@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai; connect-src 'self' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai http://localhost:*; img-src 'self' data: blob:; media-src 'self' data:;">
+    <title>Novel AI Editor</title>
+    <link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+    <!-- Top Toolbar -->
+    <header id="toolbar">
+        <div class="toolbar-left">
+            <button id="btn-new-novel" title="新建小说 (Ctrl+N)">📄 新建</button>
+            <button id="btn-open-novel" title="打开小说 (Ctrl+O)">📂 打开</button>
+            <span class="toolbar-separator"></span>
+            <button id="btn-save" title="保存 (Ctrl+S)">💾 保存</button>
+            <button id="btn-export" title="导出">📤 导出</button>
+        </div>
+        <div class="toolbar-center">
+            <span id="current-novel-title" class="novel-title">未命名小说</span>
+            <span id="current-chapter-title" class="chapter-title">— 第一章</span>
+        </div>
+        <div class="toolbar-right">
+            <button id="btn-import" title="导入 SillyTavern 数据">📥 导入</button>
+            <button id="btn-settings" title="设置 (Ctrl+,)">⚙️ 设置</button>
+            <span class="toolbar-separator"></span>
+            <button id="btn-ai-generate" title="AI 续写">✨ 续写</button>
+            <button id="btn-ai-plot" title="情节候选">💡 情节</button>
+        </div>
+    </header>
+
+    <!-- Import Menu Dropdown -->
+    <div id="import-menu" class="dropdown-menu hidden">
+        <div class="dropdown-item" data-action="import-worldbook">📚 导入 SillyTavern 世界书 (.json)</div>
+        <div class="dropdown-item" data-action="import-character">👤 导入 SillyTavern 角色卡 (.png/.json)</div>
+        <div class="dropdown-item" data-action="import-preset">🔧 导入 SillyTavern 预设 (.json)</div>
+        <div class="dropdown-separator"></div>
+        <div class="dropdown-item" data-action="import-folder">📁 批量导入 (选择文件夹)</div>
+    </div>
+
+    <!-- Main Layout -->
+    <div id="main-container">
+        <!-- Left Sidebar: Navigation -->
+        <aside id="left-sidebar" class="sidebar">
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-panel="chapters">📑 章节</button>
+                <button class="sidebar-tab" data-panel="outline">🗺️ 大纲</button>
+            </div>
+
+            <!-- Chapters Panel -->
+            <div id="panel-chapters" class="sidebar-panel active">
+                <div class="panel-toolbar">
+                    <button id="btn-add-chapter" title="添加章节">＋ 新章节</button>
+                    <button id="btn-add-volume" title="添加卷">＋ 新卷</button>
+                </div>
+                <div id="chapter-tree" class="tree-view">
+                    <div class="tree-placeholder">尚未创建章节<br>点击 "＋ 新章节" 开始写作</div>
+                </div>
+            </div>
+
+            <!-- Outline Panel -->
+            <div id="panel-outline" class="sidebar-panel">
+                <div class="panel-toolbar">
+                    <button id="btn-add-outline-node" title="添加大纲节点">＋ 新节点</button>
+                </div>
+                <div id="outline-tree" class="tree-view">
+                    <div class="tree-placeholder">尚未创建大纲<br>点击 "＋ 新节点" 规划情节</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center: Editor Area -->
+        <main id="editor-area">
+            <div id="editor-toolbar">
+                <div class="editor-toolbar-left">
+                    <select id="chapter-select" title="选择章节">
+                        <option value="">— 选择章节 —</option>
+                    </select>
+                    <button id="btn-editor-bold" title="粗体 (Ctrl+B)"><b>B</b></button>
+                    <button id="btn-editor-italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+                    <span class="toolbar-separator"></span>
+                    <input type="text" id="chapter-title-input" placeholder="章节标题..." class="chapter-title-input">
+                </div>
+                <div class="editor-toolbar-right">
+                    <span id="word-count" class="word-count">字数: 0</span>
+                    <span id="token-count" class="token-count">Token: 0</span>
+                </div>
+            </div>
+            <div id="editor-container">
+                <textarea id="chapter-editor" placeholder="开始写作你的故事...&#10;&#10;提示：点击右侧 ✨ 续写 按钮让 AI 帮你续写，或点击 💡 情节 获取情节建议。"></textarea>
+            </div>
+        </main>
+
+        <!-- Right Sidebar: Tools -->
+        <aside id="right-sidebar" class="sidebar">
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-panel="chat">💬 对话</button>
+                <button class="sidebar-tab" data-panel="worldbook">📚 世界书</button>
+                <button class="sidebar-tab" data-panel="characters">👥 角色</button>
+                <button class="sidebar-tab" data-panel="ai-tools">🤖 AI</button>
+            </div>
+
+            <!-- Chat Panel — Dual Mode -->
+            <div id="panel-chat" class="sidebar-panel active">
+                <!-- Mode Tabs -->
+                <div class="chat-mode-tabs">
+                    <button class="chat-mode-tab active" data-mode="write">📝 正文模式</button>
+                    <button class="chat-mode-tab" data-mode="assist">📚 设定制作</button>
+                </div>
+
+                <!-- Write Mode: Tavern-like -->
+                <div class="chat-mode-panel active" id="chat-mode-write">
+                    <div class="chat-messages" id="chat-messages-write">
+                        <div class="chat-welcome">
+                            <p><strong>📝 正文模式</strong> — AI 协作写作</p>
+                            <p>你提要求，AI 生成。然后选择 <strong>✅接受 / 🔄重试 / ✏️修改</strong></p>
+                            <p class="chat-welcome-hint">像 Claude Code 审阅代码一样审阅你的小说段落。</p>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="chat-input-wrapper">
+                            <textarea class="chat-input" id="chat-input-write" rows="1"
+                                placeholder="让 AI 写一段... 如：主角推开大门，发现...（Enter 发送）"></textarea>
+                        </div>
+                        <div class="chat-actions">
+                            <button class="chat-send-btn" data-mode="write">▶ 发送</button>
+                            <button class="chat-stop-btn" style="display:none">⏹</button>
+                            <button class="chat-clear-btn" data-mode="write">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Assist Mode: CC-like -->
+                <div class="chat-mode-panel" id="chat-mode-assist">
+                    <div class="chat-messages" id="chat-messages-assist">
+                        <div class="chat-welcome assist-welcome">
+                            <p><strong>📚 设定制作模式</strong></p>
+                            <p>我会引导你一步步创建角色卡和世界书。</p>
+                            <p class="chat-welcome-hint">选择一个开始，或者直接描述你想要的设定：</p>
+                            <div class="assist-quick-actions">
+                                <button class="assist-quick-btn" data-prompt="我想创建一个新角色，帮我从零开始引导。">👤 创建角色卡</button>
+                                <button class="assist-quick-btn" data-prompt="我想添加新的世界观条目。">📚 创建世界书条目</button>
+                                <button class="assist-quick-btn" data-prompt="帮我分析一下已有角色之间的关系和设定完整性。">🔍 评估已有设定</button>
+                                <button class="assist-quick-btn" data-prompt="我有一段角色/世界观的材料，帮我整理转化成角色卡或世界书条目。">📄 从材料转化</button>
+                                <button class="assist-quick-btn" data-prompt="请把上面讨论的角色信息，用 ```json 代码块输出为角色卡格式。必须包含 name、description、personality、scenario、first_mes 字段。">📋 导出为角色卡JSON</button>
+                                <button class="assist-quick-btn" data-prompt="请把上面讨论的世界观设定，用 ```json 代码块输出为世界书条目格式。每个条目必须包含 comment、key、content 字段。">📋 导出为世界书JSON</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="chat-input-wrapper">
+                            <textarea class="chat-input" id="chat-input-assist" rows="1"
+                                placeholder="讨论情节、创建世界书和角色卡...（Enter 发送）"></textarea>
+                        </div>
+                        <div class="chat-actions">
+                            <button class="chat-send-btn" data-mode="assist">▶ 发送</button>
+                            <button class="chat-stop-btn" style="display:none">⏹</button>
+                            <button class="chat-clear-btn" data-mode="assist">🗑️</button>
+                        </div>
+                        <div class="chat-context-hint">💡 Claude 了解你的世界观、角色和大纲</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- World Book Panel -->
+            <div id="panel-worldbook" class="sidebar-panel">
+                <div class="panel-toolbar">
+                    <button id="btn-add-wb-entry" title="添加世界书条目">＋ 新条目</button>
+                    <button id="btn-import-wb" title="导入世界书">📥</button>
+                </div>
+                <div class="panel-search">
+                    <input type="text" id="wb-search" placeholder="搜索世界书条目...">
+                </div>
+                <div id="worldbook-list" class="item-list">
+                    <div class="list-placeholder">尚未导入世界书<br>点击 "📥" 导入 ST 世界书文件</div>
+                </div>
+            </div>
+
+            <!-- Characters Panel -->
+            <div id="panel-characters" class="sidebar-panel">
+                <div class="panel-toolbar">
+                    <button id="btn-add-character" title="添加角色">＋ 新角色</button>
+                    <button id="btn-import-character" title="导入角色卡">📥</button>
+                </div>
+                <div class="panel-search">
+                    <input type="text" id="character-search" placeholder="搜索角色...">
+                </div>
+                <div id="character-list" class="item-list">
+                    <div class="list-placeholder">尚未导入角色<br>点击 "📥" 导入 ST 角色卡</div>
+                </div>
+            </div>
+
+            <!-- AI Tools Panel -->
+            <div id="panel-ai-tools" class="sidebar-panel">
+                <!-- AI Provider Settings -->
+                <div class="ai-section">
+                    <h4>🔌 AI 连接</h4>
+                    <select id="ai-provider" class="ai-select">
+                        <option value="anthropic">Claude (Anthropic)</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="ollama">Ollama (本地)</option>
+                    </select>
+                    <input type="password" id="ai-api-key" placeholder="API Key (Ollama 不需要)" class="ai-input">
+                    <input type="text" id="ai-endpoint" placeholder="API 端点 (默认自动)" class="ai-input">
+                    <input type="text" id="ai-model" placeholder="模型名 (如 claude-sonnet-4-6)" class="ai-input">
+                    <button id="btn-test-connection" class="ai-btn-secondary">🔍 测试连接</button>
+                </div>
+
+                <!-- Generation Settings -->
+                <div class="ai-section">
+                    <h4>⚙️ 生成参数</h4>
+                    <label>Temperature: <span id="temp-value">0.7</span></label>
+                    <input type="range" id="ai-temperature" min="0" max="2" step="0.05" value="0.7" class="ai-range">
+                    <label>Max Tokens: <span id="max-tokens-value">4096</span></label>
+                    <input type="range" id="ai-max-tokens" min="256" max="32768" step="256" value="4096" class="ai-range">
+                    <label>Top P: <span id="top-p-value">0.9</span></label>
+                    <input type="range" id="ai-top-p" min="0" max="1" step="0.05" value="0.9" class="ai-range">
+                    <select id="ai-preset" class="ai-select">
+                        <option value="">— 选择预设 —</option>
+                    </select>
+                    <button id="btn-import-preset" class="ai-btn-secondary">📥 导入预设</button>
+                    <div style="display:flex;gap:4px;margin-top:4px;">
+                        <button id="btn-save-preset" class="ai-btn-secondary" style="flex:1;">💾 保存当前为预设</button>
+                        <span id="current-preset-name" style="font-size:10px;color:var(--text-muted);align-self:center;flex:2;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                    </div>
+                </div>
+
+                <!-- Continuation Actions -->
+                <div class="ai-section">
+                    <h4>✍️ 续写操作</h4>
+                    <button id="btn-continue" class="ai-btn-primary">✨ 续写下一段</button>
+                    <button id="btn-plot-suggestions" class="ai-btn-secondary">💡 情节候选 (3条)</button>
+                    <button id="btn-inspire" class="ai-btn-secondary">🎲 灵感引导</button>
+                </div>
+
+                <!-- Prompt Templates Toggle -->
+                <div class="ai-section" id="prompt-templates-section" style="display:none;">
+                    <h4>📋 Prompt 模板 <span id="prompt-template-count"></span></h4>
+                    <div id="prompt-templates-list" class="prompt-templates-list">
+                        <div class="list-placeholder" style="font-size:11px;padding:8px;">
+                            尚未导入 ST 预设<br>
+                            <button id="btn-import-preset-inline" style="margin-top:6px;font-size:11px;">📥 导入预设</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Memory Status (L4+L5) -->
+                <div class="ai-section">
+                    <h4>🧠 记忆状态</h4>
+                    <div id="context-info" class="context-info">
+                        <div class="context-stat">
+                            <span>激活的世界书条目:</span>
+                            <span id="active-wb-count">0</span>
+                        </div>
+                        <div class="context-stat">
+                            <span>出场角色:</span>
+                            <span id="active-char-count">0</span>
+                        </div>
+                        <div class="context-stat">
+                            <span>记忆 Token 占用:</span>
+                            <span id="memory-tokens">0 / 3000</span>
+                        </div>
+                        <div class="context-stat">
+                            <span>上下文总 Token:</span>
+                            <span id="context-usage">0 / 0</span>
+                        </div>
+                    </div>
+                    <div id="active-wb-entries" class="active-entries" style="max-height:120px;overflow-y:auto;">
+                        <!-- Active memory entries shown here -->
+                    </div>
+                </div>
+
+                <!-- Auto-extract Results -->
+                <div class="ai-section" id="extraction-section" style="display:none;">
+                    <h4>🔍 AI 发现了新内容</h4>
+                    <div id="extraction-results" class="extraction-results"></div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Status Bar -->
+    <footer id="status-bar">
+        <span id="status-message">就绪</span>
+        <span id="status-connection">🔌 未连接</span>
+        <span id="status-model">—</span>
+        <span id="status-words">字数: 0</span>
+        <span id="status-save">已保存</span>
+    </footer>
+
+    <!-- Hidden file inputs for import -->
+    <input type="file" id="file-input-worldbook" accept=".json" style="display:none">
+    <input type="file" id="file-input-character" accept=".png,.json" multiple style="display:none">
+    <input type="file" id="file-input-preset" accept=".json" style="display:none">
+    <input type="file" id="file-input-folder" webkitdirectory directory style="display:none">
+
+    <!-- App Modules -->
+    <script src="js/editor/chapter-tree.js"></script>
+    <script src="js/editor/resizable-panels.js"></script>
+    <script src="js/ai/plot-candidates.js"></script>
+    <script src="js/ai/chat-panel.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

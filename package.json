@@ -1,0 +1,85 @@
+{
+    "name": "novel-ai-editor",
+    "version": "0.1.0",
+    "description": "AI小说编辑器 - 专为网文作者打造的灵感引导写作工具",
+    "type": "module",
+    "main": "electron/main.js",
+    "license": "AGPL-3.0",
+    "scripts": {
+        "start": "node src/server.js",
+        "start:electron": "node electron/main.js",
+        "dev": "node --watch src/server.js",
+        "build": "electron-builder",
+        "lint": "eslint src/**/*.js public/**/*.js"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.39.0",
+        "body-parser": "^1.20.2",
+        "compression": "^1.8.1",
+        "cookie-parser": "^1.4.6",
+        "cors": "^2.8.5",
+        "crc": "^4.3.2",
+        "express": "^4.21.0",
+        "handlebars": "^4.7.9",
+        "lodash": "^4.18.1",
+        "multer": "^2.1.1",
+        "node-fetch": "^3.3.2",
+        "open": "^10.2.0",
+        "png-chunk-text": "^1.0.0",
+        "png-chunks-extract": "^1.0.0",
+        "sanitize-filename": "^1.6.3",
+        "tiktoken": "^1.0.22",
+        "uuid": "^11.0.0",
+        "write-file-atomic": "^5.0.1",
+        "yaml": "^2.8.3",
+        "yargs": "^17.7.1"
+    },
+    "devDependencies": {
+        "electron": "^33.0.0",
+        "electron-builder": "^25.0.0",
+        "eslint": "^8.57.1"
+    },
+    "engines": {
+        "node": ">= 20"
+    },
+    "build": {
+        "appId": "com.novel-ai-editor.app",
+        "productName": "Novel AI Editor",
+        "directories": {
+            "output": "dist"
+        },
+        "files": [
+            "src/**/*",
+            "public/**/*",
+            "electron/**/*",
+            "shared/**/*",
+            "data/**/*",
+            "node_modules/**/*",
+            "package.json"
+        ],
+        "extraResources": [
+            {
+                "from": "data",
+                "to": "data"
+            }
+        ],
+        "win": {
+            "target": ["nsis"],
+            "icon": "public/st.ico"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "shortcutName": "Novel AI Editor"
+        },
+        "mac": {
+            "target": ["dmg"],
+            "category": "public.app-category.productivity"
+        },
+        "linux": {
+            "target": ["AppImage"],
+            "category": "Office"
+        }
+    }
+}
