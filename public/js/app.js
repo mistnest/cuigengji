@@ -1309,9 +1309,6 @@
             autoSave();
             setStatus(`✅ 已加载预设: ${name}`, 'success');
         });
-        $('#btn-ai-generate').addEventListener('click', onContinue);
-        $('#btn-ai-plot').addEventListener('click', onPlotSuggestions);
-
         // AI config
         $('#ai-provider').addEventListener('change', onProviderChange);
         $('#ai-api-key').addEventListener('input', debounce(onConfigChange, 500));
