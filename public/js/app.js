@@ -1230,7 +1230,7 @@
         renderPromptNav();
         renderPromptTemplates();
         autoSave();
-        setStatus('已保存: ' + name, 'success');
+        showToast('已保存: ' + name, 'success');
     }
 
     function deletePromptFromEditor() {
@@ -1610,7 +1610,7 @@
             state.isDirty = true;
             updateWordCount();
             updateContextInfo(data.context, data.memory);
-            setStatus('续写完成!', 'success');
+            showToast('续写完成!', 'success');
         } catch (err) {
             setStatus(`续写失败: ${err.message}`, 'error');
         } finally {
@@ -1846,7 +1846,7 @@
             state.isDirty = false;
             updateStatusBar();
             refreshChapterTree();
-            if (!silent) setStatus('已保存', 'success');
+            if (!silent) showToast('已保存', 'success');
             return true;
         } catch (err) {
             setStatus(`保存失败: ${err.message}`, 'error');
@@ -2729,7 +2729,7 @@
                 delete state.enabledTemplates[id];
                 renderPromptTemplates();
                 autoSave();
-                setStatus('已删除: ' + tmpl.name, 'success');
+                showToast('已删除: ' + tmpl.name, 'success');
             });
         });
 
