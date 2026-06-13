@@ -1,133 +1,258 @@
 /**
- * Novel AI Editor — Chapter Tree Component
- * 章节树管理：展开/折叠、拖拽排序、右键菜单
+ * Chapter tree, VS Code style.
+ * Volumes are folders, chapters are files. Chapters can be dragged between volumes.
  */
 const ChapterTree = (function () {
     'use strict';
 
-    let state = {
-        chapters: [],
-        currentChapterId: null,
-        expandedVolumes: {},
-    };
-
-    // Events
+    let state = { chapters: [], currentChapterId: null, openVolumes: {} };
     const listeners = {};
+    let dragChapterId = null;
+    let isDragging = false;
+    let openTimer = null;
 
-    function on(event, fn) {
-        if (!listeners[event]) listeners[event] = [];
-        listeners[event].push(fn);
+    function on(eventName, fn) {
+        (listeners[eventName] = listeners[eventName] || []).push(fn);
     }
 
-    function emit(event, data) {
-        (listeners[event] || []).forEach(fn => fn(data));
+    function emit(eventName, data) {
+        (listeners[eventName] || []).forEach(fn => fn(data));
     }
 
-    // ==================== Render ====================
     function render(chapters, currentId) {
         state.chapters = chapters || [];
         state.currentChapterId = currentId;
 
         const tree = document.getElementById('chapter-tree');
         if (!tree) return;
+        tree.innerHTML = '';
 
-        if (state.chapters.length === 0) {
-            tree.innerHTML = `<div class="tree-placeholder">尚未创建章节<br>点击 "+ 新章节" 开始写作</div>`;
-            updateChapterSelect();
+        if (!state.chapters.length) {
+            tree.innerHTML = '<div class="tree-placeholder">尚未创建章节<br>点击“新章节”开始写作</div>';
             return;
         }
 
-        // Group chapters by volume
-        const volumes = [];
-        let currentVolume = null;
-        for (const ch of state.chapters) {
-            if (ch.type === 'volume') {
-                currentVolume = { ...ch, chapters: [] };
-                volumes.push(currentVolume);
-            } else if (currentVolume) {
-                currentVolume.chapters.push(ch);
-            } else {
-                // Chapters without a volume
-                if (!volumes.find(v => v.id === '__orphan__')) {
-                    volumes.push({ id: '__orphan__', title: '未分卷', type: 'volume', chapters: [] });
-                }
-                volumes.find(v => v.id === '__orphan__').chapters.push(ch);
+        const volumes = state.chapters.filter(c => c.type === 'volume');
+        const orphan = state.chapters.filter(c => c.type !== 'volume' && !c.volumeId);
+
+        volumes.forEach(volume => {
+            const volumeChapters = state.chapters.filter(c => c.type !== 'volume' && c.volumeId === volume.id);
+            tree.appendChild(buildVolume(volume, volumeChapters));
+        });
+
+        const orphanArea = document.createElement('div');
+        orphanArea.className = 'tree-orphan-area';
+        orphanArea.dataset.dropLabel = 'root';
+
+        if (orphan.length) {
+            orphan.forEach(chapter => orphanArea.appendChild(buildChapterItem(chapter)));
+        } else {
+            const empty = document.createElement('div');
+            empty.className = 'tree-chapter-empty';
+            empty.textContent = '拖到这里移出卷';
+            orphanArea.appendChild(empty);
+        }
+        makeDropTarget(orphanArea, null);
+        tree.appendChild(orphanArea);
+
+        updateSelect();
+
+        requestAnimationFrame(() => {
+            if (window.DomAnimator) {
+                window.DomAnimator.staggerIn(tree, '.tree-chapter-item, .tree-volume-wrapper', 0.04);
             }
-        }
+        });
+    }
 
-        tree.innerHTML = volumes.map(vol => renderVolume(vol)).join('');
+    function buildVolume(volume, chapters) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tree-volume-wrapper';
+        wrapper.dataset.volumeId = volume.id;
 
-        // Bind events
-        tree.querySelectorAll('.tree-volume-toggle').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const volId = btn.dataset.volumeId;
-                state.expandedVolumes[volId] = !state.expandedVolumes[volId];
-                render(state.chapters, state.currentChapterId);
-            });
+        const header = document.createElement('div');
+        header.className = 'tree-volume-header';
+        header.dataset.volumeId = volume.id;
+
+        const isOpen = state.openVolumes[volume.id] !== false;
+        header.innerHTML = `
+            <span class="tree-twistie">${isOpen ? '▾' : '▸'}</span>
+            <span class="tree-volume-name">${esc(volume.title)}</span>
+            <button class="tree-volume-delete" title="删除卷">×</button>
+        `;
+
+        header.querySelector('.tree-twistie').addEventListener('click', event => {
+            event.stopPropagation();
+            state.openVolumes[volume.id] = !isOpen;
+            render(state.chapters, state.currentChapterId);
         });
 
-        tree.querySelectorAll('.tree-chapter-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const chapterId = item.dataset.chapterId;
-                emit('select', chapterId);
-            });
-
-            item.addEventListener('dblclick', () => {
-                const chapterId = item.dataset.chapterId;
-                emit('rename', chapterId);
-            });
+        header.querySelector('.tree-volume-delete').addEventListener('click', event => {
+            event.stopPropagation();
+            const count = chapters.length;
+            const message = count > 0
+                ? `删除卷“${volume.title}”？\n其中的 ${count} 个章节将变为未归卷。`
+                : `删除卷“${volume.title}”？`;
+            if (confirm(message)) emit('delete', volume.id);
         });
 
-        updateChapterSelect();
-    }
+        wrapper.appendChild(header);
 
-    function renderVolume(vol) {
-        const isExpanded = state.expandedVolumes[vol.id] !== false; // default expanded
-        const icon = isExpanded ? '▼' : '▶';
-        const isOrphan = vol.id === '__orphan__';
+        if (isOpen) {
+            const group = document.createElement('div');
+            group.className = 'tree-chapter-group';
+            group.dataset.volumeId = volume.id;
 
-        let html = '';
-        if (!isOrphan) {
-            html += `<div class="tree-volume" data-volume-id="${vol.id}">
-                <span class="tree-volume-toggle" data-volume-id="${vol.id}">${icon}</span>
-                <span class="tree-volume-title">📁 ${escHtml(vol.title)}</span>
-            </div>`;
+            if (chapters.length) {
+                chapters.forEach(chapter => group.appendChild(buildChapterItem(chapter)));
+            } else {
+                const empty = document.createElement('div');
+                empty.className = 'tree-chapter-empty';
+                empty.textContent = '拖拽章节到此卷';
+                group.appendChild(empty);
+            }
+
+            wrapper.appendChild(group);
+            makeDropTarget(group, volume.id);
         }
 
-        if (isExpanded && vol.chapters?.length > 0) {
-            html += vol.chapters.map(ch => renderChapter(ch)).join('');
-        }
-
-        return html;
+        makeDropTarget(header, volume.id);
+        makeDropTarget(wrapper, volume.id, { volumeWrapper: true });
+        return wrapper;
     }
 
-    function renderChapter(ch) {
-        const isActive = ch.id === state.currentChapterId;
-        const cls = `tree-chapter-item${isActive ? ' active' : ''}`;
-        const statusIcon = ch.status === 'completed' ? '✅' :
-                          ch.status === 'revised' ? '📝' : '📄';
+    function buildChapterItem(chapter) {
+        const el = document.createElement('div');
+        el.className = 'tree-chapter-item' + (chapter.id === state.currentChapterId ? ' active' : '');
+        el.dataset.chapterId = chapter.id;
+        el.draggable = true;
 
-        return `<div class="${cls}" data-chapter-id="${ch.id}">
-            <span class="tree-chapter-icon">${statusIcon}</span>
-            <span class="tree-chapter-title">${escHtml(ch.title)}</span>
-            <span class="tree-chapter-meta">${ch.wordCount || 0}字</span>
-        </div>`;
+        const icon = chapter.status === 'completed' ? '✓' : chapter.status === 'revised' ? '✎' : '□';
+        el.innerHTML = `
+            <span class="tree-drag-handle" title="拖拽移动">⋮⋮</span>
+            <span class="tree-chapter-icon">${icon}</span>
+            <span class="tree-chapter-title">${esc(chapter.title)}</span>
+            <span class="tree-chapter-meta">${chapter.wordCount || 0}字</span>
+            <button class="tree-chapter-delete" title="删除">×</button>
+        `;
+
+        el.addEventListener('click', event => {
+            if (event.target.closest('.tree-chapter-delete') || event.target.closest('.tree-drag-handle')) return;
+            if (isDragging) return;
+            emit('select', chapter.id);
+        });
+
+        el.querySelector('.tree-chapter-delete').addEventListener('click', event => {
+            event.stopPropagation();
+            if (confirm(`删除“${chapter.title}”？`)) emit('delete', chapter.id);
+        });
+
+        el.addEventListener('dragstart', event => {
+            dragChapterId = chapter.id;
+            isDragging = true;
+            el.classList.add('dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', chapter.id);
+            event.dataTransfer.setData('application/x-novel-chapter-id', chapter.id);
+        });
+
+        el.addEventListener('dragend', clearDragState);
+        return el;
     }
 
-    function updateChapterSelect() {
+    function makeDropTarget(el, volumeId, options = {}) {
+        el.addEventListener('dragover', event => {
+            if (!getDraggedChapterId(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            el.classList.add('drag-over');
+
+            if (options.volumeWrapper && volumeId && state.openVolumes[volumeId] === false) {
+                clearTimeout(openTimer);
+                openTimer = setTimeout(() => {
+                    state.openVolumes[volumeId] = true;
+                    render(state.chapters, state.currentChapterId);
+                }, 450);
+            }
+        });
+
+        el.addEventListener('dragleave', event => {
+            if (el.contains(event.relatedTarget)) return;
+            el.classList.remove('drag-over');
+            if (options.volumeWrapper) clearTimeout(openTimer);
+        });
+
+        el.addEventListener('drop', event => {
+            const chapterId = getDraggedChapterId(event);
+            if (!chapterId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            clearTimeout(openTimer);
+            el.classList.remove('drag-over');
+
+            // Find which chapter to insert before (for within-volume reordering)
+            let beforeChapterId = null;
+            const dropY = event.clientY;
+            const chapterItems = el.querySelectorAll('.tree-chapter-item');
+            let closestDist = Infinity;
+            chapterItems.forEach(item => {
+                if (item.dataset.chapterId === chapterId) return; // skip self
+                const rect = item.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                const dist = Math.abs(dropY - midY);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    beforeChapterId = item.dataset.chapterId;
+                }
+            });
+
+            emit('reorder', { chapterId, volumeId, beforeChapterId });
+            clearDragState();
+        });
+    }
+
+    function getDraggedChapterId(event) {
+        return event?.dataTransfer?.getData('application/x-novel-chapter-id')
+            || event?.dataTransfer?.getData('text/plain')
+            || dragChapterId;
+    }
+
+    function clearDragState() {
+        clearTimeout(openTimer);
+        openTimer = null;
+        dragChapterId = null;
+        isDragging = false;
+        document.querySelectorAll('.dragging, .drag-over').forEach(el => {
+            el.classList.remove('dragging', 'drag-over');
+        });
+    }
+
+    function updateSelect() {
         const select = document.getElementById('chapter-select');
         if (!select) return;
 
+        // Find current chapter's volume
+        const currentChapter = state.chapters.find(c => c.id === state.currentChapterId);
+        const currentVolumeId = currentChapter?.volumeId;
+
+        // Only show chapters in the same volume (or same orphan status)
+        const chapters = state.chapters.filter(c => {
+            if (c.type === 'volume') return false;
+            if (currentVolumeId) return c.volumeId === currentVolumeId;
+            return !c.volumeId;
+        });
+
         select.innerHTML = '<option value="">— 选择章节 —</option>';
-        for (const ch of state.chapters) {
-            if (ch.type !== 'volume') {
-                const selected = ch.id === state.currentChapterId ? ' selected' : '';
-                select.innerHTML += `<option value="${ch.id}"${selected}>${escHtml(ch.title)}</option>`;
-            }
-        }
+        chapters.forEach(chapter => {
+            select.innerHTML += `<option value="${chapter.id}"${chapter.id === state.currentChapterId ? ' selected' : ''}>${esc(chapter.title)}</option>`;
+        });
     }
 
-    // ==================== Public API ====================
+    function esc(value) {
+        const el = document.createElement('span');
+        el.textContent = value || '';
+        return el.innerHTML;
+    }
+
     return {
         render,
         on,
@@ -135,11 +260,3 @@ const ChapterTree = (function () {
         getCurrentId: () => state.currentChapterId,
     };
 })();
-
-// Utility
-function escHtml(str) {
-    if (!str) return '';
-    const el = document.createElement('span');
-    el.textContent = str;
-    return el.innerHTML;
-}

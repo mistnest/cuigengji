@@ -79,6 +79,32 @@ router.post('/', async (req, res) => {
     }
 });
 
+// PUT /api/outline/reorder — Reorder outline nodes
+router.put('/reorder', async (req, res) => {
+    try {
+        const { novelId, nodeIds } = req.body;  // nodeIds in new order
+        if (!novelId || !Array.isArray(nodeIds)) {
+            return res.status(400).json({ error: 'novelId and nodeIds array are required' });
+        }
+
+        const outlinePath = getOutlinePath(novelId);
+        if (!fs.existsSync(outlinePath)) return res.status(404).json({ error: 'Outline not found' });
+
+        const outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
+
+        nodeIds.forEach((id, index) => {
+            const node = outline.nodes.find(n => n.id === id);
+            if (node) node.order = index;
+        });
+
+        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[Outline] Reorder error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // PUT /api/outline/:id — Update outline node
 router.put('/:id', async (req, res) => {
     try {
@@ -141,32 +167,6 @@ router.delete('/:id', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         console.error('[Outline] Delete error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// PUT /api/outline/reorder — Reorder outline nodes
-router.put('/reorder', async (req, res) => {
-    try {
-        const { novelId, nodeIds } = req.body;  // nodeIds in new order
-        if (!novelId || !Array.isArray(nodeIds)) {
-            return res.status(400).json({ error: 'novelId and nodeIds array are required' });
-        }
-
-        const outlinePath = getOutlinePath(novelId);
-        if (!fs.existsSync(outlinePath)) return res.status(404).json({ error: 'Outline not found' });
-
-        const outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-
-        nodeIds.forEach((id, index) => {
-            const node = outline.nodes.find(n => n.id === id);
-            if (node) node.order = index;
-        });
-
-        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
-        res.json({ success: true });
-    } catch (err) {
-        console.error('[Outline] Reorder error:', err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -10,7 +10,6 @@ import { fileURLToPath } from 'url';
 
 import cors from 'cors';
 import express from 'express';
-import compression from 'compression';
 import bodyParser from 'body-parser';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -19,8 +18,6 @@ import { PROJECT_ROOT } from './config.js';
 import { serverEvents, EVENT_NAMES } from './server-events.js';
 
 // ---- CLI Arguments ----
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const cliArgs = yargs(hideBin(process.argv))
     .option('port', {
         type: 'number',
@@ -54,7 +51,7 @@ ensureDataDirs();
 // ---- Initialize Express ----
 const app = express();
 
-app.use(compression());
+// app.use(compression()); // Disabled: causes ERR_INVALID_CHUNKED_ENCODING on some browsers
 app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
@@ -80,6 +77,10 @@ import { router as aiRouter } from './endpoints/ai.js';
 import { router as importRouter } from './endpoints/import.js';
 import { router as chatRouter } from './endpoints/chat.js';
 import { router as persistenceRouter } from './endpoints/persistence.js';
+import { router as novelsRouter } from './endpoints/novels.js';
+import { router as sessionsRouter } from './endpoints/sessions.js';
+import { router as debugRouter } from './endpoints/debug.js';
+import { router as aiSecretsRouter } from './endpoints/ai-secrets.js';
 
 app.use('/api/chapters', chaptersRouter);
 app.use('/api/outline', outlineRouter);
@@ -87,6 +88,10 @@ app.use('/api/ai', aiRouter);
 app.use('/api/import', importRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/save', persistenceRouter);
+app.use('/api/novels', novelsRouter);
+app.use('/api/sessions', sessionsRouter);
+app.use('/api/debug', debugRouter);
+app.use('/api/ai-secrets', aiSecretsRouter);
 
 // ---- 404 ----
 app.use((_req, res) => {
@@ -94,17 +99,23 @@ app.use((_req, res) => {
 });
 
 // ---- Start Server ----
-async function startServer() {
+async function startServer(options = {}) {
+    const port = options.port ?? cliArgs.port;
+    const host = options.host ?? cliArgs.host;
+    if (options.dataRoot) {
+        globalThis.DATA_ROOT = options.dataRoot;
+        ensureDataDirs();
+    }
     return new Promise((resolve) => {
-        const server = app.listen(cliArgs.port, cliArgs.host, () => {
-            const url = `http://${cliArgs.host}:${cliArgs.port}`;
+        const server = app.listen(port, host, () => {
+            const url = `http://${host}:${port}`;
             console.log(`\n  📖 Novel AI Editor v0.1.0`);
             console.log(`  🚀 Server running at ${url}\n`);
 
             serverEvents.emit(EVENT_NAMES.SERVER_STARTED, {
                 url: new URL(url),
-                port: cliArgs.port,
-                host: cliArgs.host,
+                port,
+                host,
             });
 
             resolve({ server, url });

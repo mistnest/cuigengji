@@ -1,16 +1,24 @@
 {
-    "name": "novel-ai-editor",
+    "name": "cuigengji",
     "version": "0.1.0",
-    "description": "AI小说编辑器 - 专为网文作者打造的灵感引导写作工具",
+    "description": "催更姬 - AI 小说创作助手",
     "type": "module",
-    "main": "electron/main.js",
+    "main": "electron/index.js",
     "license": "AGPL-3.0",
     "scripts": {
         "start": "node src/server.js",
-        "start:electron": "node electron/main.js",
+        "start:electron": "node scripts/start-electron.js",
         "dev": "node --watch src/server.js",
         "build": "electron-builder",
-        "lint": "eslint src/**/*.js public/**/*.js"
+        "lint": "eslint src/**/*.js public/**/*.js",
+        "test": "npx playwright test",
+        "test:smoke": "npx playwright test --grep @smoke",
+        "test:api": "npx playwright test tests/api/",
+        "test:e2e": "npx playwright test tests/e2e/",
+        "test:regression": "npx playwright test --grep @regression",
+        "test:ui": "npx playwright test --ui",
+        "test:report": "npx playwright show-report test-results/html",
+        "test:install": "npx playwright install chromium"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",
@@ -20,8 +28,12 @@
         "cors": "^2.8.5",
         "crc": "^4.3.2",
         "express": "^4.21.0",
+        "ftfy": "^1.0.1",
         "handlebars": "^4.7.9",
+        "iconv-lite": "^0.4.24",
+        "jschardet": "^3.1.4",
         "lodash": "^4.18.1",
+        "mammoth": "^1.12.0",
         "multer": "^2.1.1",
         "node-fetch": "^3.3.2",
         "open": "^10.2.0",
@@ -35,7 +47,8 @@
         "yargs": "^17.7.1"
     },
     "devDependencies": {
-        "electron": "^33.0.0",
+        "@playwright/test": "^1.52.0",
+        "electron": "^33.4.11",
         "electron-builder": "^25.0.0",
         "eslint": "^8.57.1"
     },
@@ -44,7 +57,7 @@
     },
     "build": {
         "appId": "com.novel-ai-editor.app",
-        "productName": "Novel AI Editor",
+        "productName": "催更姬",
         "directories": {
             "output": "dist"
         },
@@ -64,21 +77,27 @@
             }
         ],
         "win": {
-            "target": ["nsis"],
+            "target": [
+                "nsis"
+            ],
             "icon": "public/st.ico"
         },
         "nsis": {
             "oneClick": false,
             "allowToChangeInstallationDirectory": true,
             "createDesktopShortcut": true,
-            "shortcutName": "Novel AI Editor"
+            "shortcutName": "催更姬"
         },
         "mac": {
-            "target": ["dmg"],
+            "target": [
+                "dmg"
+            ],
             "category": "public.app-category.productivity"
         },
         "linux": {
-            "target": ["AppImage"],
+            "target": [
+                "AppImage"
+            ],
             "category": "Office"
         }
     }

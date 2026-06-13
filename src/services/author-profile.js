@@ -171,7 +171,7 @@ export class AuthorProfile {
      */
     deleteMemory(name) {
         const filePath = path.join(MEMORY_DIR, `${name}.md`);
-        if (fs.existsSync(fs.unlinkSync(filePath))) fs.unlinkSync(filePath);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         this._removeFromIndex(name);
     }
 

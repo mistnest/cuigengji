@@ -44,6 +44,13 @@ export const INSERTION_STRATEGY = {
     GLOBAL_FIRST: 2,
 };
 
+export const SELECTIVE_LOGIC = {
+    AND_ANY: 0,   // 次级关键词匹配任意一个 → 激活
+    NOT_ALL: 1,   // 次级关键词不是全部匹配 → 激活
+    NOT_ANY: 2,   // 次级关键词一个都没匹配 → 激活
+    AND_ALL: 3,   // 次级关键词全部匹配 → 激活
+};
+
 export class WorldBookEngine {
     /**
      * @param {WorldBook} worldBook
@@ -169,47 +176,93 @@ export class WorldBookEngine {
 
         // Selective activation by keywords
         if (entry.selective && entry.key?.length > 0) {
-            return this._matchKeywords(entry.key, text, {
+            const matchOpts = {
                 caseSensitive: entry.caseSensitive ?? this.options.caseSensitive,
                 matchWholeWords: entry.matchWholeWords ?? this.options.matchWholeWords,
-            });
-        }
+            };
 
-        // Secondary keywords
-        if (entry.keysecondary?.length > 0) {
-            return this._matchKeywords(entry.keysecondary, text, {
-                caseSensitive: entry.caseSensitive ?? this.options.caseSensitive,
-                matchWholeWords: entry.matchWholeWords ?? this.options.matchWholeWords,
-            });
+            // Step 1: Must match a PRIMARY keyword first
+            const primaryMatched = this._matchKeywords(entry.key, text, matchOpts);
+            if (!primaryMatched) return false;
+
+            // Step 2: If there are secondary keywords, apply logic
+            const hasSecondary = Array.isArray(entry.keysecondary) && entry.keysecondary.length > 0;
+
+            if (!hasSecondary) {
+                // No secondary keywords → activated by primary alone
+                return true;
+            }
+
+            // Step 3: Apply secondary keyword logic
+            const logic = entry.selectiveLogic ?? SELECTIVE_LOGIC.AND_ANY;
+            return this._checkSecondaryLogic(entry.keysecondary, text, matchOpts, logic);
         }
 
         return false;
     }
 
     _matchKeywords(keywords, text, options) {
-        const flags = options.caseSensitive ? 'g' : 'gi';
-
         for (const kw of keywords) {
-            if (!kw.trim()) continue;
+            if (typeof kw !== 'string' || !kw.trim()) continue;
+            if (this._matchSingleKeyword(kw, text, options)) return true;
+        }
+        return false;
+    }
 
-            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            let pattern = escaped;
+    /**
+     * Check secondary keywords against the selective logic.
+     */
+    _checkSecondaryLogic(keysecondaries, text, options, logic) {
+        let hasAnyMatch = false;
+        let hasAllMatch = true;
 
-            if (options.matchWholeWords) {
-                pattern = `\\b${escaped}\\b`;
-            }
+        for (const kw of keysecondaries) {
+            if (typeof kw !== 'string' || !kw.trim()) continue;
 
-            try {
-                if (new RegExp(pattern, flags).test(text)) return true;
-            } catch {
-                // Fallback to simple includes
-                const compare = options.caseSensitive ? text : text.toLowerCase();
-                const compareKw = options.caseSensitive ? kw : kw.toLowerCase();
-                if (compare.includes(compareKw)) return true;
-            }
+            const matched = this._matchSingleKeyword(kw, text, options);
+
+            if (matched) hasAnyMatch = true;
+            if (!matched) hasAllMatch = false;
+
+            // AND_ANY: short-circuit on first match
+            if (logic === SELECTIVE_LOGIC.AND_ANY && matched) return true;
+            // NOT_ALL: short-circuit on first non-match
+            if (logic === SELECTIVE_LOGIC.NOT_ALL && !matched) return true;
         }
 
-        return false;
+        switch (logic) {
+            case SELECTIVE_LOGIC.AND_ANY: return hasAnyMatch;    // at least one matched
+            case SELECTIVE_LOGIC.AND_ALL: return hasAllMatch;    // all matched
+            case SELECTIVE_LOGIC.NOT_ANY: return !hasAnyMatch;   // none matched
+            case SELECTIVE_LOGIC.NOT_ALL: return !hasAllMatch;   // not all matched
+            default: return hasAnyMatch;
+        }
+    }
+
+    _matchSingleKeyword(kw, text, options) {
+        const flags = (options.caseSensitive ? 'gu' : 'giu');
+        const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Chinese-aware whole-word: Unicode property escapes for Chinese + Latin + digits
+        const pattern = options.matchWholeWords
+            ? `(?<![\\p{Script=Han}a-zA-Z0-9])${escaped}(?![\\p{Script=Han}a-zA-Z0-9])`
+            : escaped;
+
+        try {
+            return new RegExp(pattern, flags).test(text);
+        } catch {
+            // Fallback: manual surround check
+            const src = options.caseSensitive ? text : text.toLowerCase();
+            const kw2 = options.caseSensitive ? kw : kw.toLowerCase();
+            if (!options.matchWholeWords) return src.includes(kw2);
+            let idx = 0;
+            while ((idx = src.indexOf(kw2, idx)) !== -1) {
+                const before = idx > 0 ? src[idx - 1] : ' ';
+                const after = idx + kw2.length < src.length ? src[idx + kw2.length] : ' ';
+                if (!/[一-鿿a-zA-Z0-9]/.test(before) && !/[一-鿿a-zA-Z0-9]/.test(after)) return true;
+                idx += kw2.length;
+            }
+            return false;
+        }
     }
 
     _updateActivationState(entry, state) {
@@ -318,7 +371,7 @@ export class WorldBookEngine {
             sticky: 0,
             cooldown: 0,
             probability: 100,
-            depth: 4,
+            depth: 1000,
             caseSensitive: null,
             matchWholeWords: null,
             useGroupScoring: null,

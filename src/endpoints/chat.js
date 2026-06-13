@@ -5,32 +5,28 @@
  *   POST /api/chat/write — 续写模式 (酒馆风格)
  */
 import express from 'express';
-import { createMemoryManager } from '../services/memory-manager.js';
-import { getAuthorProfile } from '../services/author-profile.js';
+import { applyAiSecret } from '../services/ai-secrets.js';
+import { callAIChat } from '../services/ai-client.js';
+import { capturePrompt } from './debug.js';
+import { buildWritingContext } from '../services/context-orchestrator.js';
 
 export const router = express.Router();
 
-// Helper: fetch with timeout
-async function fetchWithTimeout(url, options, timeoutMs = 60000) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-        clearTimeout(timer);
-    }
+function hasApiKey(config) {
+    return !!config?.apiKey || config?.provider === 'ollama';
 }
 
-// POST /api/chat — 助手模式
 router.post('/', async (req, res) => {
     try {
-        const { message, history, context, config } = req.body;
+        const { message, history, context, config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
-        if (!config?.apiKey && config?.provider !== 'ollama') return res.status(400).json({ error: 'API key required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         const sysPrompt = buildAssistSystemPrompt(context || {});
         const messages = buildMessageArray(history, message);
-        const reply = await callAI(config, sysPrompt, messages);
+        capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(messages) });
+        const reply = await callAIChat(aiConfig, sysPrompt, messages);
 
         res.json({ reply });
     } catch (err) {
@@ -39,36 +35,177 @@ router.post('/', async (req, res) => {
     }
 });
 
+// POST /api/chat/plan — 情节研讨模式 (CC Plan Mode)
+router.post('/plan', async (req, res) => {
+    try {
+        const { message, history, context, config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
+
+        const sysPrompt = buildPlanSystemPrompt(context);
+        const msgs = [];
+
+        if (!history?.length) {
+            msgs.push({ role: 'user', content: `【小说上下文】\n书名: ${context.novelTitle || ''}\n当前章节: ${context.chapterTitle || ''}\n\n【情节问题/需求】\n${message}` });
+        } else {
+            history.slice(-20).forEach(m => msgs.push({ role: m.role, content: m.content }));
+            msgs.push({ role: 'user', content: message });
+        }
+
+        capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(msgs) });
+        const reply = await callAIChat(aiConfig, sysPrompt, msgs);
+        res.json({ reply });
+    } catch (err) {
+        console.error('[Chat Plan]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+function buildPlanSystemPrompt(ctx) {
+    const p = [];
+    p.push('你是小说创作的情节研讨顾问。你的任务是分析用户提出的情节问题，给出**多角度的结构化分析**。');
+    p.push('');
+    p.push('## 工作流程');
+    p.push('1. 分析当前情节状态和用户的问题');
+    p.push('2. 列出 2-3 种可能的情节发展方向（标记为 方案A、方案B、方案C）');
+    p.push('3. 每个方案包含：情节概述、优点、风险/挑战、对后续情节的影响');
+    p.push('4. 最后给出你的推荐和建议');
+    p.push('');
+    p.push('## 输出格式');
+    p.push('用清晰的结构输出，每个方案用 `### 方案X：标题` 分隔。');
+    p.push('');
+    p.push('## 重要规则');
+    p.push('- 基于已有世界观和角色设定进行分析，不要凭空编造');
+    p.push('- 每个方案都要考虑角色性格一致性和情节逻辑');
+    p.push('- 如果用户已有倾向，重点分析该方向的可行性');
+    p.push('- 最后必须有明确的对比和推荐');
+    p.push('- 用中文回复');
+    p.push('');
+    if (ctx.novelTitle) p.push(`书名: ${ctx.novelTitle}`);
+    if (ctx.chapterTitle) p.push(`当前章节: ${ctx.chapterTitle}`);
+    if (ctx.currentText) p.push(`\n当前章节末尾:\n${ctx.currentText.slice(-500)}`);
+    return p.join('\n');
+}
+
 // POST /api/chat/write — 续写模式 (酒馆风格)
 router.post('/write', async (req, res) => {
     try {
-        const { message, history, context, config, promptTemplates } = req.body;
+        const { message, history, context, config, promptTemplates, promptOrder, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
-        if (!config?.apiKey && config?.provider !== 'ollama') return res.status(400).json({ error: 'API key required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
-        // L4+L5: Memory retrieval
-        const writeMemory = createMemoryManager({
-            worldBook: context?.worldBookEntries ? { entries: Object.fromEntries(context.worldBookEntries.map((e, i) => [i, { uid: i, key: [e.name], content: e.content, selective: true, disable: false, order: 100, position: 0 }])) } : { entries: {} },
-            characters: (context?.characters || []).map(c => ({ data: { name: c.name, description: c.description } })),
-            outline: context?.outline || [],
+        const builtPrompt = buildWritingContext({
+            message,
+            history,
+            context: context || {},
+            config: aiConfig,
+            promptTemplates,
+            promptOrder,
         });
-        const activeMemories = writeMemory.retrieve(context?.currentText || '');
-        const memoryText = writeMemory.formatForPrompt(activeMemories);
 
-        // L1: Author profile
-        const authorProfile = getAuthorProfile();
-        const authorContext = authorProfile.formatForPrompt(true, 500);
+        capturePrompt({
+            provider: aiConfig.provider,
+            model: aiConfig.model,
+            temperature: aiConfig.temperature ?? 0.7,
+            maxTokens: 4096,
+            topP: aiConfig.topP ?? 0.9,
+            systemPrompt: builtPrompt.systemPrompt,
+            userPrompt: JSON.stringify({ messages: builtPrompt.messages, context: builtPrompt.debug }),
+        });
+        const reply = await callAIChat(aiConfig, builtPrompt.systemPrompt, builtPrompt.messages);
 
-        const sysPrompt = buildWriteSystemPrompt(context || {}, promptTemplates, memoryText, authorContext);
-        const messages = buildWriteMessages(history, message, context);
-        const reply = await callAI(config, sysPrompt, messages);
-
-        res.json({ reply });
+        res.json({ reply, contextDebug: builtPrompt.debug });
     } catch (err) {
         console.error('[Chat Write]', err.message);
         res.status(500).json({ error: err.message });
     }
 });
+
+// POST /api/chat/infill — Fill the selected gap between before/after prose.
+router.post('/infill', async (req, res) => {
+    try {
+        const {
+            beforeText = '',
+            afterText = '',
+            instruction = '',
+            lengthMode = 'medium',
+            context,
+            config,
+            promptTemplates,
+            promptOrder,
+            presetName,
+        } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        if (!instruction?.trim()) return res.status(400).json({ error: 'instruction is required' });
+        if (!beforeText?.trim() && !afterText?.trim()) return res.status(400).json({ error: 'beforeText or afterText is required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
+
+        const message = buildInfillUserMessage({ beforeText, afterText, instruction, lengthMode });
+        const builtPrompt = buildWritingContext({
+            message,
+            history: [],
+            context: {
+                ...(context || {}),
+                taskMode: 'infill',
+                beforeText,
+                afterText,
+            },
+            config: aiConfig,
+            promptTemplates,
+            promptOrder,
+        });
+
+        capturePrompt({
+            provider: aiConfig.provider,
+            model: aiConfig.model,
+            temperature: aiConfig.temperature ?? 0.7,
+            maxTokens: 4096,
+            topP: aiConfig.topP ?? 0.9,
+            systemPrompt: builtPrompt.systemPrompt,
+            userPrompt: JSON.stringify({ messages: builtPrompt.messages, context: builtPrompt.debug }),
+        });
+        const reply = await callAIChat(aiConfig, builtPrompt.systemPrompt, builtPrompt.messages);
+
+        res.json({ reply: cleanInfillReply(reply), contextDebug: builtPrompt.debug });
+    } catch (err) {
+        console.error('[Chat Infill]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+function buildInfillUserMessage({ beforeText, afterText, instruction, lengthMode }) {
+    const lengthText = {
+        short: '短：约 200-500 字，快速过渡。',
+        medium: '适中：约 500-1000 字，补足动作、心理和场景衔接。',
+        long: '详细：约 1000-1800 字，展开描写但不要拖沓。',
+    }[lengthMode] || '适中：约 500-1000 字。';
+    return [
+        '任务：补写小说中段。',
+        '',
+        '要求：',
+        '- 只输出需要填入中间空缺的正文，不要重复前文或后文。',
+        '- 必须自然承接前文，并能无缝接到后文。',
+        '- 不改写前文和后文已经确定的事实。',
+        '- 按作者要求完成中间发生的内容。',
+        '- 输出中文小说正文，不要解释，不要列提纲，不要加标题。',
+        `- 长度：${lengthText}`,
+        '',
+        `【前文】\n${beforeText || '(无)'}`,
+        '',
+        `【中间要补】\n${instruction}`,
+        '',
+        `【后文】\n${afterText || '(无)'}`,
+    ].join('\n');
+}
+
+function cleanInfillReply(reply = '') {
+    return String(reply)
+        .replace(/^```(?:\w+)?\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+}
 
 // ==================== System Prompts ====================
 
@@ -155,11 +292,14 @@ function buildAssistSystemPrompt(ctx) {
     return p.join('\n');
 }
 
-function buildWriteSystemPrompt(ctx, templates, memoryText, authorContext) {
+function buildWriteSystemPrompt(ctx, templates, memoryText, authorContext, novelMemoryText) {
     const p = [];
 
     // L1: Author profile first
     if (authorContext) p.push(authorContext);
+
+    // L2: Novel project memory
+    if (novelMemoryText) p.push(novelMemoryText);
 
     // If user imported ST prompt templates, use the enabled ones
     const hasTemplates = templates?.length > 0;
@@ -253,59 +393,5 @@ function buildWriteMessages(history, currentMsg, ctx) {
     return msgs;
 }
 
-// ==================== AI Caller ====================
 
-async function callAI(config, systemPrompt, messages) {
-    const { provider, apiKey, endpoint, model } = config;
-    const temp = config.temperature ?? 0.7;
-    const topP = config.topP ?? 0.9;
-    const maxTok = 4096;
 
-    switch (provider) {
-        case 'anthropic': {
-            const r = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-                body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: maxTok, temperature: temp, top_p: topP, system: systemPrompt, messages }),
-            });
-            if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
-            const d = await r.json();
-            return d.content?.map(c => c.text || '').join('') || '';
-        }
-        case 'openai':
-        case 'deepseek':
-        case 'custom': {
-            const base = endpoint?.replace(/\/+$/, '') || (provider === 'deepseek' ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1');
-            const r = await fetchWithTimeout(`${base}/chat/completions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify({ model: model || (provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o'), max_tokens: maxTok, temperature: temp, top_p: topP, messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
-            });
-            if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
-            const d = await r.json();
-            return d.choices?.[0]?.message?.content || '';
-        }
-        case 'openrouter': {
-            const r = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify({ model: model || 'anthropic/claude-sonnet-4-6', max_tokens: maxTok, temperature: temp, top_p: topP, messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
-            });
-            if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
-            const d = await r.json();
-            return d.choices?.[0]?.message?.content || '';
-        }
-        case 'ollama': {
-            const base = endpoint?.replace(/\/+$/, '') || 'http://localhost:11434';
-            const prompt = `### System:\n${systemPrompt}\n\n### Conversation:\n${messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}:\n${m.content}`).join('\n\n')}\n\n### Assistant:\n`;
-            const r = await fetchWithTimeout(`${base}/api/generate`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: model || 'llama3', prompt, stream: false, options: { temperature: temp, num_predict: maxTok, top_p: topP } }),
-            });
-            if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Ollama ${r.status}`); }
-            const d = await r.json();
-            return d.response || '';
-        }
-        default: throw new Error(`Unsupported: ${provider}`);
-    }
-}

@@ -12,24 +12,37 @@ import { createMemoryManager } from '../services/memory-manager.js';
 import { prepareContext } from '../services/context-manager.js';
 import { NovelMemory } from '../services/novel-memory.js';
 import { getAuthorProfile } from '../services/author-profile.js';
+import { applyAiSecret } from '../services/ai-secrets.js';
+import { callAIText, fetchModelList } from '../services/ai-client.js';
+import { capturePrompt } from './debug.js';
 
 export const router = express.Router();
+
+function hasApiKey(config) {
+    return !!config?.apiKey || config?.provider === 'ollama';
+}
 
 // ==================== POST /continue — AI 续写 (完整记忆管线) ====================
 router.post('/continue', async (req, res) => {
     try {
-        const { text, config, worldBook, characters, outline, styleGuide, instructions, chapterContext, novelId } = req.body;
+        const { text, config, worldBook, characters, outline, styleGuide, instructions, chapterContext, novelId, memoryBudget, presetName } = req.body;
 
+        const aiConfig = applyAiSecret(config, presetName);
         if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
-        if (!config?.apiKey && config?.provider !== 'ollama') return res.status(400).json({ error: 'API key required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         // ---- L4: Smart Retrieval ----
+        const { getModelContext } = await import('../services/context-manager.js');
+        const modelCtx = getModelContext(aiConfig.model || 'default');
         const memory = createMemoryManager({
             worldBook: worldBook || { entries: {} },
             characters: characters || [],
             outline: outline || [],
             styleGuide: styleGuide || '',
             chapterSummaries: chapterContext || [],
+        }, {
+            memoryBudgetPct: memoryBudget || 15,
+            modelContextSize: modelCtx.total,
         });
 
         const activeMemories = memory.retrieve(text);
@@ -40,11 +53,23 @@ router.post('/continue', async (req, res) => {
         const authorProfile = getAuthorProfile();
         const authorContext = authorProfile.formatForPrompt(true, 1000);
 
+        // ---- L2: Novel Project Memory ----
+        let novelMemoryText = '';
+        if (novelId) {
+            const novelMemory = new NovelMemory(novelId);
+            novelMemoryText = novelMemory.formatForPrompt();
+        }
+
         // ---- Build Prompts ----
         const sysParts = [];
 
         // Author profile first (L1 — highest precedence)
         if (authorContext) sysParts.push(authorContext);
+
+        // Novel memory (L2)
+        if (novelMemoryText) {
+            sysParts.push(novelMemoryText);
+        }
 
         // Writing role
         sysParts.push('你是一个专业的网络小说作家。请根据以下设定和上下文，进行高质量的小说续写。');
@@ -78,15 +103,22 @@ router.post('/continue', async (req, res) => {
         // ---- Context Management ----
         const ctx = prepareContext({
             text: userPrompt,
-            model: config.model || 'default',
+            model: aiConfig.model || 'default',
             systemPrompt,
             worldBook,
             characters,
-            maxOutputTokens: config.maxTokens || 4096,
+            maxOutputTokens: aiConfig.maxTokens || 4096,
         });
 
         // ---- Call AI ----
-        const result = await callAI(config, systemPrompt, ctx.trimmedText);
+        // [DEBUG] Capture the full API request
+        capturePrompt({
+            provider: aiConfig.provider, model: aiConfig.model,
+            temperature: aiConfig.temperature ?? 0.7, maxTokens: aiConfig.maxTokens ?? 4096, topP: aiConfig.topP ?? 0.9,
+            systemPrompt, userPrompt: ctx.trimmedText,
+            memoryStats, tokenEstimate: ctx.summary,
+        });
+        const result = await callAIText(aiConfig, systemPrompt, ctx.trimmedText);
 
         // ---- L3: Auto-Extract ----
         let extractions = null;
@@ -118,9 +150,10 @@ router.post('/continue', async (req, res) => {
 // ==================== POST /plot-suggestions ====================
 router.post('/plot-suggestions', async (req, res) => {
     try {
-        const { text, config, worldBook, characters, outline, styleGuide } = req.body;
+        const { text, config, worldBook, characters, outline, styleGuide, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
         if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
-        if (!config?.apiKey && config?.provider !== 'ollama') return res.status(400).json({ error: 'API key required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         const memory = createMemoryManager({ worldBook, characters, outline, styleGuide });
         const activeMemories = memory.retrieve(text);
@@ -146,7 +179,7 @@ router.post('/plot-suggestions', async (req, res) => {
             '请给出3种风格各异的情节发展方向：',
         ].join('\n');
 
-        const result = await callAI(config, systemPrompt, userPrompt, { maxTokens: 2000 });
+        const result = await callAIText(aiConfig, systemPrompt, userPrompt, { maxTokens: 2000 });
         const candidates = parsePlotCandidates(result);
 
         res.json({ candidates });
@@ -159,7 +192,9 @@ router.post('/plot-suggestions', async (req, res) => {
 // ==================== POST /inspire ====================
 router.post('/inspire', async (req, res) => {
     try {
-        const { text, config, worldBook, characters, styleGuide } = req.body;
+        const { text, config, worldBook, characters, styleGuide, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         const memory = createMemoryManager({ worldBook, characters, outline: [], styleGuide });
         const activeMemories = memory.retrieve(text);
@@ -174,7 +209,7 @@ router.post('/inspire', async (req, res) => {
             memoryText,
         ].join('\n');
 
-        const result = await callAI(config, systemPrompt,
+        const result = await callAIText(aiConfig, systemPrompt,
             text ? `当前正文：\n${text.slice(-1500)}` : '请根据当前小说给出灵感启发',
             { maxTokens: 1500 }
         );
@@ -189,10 +224,12 @@ router.post('/inspire', async (req, res) => {
 // ==================== POST /summarize ====================
 router.post('/summarize', async (req, res) => {
     try {
-        const { text, config } = req.body;
+        const { text, config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
         if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
-        const result = await callAI(config,
+        const result = await callAIText(aiConfig,
             '你是专业编辑。请为以下章节写一个简洁摘要（200字内），包含主要情节和关键人物。只输出摘要。',
             text,
             { maxTokens: 400 }
@@ -208,17 +245,18 @@ router.post('/summarize', async (req, res) => {
 // ==================== POST /extract-memories (L3 trigger) ====================
 router.post('/extract-memories', async (req, res) => {
     try {
-        const { text, novelId, config } = req.body;
+        const { text, novelId, config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
         if (!text?.trim() || !novelId) return res.status(400).json({ error: 'text and novelId required' });
 
         const novelMemory = new NovelMemory(novelId);
         const extractions = novelMemory.extractFromText(text);
 
         // If we have AI config, generate proper summaries
-        if (config?.apiKey || config?.provider === 'ollama') {
+        if (hasApiKey(aiConfig)) {
             // Generate chapter summary
             if (text.length > 500) {
-                const summary = await callAI(config,
+                const summary = await callAIText(aiConfig,
                     '你是专业编辑。请为以下内容写一个简洁摘要（200字内）。只输出摘要。',
                     text.slice(-3000),
                     { maxTokens: 400 }
@@ -253,14 +291,91 @@ router.post('/extract-memories', async (req, res) => {
     }
 });
 
+// ==================== POST /list-models — 获取可用模型列表 ====================
+router.post('/list-models', async (req, res) => {
+    try {
+        const { config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        if (!aiConfig?.provider) return res.status(400).json({ error: 'provider is required' });
+
+        const models = await fetchModelList(aiConfig);
+        res.json({ models });
+    } catch (err) {
+        console.error('[AI] List models error:', err.message);
+        res.json({ models: [], error: err.message });
+    }
+});
+
 // ==================== POST /test-connection ====================
 router.post('/test-connection', async (req, res) => {
     try {
-        const { config } = req.body;
-        const result = await callAI(config, '简短回复。', '回复"连接成功"', { maxTokens: 50 });
-        res.json({ success: true, response: result });
+        const { config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        {
+            const result = await callAIText(
+                aiConfig,
+                '\u7b80\u77ed\u56de\u590d\u3002',
+                '\u53ea\u56de\u590d\u201c\u8fde\u63a5\u6210\u529f\u201d\u3002',
+                { maxTokens: 512 },
+            );
+            return res.json({ success: true, response: result });
+        }
     } catch (err) {
         res.json({ success: false, error: err.message });
+    }
+});
+
+// ==================== POST /preview — [DEBUG] 预览发送给 AI 的完整 prompt ====================
+router.post('/preview', async (req, res) => {
+    try {
+        const { text, config, worldBook, characters, outline, styleGuide, chapterContext, memoryBudget } = req.body;
+
+        const { getModelContext } = await import('../services/context-manager.js');
+        const modelCtx = getModelContext(config.model || 'default');
+        const memory = createMemoryManager({
+            worldBook: worldBook || { entries: {} },
+            characters: characters || [],
+            outline: outline || [],
+            styleGuide: styleGuide || '',
+            chapterSummaries: chapterContext || [],
+        }, {
+            memoryBudgetPct: memoryBudget || 15,
+            modelContextSize: modelCtx.total,
+        });
+
+        const activeMemories = memory.retrieve(text || '');
+        const memoryText = memory.formatForPrompt(activeMemories);
+        const memoryStats = memory.getStats(activeMemories);
+
+        const authorProfile = getAuthorProfile();
+        const authorContext = authorProfile.formatForPrompt(true, 1000);
+
+        const sysParts = [];
+        if (authorContext) sysParts.push(authorContext);
+        sysParts.push('你是一个专业的网络小说作家。请根据以下设定和上下文，进行高质量的小说续写。');
+        if (memoryText) sysParts.push(`\n${memoryText}`);
+        sysParts.push('\n【写作要求】\n1. 保持与原文完全一致的文风和叙事节奏\n2. 充分运用提供的人物设定和世界观信息\n3. 情节发展合乎逻辑，有因果关联\n4. 对话要符合人物性格且推动情节\n5. 适当设置悬念和冲突\n6. 纯中文写作，标点规范');
+
+        const systemPrompt = sysParts.join('\n');
+        const userPrompt = text ? `【当前正文 — 请从此处续写】\n${text.trimEnd()}\n\n续写要求：直接输出续写正文内容。不要加任何前缀、后缀或解释。` : '(无正文)';
+
+        const tokenEstimate = {
+            system: Math.round(systemPrompt.length / 2.5),
+            user: Math.round(userPrompt.length / 2.5),
+            total: Math.round((systemPrompt.length + userPrompt.length) / 2.5),
+        };
+
+        res.json({
+            provider: config.provider,
+            model: config.model,
+            systemPrompt,
+            userPrompt,
+            memoryStats,
+            tokenEstimate,
+        });
+    } catch (err) {
+        console.error('[AI] Preview error:', err.message);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -282,62 +397,6 @@ router.post('/memory-status', async (_req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// ==================== AI Backend Caller ====================
-
-async function callAI(config, systemPrompt, userPrompt, options = {}) {
-    const { provider, apiKey, endpoint, model } = config;
-    const maxTokens = options.maxTokens || config.maxTokens || 4096;
-    const temperature = config.temperature ?? 0.7;
-    const topP = config.topP ?? 0.9;
-    const topK = config.topK ?? 40;
-
-    switch (provider) {
-        case 'anthropic':
-            return callAnthropic({ apiKey, model, systemPrompt, userPrompt, temperature, maxTokens, topP, topK });
-        case 'openai':
-        case 'custom':
-            return callOpenAI({ apiKey, endpoint, model, systemPrompt, userPrompt, temperature, maxTokens, topP });
-        case 'deepseek':
-            return callOpenAI({ apiKey, endpoint: endpoint || 'https://api.deepseek.com/v1', model: model || 'deepseek-chat', systemPrompt, userPrompt, temperature, maxTokens, topP });
-        case 'openrouter':
-            return callOpenRouter({ apiKey, model, systemPrompt, userPrompt, temperature, maxTokens, topP });
-        case 'ollama':
-            return callOllama({ endpoint: endpoint || 'http://localhost:11434', model, systemPrompt, userPrompt, temperature, maxTokens, topP, topK });
-        default:
-            throw new Error(`Unsupported: ${provider}`);
-    }
-}
-
-async function callAnthropic({ apiKey, model, systemPrompt, userPrompt, temperature, maxTokens, topP, topK }) {
-    const body = { model: model || 'claude-sonnet-4-6', max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] };
-    if (topK) body.top_k = topK;
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
-    const d = await r.json();
-    return d.content?.map(c => c.text || '').join('') || '';
-}
-
-async function callOpenAI({ apiKey, endpoint, model, systemPrompt, userPrompt, temperature, maxTokens, topP }) {
-    const base = endpoint?.replace(/\/+$/, '') || 'https://api.openai.com/v1';
-    const r = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: model || 'gpt-4o', max_tokens: maxTokens, temperature, top_p: topP, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${r.status}`); }
-    return r.json().then(d => d.choices?.[0]?.message?.content || '');
-}
-
-async function callOpenRouter({ apiKey, model, systemPrompt, userPrompt, temperature, maxTokens, topP }) {
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: model || 'anthropic/claude-sonnet-4-6', max_tokens: maxTokens, temperature, top_p: topP, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] }) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${r.status}`); }
-    return r.json().then(d => d.choices?.[0]?.message?.content || '');
-}
-
-async function callOllama({ endpoint, model, systemPrompt, userPrompt, temperature, maxTokens, topP, topK }) {
-    const base = endpoint?.replace(/\/+$/, '') || 'http://localhost:11434';
-    const p = `### System:\n${systemPrompt}\n\n### User:\n${userPrompt}`;
-    const r = await fetch(`${base}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: model || 'llama3', prompt: p, stream: false, options: { temperature, num_predict: maxTokens, top_p: topP, top_k: topK } }) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `${r.status}`); }
-    return r.json().then(d => d.response || '');
-}
 
 function parsePlotCandidates(text) {
     const blocks = text.split('---').map(s => s.trim()).filter(Boolean);

@@ -1,15 +1,25 @@
 /**
  * Novel AI Editor — Memory Manager
  *
- * 参考 Claude Code 的 5 层记忆架构，映射到小说创作：
+ * 记忆系统的检索 & 注入引擎，服务 context-orchestrator 的 7 层架构：
  *
- *   CC Layer         →  Novel Editor
- *   ─────────────────────────────────
- *   L1 CLAUDE.md     →  novel.json (项目设定)
- *   L2 File Storage  →  data/ 目录 (世界书/角色卡/章节)
- *   L3 Auto-extract  →  从正文自动提取新角色/世界观/摘要
- *   L4 Smart Retrieval→  关键词匹配 + 角色名检测 + 语义关联
- *   L5 Context Inject →  Prompt 组装注入
+ *   Layer               →  说明
+ *   ────────────────────────────────────────────────
+ *   1. platform         →  平台规则 (任务描述/语言/书名)
+ *   2. author           →  作者偏好 (L1 AuthorProfile + 记忆文件)
+ *   3. worldSetting     →  世界设定 (世界书条目匹配 + 全局设定注入)
+ *   4. characterState   →  人物状态 (角色卡 + 出场检测 + 状态推断)
+ *   5. plotHistory      →  前情资料 (NovelMemory + 大纲 + 章节摘要)
+ *   6. recentPlot       →  近期情节 (当前正文 + 章节标题)
+ *   7. userMessage      →  用户输入 (聊天框消息 / 续写请求)
+ *
+ * 本模块负责 L3+L4+L5 子管线：
+ *   L3 Auto-extract  →  从 AI 输出文本中提取新角色/世界观/摘要
+ *   L4 Smart Retrieval →  关键词匹配 + 角色名检测 + 二级关键词逻辑
+ *   L5 Context Inject  →  按 position 分组组装 Prompt + Token 预算裁剪
+ *
+ * 入口：context-orchestrator.buildWritingContext() 调用 createMemoryManager()
+ *      → retrieve() 检索激活的记忆 → formatForPrompt() 注入 Prompt
  */
 
 import { estimateTokens } from './context-manager.js';
@@ -62,7 +72,8 @@ export class MemoryManager {
         this.writingRules = options.writingRules || [];
         this.chapterSummaries = options.chapterSummaries || [];
         this.customMemories = options.customMemories || [];
-        this.maxTokens = options.maxTokens || 3000; // Memory budget
+        this.memoryBudgetPct = options.memoryBudgetPct || 15; // Percentage of model context
+        this.modelContextSize = options.modelContextSize || 128000; // Will be updated from backend
         this.caseSensitive = options.caseSensitive || false;
     }
 
@@ -78,11 +89,13 @@ export class MemoryManager {
      * @returns {MemoryItem[]} 激活的记忆，按权重降序排列
      */
     retrieve(text, options = {}) {
-        const scanText = text ? text.slice(-(options.maxScanDepth || 4000)) : '';
+        const fullText = text || '';
+        const scanDepth = Number(options.maxScanDepth) || 0;
+        const scanText = scanDepth > 0 ? fullText.slice(-scanDepth) : fullText;
         const memories = [];
 
         // 1. World book entries — keyword matching (核心)
-        memories.push(...this._retrieveWorldEntries(scanText));
+        memories.push(...this._retrieveWorldEntries(fullText));
 
         // 2. Characters — name matching
         memories.push(...this._retrieveCharacters(scanText));
@@ -139,66 +152,89 @@ export class MemoryManager {
     formatForPrompt(memories) {
         if (!memories.length) return '';
 
-        const groups = {};
+        // Group world entries by position, other types by their own groups
+        const positionGroups = { 0: [], 1: [], 2: [], 3: [] };
+        const otherGroups = {};
+
         for (const m of memories) {
-            if (!groups[m.type]) groups[m.type] = [];
-            groups[m.type].push(m);
+            if (m.type === MEMORY_TYPE.WORLD_ENTRY) {
+                const pos = m.source?.position ?? m._position ?? 0;
+                positionGroups[pos] = positionGroups[pos] || [];
+                positionGroups[pos].push(m);
+            } else {
+                if (!otherGroups[m.type]) otherGroups[m.type] = [];
+                otherGroups[m.type].push(m);
+            }
         }
 
         const sections = [];
 
-        // World entries first
-        if (groups[MEMORY_TYPE.WORLD_ENTRY]?.length) {
-            sections.push('【世界观设定】');
-            groups[MEMORY_TYPE.WORLD_ENTRY].forEach(m => {
+        // Layer 0: 全局设定 (position=0 + constant entries)
+        if (positionGroups[0]?.length) {
+            sections.push('【全局设定】');
+            positionGroups[0].forEach(m => {
                 sections.push(`◇ ${m.label}：${m.content}`);
             });
         }
 
         // Characters
-        if (groups[MEMORY_TYPE.CHARACTER]?.length) {
+        if (otherGroups[MEMORY_TYPE.CHARACTER]?.length) {
             sections.push('\n【出场角色】');
-            groups[MEMORY_TYPE.CHARACTER].forEach(m => {
+            otherGroups[MEMORY_TYPE.CHARACTER].forEach(m => {
                 sections.push(`◇ ${m.label}`);
                 if (m.content) sections.push(`  ${m.content}`);
             });
         }
 
+        // Layer 1: 物品/角色相关设定 (position=1)
+        if (positionGroups[1]?.length) {
+            sections.push('\n【相关设定】');
+            positionGroups[1].forEach(m => {
+                sections.push(`◇ ${m.label}：${m.content}`);
+            });
+        }
+
+        // Layer 2: 当前场景设定 (position=2)
+        if (positionGroups[2]?.length) {
+            sections.push('\n【当前场景】');
+            positionGroups[2].forEach(m => {
+                sections.push(`◇ ${m.label}：${m.content}`);
+            });
+        }
+
+        // Layer 3: 指定深度 (position=3)
+        if (positionGroups[3]?.length) {
+            sections.push('\n【深度设定】');
+            positionGroups[3].forEach(m => {
+                sections.push(`◇ ${m.label}：${m.content}`);
+            });
+        }
+
         // Outline
-        if (groups[MEMORY_TYPE.OUTLINE]?.length) {
+        if (otherGroups[MEMORY_TYPE.OUTLINE]?.length) {
             sections.push('\n【大纲要求】');
-            groups[MEMORY_TYPE.OUTLINE].forEach(m => {
+            otherGroups[MEMORY_TYPE.OUTLINE].forEach(m => {
                 sections.push(`◇ ${m.label}`);
             });
         }
 
         // Chapter summaries
-        if (groups[MEMORY_TYPE.CHAPTER_SUMMARY]?.length) {
+        if (otherGroups[MEMORY_TYPE.CHAPTER_SUMMARY]?.length) {
             sections.push('\n【前情提要】');
-            groups[MEMORY_TYPE.CHAPTER_SUMMARY].forEach(m => {
+            otherGroups[MEMORY_TYPE.CHAPTER_SUMMARY].forEach(m => {
                 sections.push(`◇ ${m.label}：${m.content}`);
             });
         }
 
-        // Style guide
-        if (groups[MEMORY_TYPE.STYLE_GUIDE]?.length) {
+        // Style guide + writing rules
+        if (otherGroups[MEMORY_TYPE.STYLE_GUIDE]?.length) {
             sections.push('\n【文风要求】');
-            sections.push(groups[MEMORY_TYPE.STYLE_GUIDE][0].content);
+            sections.push(otherGroups[MEMORY_TYPE.STYLE_GUIDE][0].content);
         }
-
-        // Writing rules
-        if (groups[MEMORY_TYPE.WRITING_RULE]?.length) {
+        if (otherGroups[MEMORY_TYPE.WRITING_RULE]?.length) {
             sections.push('\n【写作规范】');
-            groups[MEMORY_TYPE.WRITING_RULE].forEach((m, i) => {
+            otherGroups[MEMORY_TYPE.WRITING_RULE].forEach((m, i) => {
                 sections.push(`${i + 1}. ${m.content}`);
-            });
-        }
-
-        // Custom extracted
-        if (groups[MEMORY_TYPE.EXTRACTED_NOTE]?.length) {
-            sections.push('\n【创作笔记】');
-            groups[MEMORY_TYPE.EXTRACTED_NOTE].forEach(m => {
-                sections.push(`- ${m.label}：${m.content}`);
             });
         }
 
@@ -301,27 +337,84 @@ ${chapterContent.slice(-3000)}
                 continue;
             }
 
-            // Selective by keyword
+            // Selective by keyword — each entry scans its own depth
             if (entry.selective && entry.key?.length > 0) {
-                const matched = entry.key.some(kw => {
-                    if (!kw.trim()) return false;
+                // Per-entry scan depth (in characters): depth=0 means full text
+                // Per-entry scan depth in characters: 0 = full text, otherwise scan last N chars
+                const entryDepth = entry.scanDepth ?? entry.depth ?? 1000;
+                const scanRange = entryDepth > 0 ? text.slice(-entryDepth) : text;
+
+                // Step 1: Primary keyword match
+                const primaryMatched = entry.key.some(kw => {
+                    if (typeof kw !== 'string' || !kw.trim()) return false;
                     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    let pattern = escaped;
+                    if (entry.matchWholeWords) pattern = `(?<![\\p{Script=Han}a-zA-Z0-9])${escaped}(?![\\p{Script=Han}a-zA-Z0-9])`;
                     try {
-                        const flags = entry.caseSensitive ? 'g' : 'gi';
-                        return new RegExp(escaped, flags).test(text);
+                        return new RegExp(pattern, entry.caseSensitive ? 'gu' : 'giu').test(scanRange);
                     } catch {
-                        const source = entry.caseSensitive ? text : text.toLowerCase();
+                        const source = entry.caseSensitive ? scanRange : scanRange.toLowerCase();
                         return source.includes(entry.caseSensitive ? kw : kw.toLowerCase());
                     }
                 });
 
-                if (matched) {
-                    active.push(this._entryToMemory(entry, 80));
+                if (!primaryMatched) continue;
+
+                // Step 2: Secondary keyword logic
+                const hasSecondary = Array.isArray(entry.keysecondary) && entry.keysecondary.length > 0;
+                if (hasSecondary) {
+                    const logic = entry.selectiveLogic ?? 0; // default AND_ANY
+                    let hasAny = false, hasAll = true;
+                    for (const skw of entry.keysecondary) {
+                        if (typeof skw !== 'string' || !skw.trim()) continue;
+                        const sMatched = this._matchSingleKW(skw, text, entry);
+                        if (sMatched) hasAny = true; else hasAll = false;
+                        if (logic === 0 && sMatched) break;        // AND_ANY: short-circuit
+                        if (logic === 1 && !sMatched) break;       // NOT_ALL: short-circuit
+                    }
+                    const secondaryPassed =
+                        logic === 0 ? hasAny :                    // AND_ANY
+                        logic === 1 ? !hasAll :                   // NOT_ALL
+                        logic === 2 ? !hasAny :                   // NOT_ANY
+                        logic === 3 ? hasAll : hasAny;            // AND_ALL
+                    if (!secondaryPassed) continue;
                 }
+
+                // Step 3: Probability check
+                const probability = entry.probability ?? 100;
+                if (probability < 100 && Math.random() * 100 > probability) continue;
+
+                active.push(this._entryToMemory(entry, 80));
             }
         }
 
         return active;
+    }
+
+    _matchSingleKW(kw, text, entry) {
+        try {
+            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Chinese-aware whole-word: use Unicode-aware boundaries instead of \b
+            const pattern = entry.matchWholeWords
+                ? `(?<![\\p{Script=Han}a-zA-Z0-9])${escaped}(?![\\p{Script=Han}a-zA-Z0-9])`
+                : escaped;
+            return new RegExp(pattern, entry.caseSensitive ? 'gu' : 'giu').test(text);
+        } catch {
+            // Fallback without Unicode property escapes
+            const src = entry.caseSensitive ? text : text.toLowerCase();
+            const kw2 = entry.caseSensitive ? kw : kw.toLowerCase();
+            if (!entry.matchWholeWords) return src.includes(kw2);
+            // Manual whole-word: check surrounding characters
+            let idx = 0;
+            while ((idx = src.indexOf(kw2, idx)) !== -1) {
+                const before = idx > 0 ? src[idx - 1] : ' ';
+                const after = idx + kw2.length < src.length ? src[idx + kw2.length] : ' ';
+                const isWordChar = c => /[一-鿿a-zA-Z0-9]/.test(c);
+                if (!isWordChar(before) && !isWordChar(after)) return true;
+                idx += kw2.length;
+            }
+            return false;
+        }
     }
 
     _entryToMemory(entry, baseWeight) {
@@ -333,7 +426,8 @@ ${chapterContent.slice(-3000)}
             weight: baseWeight + (entry.order || 100) / 10,
             triggers: entry.key || [],
             estimatedTokens: estimateTokens(entry.content || ''),
-            source: { type: 'world_book', uid: entry.uid },
+            _position: entry.position ?? 0,
+            source: { type: 'world_book', uid: entry.uid, position: entry.position ?? 0 },
         };
     }
 
@@ -415,12 +509,13 @@ ${chapterContent.slice(-3000)}
     // ==================== Budget Management ====================
 
     _trimToBudget(memories) {
+        const budget = Math.round(this.modelContextSize * this.memoryBudgetPct / 100);
         const result = [];
         let used = 0;
 
         for (const m of memories) {
             const tokens = m.estimatedTokens || 0;
-            if (used + tokens <= this.maxTokens) {
+            if (used + tokens <= budget) {
                 result.push(m);
                 used += tokens;
             }
@@ -441,11 +536,14 @@ ${chapterContent.slice(-3000)}
             byType[m.type] = (byType[m.type] || 0) + 1;
         }
 
+        const budget = Math.round(this.modelContextSize * this.memoryBudgetPct / 100);
         return {
             totalEntries: activeMemories.length,
             totalTokens,
-            budget: this.maxTokens,
-            usagePercent: Math.round((totalTokens / this.maxTokens) * 100),
+            budget,
+            budgetPct: this.memoryBudgetPct,
+            modelContext: this.modelContextSize,
+            usagePercent: Math.round((totalTokens / budget) * 100),
             byType,
         };
     }
@@ -495,7 +593,7 @@ ${chapterContent.slice(-3000)}
  * @param {object} editorState
  * @returns {MemoryManager}
  */
-export function createMemoryManager(editorState = {}) {
+export function createMemoryManager(editorState = {}, options = {}) {
     return new MemoryManager({
         worldBook: editorState.worldBook || { entries: {} },
         characters: editorState.characters || [],
@@ -503,6 +601,8 @@ export function createMemoryManager(editorState = {}) {
         styleGuide: editorState.styleGuide || editorState.currentNovel?.styleGuide || '',
         writingRules: getActiveWritingRules(editorState),
         chapterSummaries: editorState.chapterSummaries || [],
+        memoryBudgetPct: options.memoryBudgetPct || editorState.memoryBudgetPct || 15,
+        modelContextSize: options.modelContextSize || 128000,
     });
 }
 

@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Shared Config
+ * Novel AI Editor - Shared Config
  * 避免循环依赖的共享配置模块
  */
 import path from 'node:path';

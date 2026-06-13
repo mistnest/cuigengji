@@ -1,0 +1,3184 @@
+{
+  "config": {
+    "configFile": "D:\\novel\\novel-ai-editor\\playwright.config.ts",
+    "rootDir": "D:/novel/novel-ai-editor/tests",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "D:/novel/novel-ai-editor/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "D:/novel/novel-ai-editor/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "playwright-report"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results/results.json"
+        }
+      ],
+      [
+        "list",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 1,
+    "webServer": {
+      "command": "node src/server.js",
+      "url": "http://127.0.0.1:8765/api/ping",
+      "reuseExistingServer": true,
+      "timeout": 10000
+    }
+  },
+  "suites": [
+    {
+      "title": "api\\api.spec.ts",
+      "file": "api/api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Health Check API",
+          "file": "api/api.spec.ts",
+          "line": 18,
+          "column": 6,
+          "specs": [
+            {
+              "title": "GET /api/ping returns 204 @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 30,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.051Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-b202807c64c41137044f",
+              "file": "api/api.spec.ts",
+              "line": 19,
+              "column": 3
+            },
+            {
+              "title": "GET /api/version returns correct format @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.121Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-8be78788ac91a5159c93",
+              "file": "api/api.spec.ts",
+              "line": 24,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Novels API",
+          "file": "api/api.spec.ts",
+          "line": 37,
+          "column": 6,
+          "specs": [
+            {
+              "title": "GET /api/novels returns list @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.144Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-61a8038ef70fbf66209f",
+              "file": "api/api.spec.ts",
+              "line": 47,
+              "column": 3
+            },
+            {
+              "title": "POST /api/novels creates new project @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 16,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.170Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-98b2386d903360d2d059",
+              "file": "api/api.spec.ts",
+              "line": 55,
+              "column": 3
+            },
+            {
+              "title": "POST /api/novels requires title @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.209Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-a463ced231c233aa315c",
+              "file": "api/api.spec.ts",
+              "line": 66,
+              "column": 3
+            },
+            {
+              "title": "POST /api/novels rejects duplicate title @regression @boundary",
+              "ok": true,
+              "tags": [
+                "regression",
+                "boundary"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 16,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.238Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-5c6d08b055553ff55a78",
+              "file": "api/api.spec.ts",
+              "line": 75,
+              "column": 3
+            },
+            {
+              "title": "DELETE /api/novels/:id removes project @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 23,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.285Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-9658963086cb1a192d56",
+              "file": "api/api.spec.ts",
+              "line": 87,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Chapters API",
+          "file": "api/api.spec.ts",
+          "line": 102,
+          "column": 6,
+          "specs": [
+            {
+              "title": "GET /api/chapters requires novelId @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.353Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-085156bdb2ebfdbfafc3",
+              "file": "api/api.spec.ts",
+              "line": 121,
+              "column": 3
+            },
+            {
+              "title": "GET /api/chapters?novelId=xxx returns empty list initially @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 29,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.405Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-1d624a1b63fe2b098f57",
+              "file": "api/api.spec.ts",
+              "line": 128,
+              "column": 3
+            },
+            {
+              "title": "POST /api/chapters creates chapter @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.447Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-8e599f93717f86e6af23",
+              "file": "api/api.spec.ts",
+              "line": 135,
+              "column": 3
+            },
+            {
+              "title": "POST /api/chapters creates volume @smoke",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.470Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-722ec582c92558268c5a",
+              "file": "api/api.spec.ts",
+              "line": 147,
+              "column": 3
+            },
+            {
+              "title": "GET /api/chapters/:id returns full chapter @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.495Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-38b7d8195a83ee0a5b3f",
+              "file": "api/api.spec.ts",
+              "line": 157,
+              "column": 3
+            },
+            {
+              "title": "GET /api/chapters/:id returns 404 for non-existent @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.522Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-4cac45d1e0464dfde433",
+              "file": "api/api.spec.ts",
+              "line": 164,
+              "column": 3
+            },
+            {
+              "title": "PUT /api/chapters/:id updates content @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.548Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-ee711780af2d095bca2d",
+              "file": "api/api.spec.ts",
+              "line": 169,
+              "column": 3
+            },
+            {
+              "title": "PUT /api/chapters/:id updates title @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.595Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-c7d6f01d509b74791117",
+              "file": "api/api.spec.ts",
+              "line": 180,
+              "column": 3
+            },
+            {
+              "title": "DELETE /api/chapters/:id removes chapter @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 25,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.615Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-40cc531f69aba6e3db31",
+              "file": "api/api.spec.ts",
+              "line": 189,
+              "column": 3
+            },
+            {
+              "title": "DELETE /api/chapters/:id removes volume @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.651Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-f08ad46ec82b17e7b674",
+              "file": "api/api.spec.ts",
+              "line": 208,
+              "column": 3
+            },
+            {
+              "title": "POST /api/chapters handles empty body @regression @boundary",
+              "ok": true,
+              "tags": [
+                "regression",
+                "boundary"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.677Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-fe3b02c048820dfe4062",
+              "file": "api/api.spec.ts",
+              "line": 229,
+              "column": 5
+            },
+            {
+              "title": "POST /api/chapters handles empty title @regression @boundary",
+              "ok": true,
+              "tags": [
+                "regression",
+                "boundary"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.704Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-98705fc38a8544366250",
+              "file": "api/api.spec.ts",
+              "line": 229,
+              "column": 5
+            },
+            {
+              "title": "POST /api/chapters handles missing title @regression @boundary",
+              "ok": true,
+              "tags": [
+                "regression",
+                "boundary"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.741Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-bbe30226ac9d53d3085a",
+              "file": "api/api.spec.ts",
+              "line": 229,
+              "column": 5
+            }
+          ]
+        },
+        {
+          "title": "AI API — Validation",
+          "file": "api/api.spec.ts",
+          "line": 241,
+          "column": 6,
+          "specs": [
+            {
+              "title": "POST /continue requires text @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.777Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-3e0d012c003e31d969c3",
+              "file": "api/api.spec.ts",
+              "line": 244,
+              "column": 3
+            },
+            {
+              "title": "POST /continue requires API key @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 263,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:21.797Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-9d0ccdb3c6c41fbb6c82",
+              "file": "api/api.spec.ts",
+              "line": 256,
+              "column": 3
+            },
+            {
+              "title": "POST /plot-suggestions requires text @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.072Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-1cdd67c0722d8f703ce5",
+              "file": "api/api.spec.ts",
+              "line": 264,
+              "column": 3
+            },
+            {
+              "title": "POST /summarize requires text @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.100Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-f9c7aa26127a1b72f747",
+              "file": "api/api.spec.ts",
+              "line": 271,
+              "column": 3
+            },
+            {
+              "title": "POST /test-connection without key returns error gracefully @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 96,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.117Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-dc7ca5f101c44dbae3c8",
+              "file": "api/api.spec.ts",
+              "line": 278,
+              "column": 3
+            },
+            {
+              "title": "POST /list-models requires provider @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.222Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-cc8ed3f8b2f90e0edd3b",
+              "file": "api/api.spec.ts",
+              "line": 287,
+              "column": 3
+            },
+            {
+              "title": "POST /preview without AI key works (pure prompt preview) @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.242Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-fa9d760403d27d349ae4",
+              "file": "api/api.spec.ts",
+              "line": 294,
+              "column": 3
+            },
+            {
+              "title": "POST /memory-status returns author info @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.261Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-387bc02c4f532366a4b9",
+              "file": "api/api.spec.ts",
+              "line": 304,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Import API",
+          "file": "api/api.spec.ts",
+          "line": 316,
+          "column": 6,
+          "specs": [
+            {
+              "title": "POST /api/import/worldbook requires data @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.284Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-c53b7bd5081135ada2e3",
+              "file": "api/api.spec.ts",
+              "line": 317,
+              "column": 3
+            },
+            {
+              "title": "POST /api/import/document requires file upload @regression @negative",
+              "ok": true,
+              "tags": [
+                "regression",
+                "negative"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.306Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-66054280c79ac0fe2ee7",
+              "file": "api/api.spec.ts",
+              "line": 325,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Global Error Handling",
+          "file": "api/api.spec.ts",
+          "line": 336,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Unknown route returns 404 @regression",
+              "ok": true,
+              "tags": [
+                "regression"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.333Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-9bde17b443f1fd658ca4",
+              "file": "api/api.spec.ts",
+              "line": 337,
+              "column": 3
+            },
+            {
+              "title": "Malformed JSON body is handled gracefully @regression @boundary",
+              "ok": true,
+              "tags": [
+                "regression",
+                "boundary"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:22.349Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "495da78dfc57d624a56a-f92cd5b1ba1259a7c9b3",
+              "file": "api/api.spec.ts",
+              "line": 344,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "e2e\\novel-editor.spec.ts",
+      "file": "e2e/novel-editor.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "章节可保存、拖入卷，并在重新进入后保持位置 @smoke",
+          "ok": true,
+          "tags": [
+            "smoke"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3222,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:22.397Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "41c9223a53fe7e602f92-aa99f8f701a5dcbc82c7",
+          "file": "e2e/novel-editor.spec.ts",
+          "line": 34,
+          "column": 1
+        },
+        {
+          "title": "世界书、角色和 Prompt 按项目隔离并持久化 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4576,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:26.057Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "41c9223a53fe7e602f92-24ea51564758bb7cf2e6",
+          "file": "e2e/novel-editor.spec.ts",
+          "line": 60,
+          "column": 1
+        },
+        {
+          "title": "角色卡内嵌世界书提取后会保存到项目 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3094,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:30.653Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "41c9223a53fe7e602f92-83275b14cbd0398937aa",
+          "file": "e2e/novel-editor.spec.ts",
+          "line": 111,
+          "column": 1
+        },
+        {
+          "title": "会话可新建、保存、搜索并切换 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2133,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:33.764Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "41c9223a53fe7e602f92-6ad7c06f209f656d78c9",
+          "file": "e2e/novel-editor.spec.ts",
+          "line": 153,
+          "column": 1
+        },
+        {
+          "title": "Prompt 搜索、勾选删除和记忆预算控件有效 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2529,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:35.912Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "41c9223a53fe7e602f92-ccfd1f20cf85a0dc365d",
+          "file": "e2e/novel-editor.spec.ts",
+          "line": 177,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "e2e\\webapp.spec.ts",
+      "file": "e2e/webapp.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "欢迎页可创建工作区，并在最近项目中重新打开 @smoke",
+          "ok": true,
+          "tags": [
+            "smoke"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2166,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:38.490Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cf89e50fa019deb8bf34-7912ea39817f94268930",
+          "file": "e2e/webapp.spec.ts",
+          "line": 29,
+          "column": 1
+        },
+        {
+          "title": "欢迎页导入 TXT 会创建工作区并显示正文 @smoke",
+          "ok": true,
+          "tags": [
+            "smoke"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2152,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:40.677Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cf89e50fa019deb8bf34-a413a4eb765fda2b0ad4",
+          "file": "e2e/webapp.spec.ts",
+          "line": 43,
+          "column": 1
+        },
+        {
+          "title": "页面加载和工作区进入没有脚本错误或资源 404 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2721,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:42.847Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cf89e50fa019deb8bf34-c3467d6f205bf4456272",
+          "file": "e2e/webapp.spec.ts",
+          "line": 63,
+          "column": 1
+        },
+        {
+          "title": "900x600 窗口仍保留三栏编辑区 @regression",
+          "ok": true,
+          "tags": [
+            "regression"
+          ],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2196,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-13T03:37:45.586Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cf89e50fa019deb8bf34-1c738e74a297d88a1bfa",
+          "file": "e2e/webapp.spec.ts",
+          "line": 82,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "memory\\memory.spec.ts",
+      "file": "memory/memory.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "L1 — Author Profile",
+          "file": "memory/memory.spec.ts",
+          "line": 59,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-L1-001 @smoke Author profile creates default AUTHOR.md",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.837Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-654080b06f9893c9c2e4",
+              "file": "memory/memory.spec.ts",
+              "line": 63,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-002 Write and read a memory file",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.865Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-d62edad121efa71a1dd4",
+              "file": "memory/memory.spec.ts",
+              "line": 73,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-003 List memories from MEMORY.md index",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.898Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-31a0ca9d4f3706754755",
+              "file": "memory/memory.spec.ts",
+              "line": 95,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-004 Delete a memory removes from file and index",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.928Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-f79254ebd3011db77588",
+              "file": "memory/memory.spec.ts",
+              "line": 111,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-005 Keyword-based memory retrieval (CC-style top-5)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.957Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-02edfd1e17d559ab6c8b",
+              "file": "memory/memory.spec.ts",
+              "line": 126,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-006 Memory freshness check detects stale memories",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:47.985Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-bee5667613891d4d7b21",
+              "file": "memory/memory.spec.ts",
+              "line": 142,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-007 formatForPrompt includes profile and recent memories",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.036Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-6ae364c9b5b67c39f1f3",
+              "file": "memory/memory.spec.ts",
+              "line": 158,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-008 MEMORY.md index enforces 200-line hard limit",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        },
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.066Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-0dd2b2de59a05c4014b2",
+              "file": "memory/memory.spec.ts",
+              "line": 171,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L1-009 Profile update and section suggestion",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.100Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-58fa458ae7f4d28e993c",
+              "file": "memory/memory.spec.ts",
+              "line": 190,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "L2 — Novel Project Memory",
+          "file": "memory/memory.spec.ts",
+          "line": 212,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-L2-001 @smoke NovelConfig creates project file with defaults",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.143Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-f21519aa50bbfb6e9767",
+              "file": "memory/memory.spec.ts",
+              "line": 216,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L2-002 NovelConfig write merges with existing data",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 16,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.189Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-a6f40578c92e858e34e5",
+              "file": "memory/memory.spec.ts",
+              "line": 227,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L2-003 NovelConfig.formatForPrompt generates correct prompt",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.215Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-d08a61780b66ea9a5fee",
+              "file": "memory/memory.spec.ts",
+              "line": 238,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L2-004 NovelMemory writes chapter summary and lists memories",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.235Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-2351298bee7ae612468b",
+              "file": "memory/memory.spec.ts",
+              "line": 256,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L2-005 NovelMemory session notes save and retrieve",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 83,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.263Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-3896c310c1c9dab4e70d",
+              "file": "memory/memory.spec.ts",
+              "line": 270,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L2-006 NovelMemory.formatForPrompt includes summaries",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.362Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-b951e7ce05157d6450bf",
+              "file": "memory/memory.spec.ts",
+              "line": 282,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "L3 — Auto-Extraction (from AI output)",
+          "file": "memory/memory.spec.ts",
+          "line": 296,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-L3-001 @smoke NovelMemory extracts character names",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.403Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-de1d2d750c2e616d2612",
+              "file": "memory/memory.spec.ts",
+              "line": 300,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L3-002 @smoke Common words are filtered out",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.448Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-b9ca24176109fdd8cc7f",
+              "file": "memory/memory.spec.ts",
+              "line": 316,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L3-002 NovelMemory extracts world elements (places)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.466Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-bc9211c86f0da03f7a44",
+              "file": "memory/memory.spec.ts",
+              "line": 329,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L3-003 NovelMemory extracts world elements (items)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.482Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-0f350306782c65e4b94a",
+              "file": "memory/memory.spec.ts",
+              "line": 346,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L3-004 NovelMemory detects plot developments",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.504Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-0f7f79c1c2c1a648186c",
+              "file": "memory/memory.spec.ts",
+              "line": 358,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L3-005 @smoke World element classification works",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.522Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-efb4bd1e011047d6cafc",
+              "file": "memory/memory.spec.ts",
+              "line": 376,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "L4 — Smart Retrieval (MemoryManager)",
+          "file": "memory/memory.spec.ts",
+          "line": 404,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-L4-001 @smoke Constant entries always active",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.588Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-e5e484e02090339393a7",
+              "file": "memory/memory.spec.ts",
+              "line": 472,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-002 Keyword match activates world entry",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.609Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-bac2d36cf2770b101577",
+              "file": "memory/memory.spec.ts",
+              "line": 490,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-003 Disabled entries are never activated",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.628Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-fe67936650d3ccd1b193",
+              "file": "memory/memory.spec.ts",
+              "line": 509,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-004 Secondary keyword logic AND_ANY works",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.651Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-102b6ab9a52d939192d0",
+              "file": "memory/memory.spec.ts",
+              "line": 527,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-005 Character name detection activates character memory",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.673Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-d352eba16f7de5a21258",
+              "file": "memory/memory.spec.ts",
+              "line": 559,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-006 Character weight increases with multiple mentions",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.708Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-dd1bb4acec3a12bc5c1a",
+              "file": "memory/memory.spec.ts",
+              "line": 585,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-007 Outline nodes are retrieved (incomplete only)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.725Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-6bddc4652b0f87d9fa70",
+              "file": "memory/memory.spec.ts",
+              "line": 604,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-008 getStats returns correct memory statistics",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.748Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-9e179e07fc1c2e97cfe2",
+              "file": "memory/memory.spec.ts",
+              "line": 630,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-009 Token budget trimming works correctly",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.772Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-a8b26e4b56744e5bc217",
+              "file": "memory/memory.spec.ts",
+              "line": 657,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L4-010 addCustomMemory and clearExtracted",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.792Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-18ece56e5969cd16e465",
+              "file": "memory/memory.spec.ts",
+              "line": 678,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "L5 — Context Injection & Token Management",
+          "file": "memory/memory.spec.ts",
+          "line": 702,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-L5-001 @smoke formatForPrompt groups by position correctly",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.822Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-c7e6f6f62249914b3af3",
+              "file": "memory/memory.spec.ts",
+              "line": 706,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-002 allocateBudget and checkBudget detect overflow",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.851Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-45a00908cf1877e9c947",
+              "file": "memory/memory.spec.ts",
+              "line": 759,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-003 trimText preserves end content and adds marker",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.871Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-325c4f99060533f5459b",
+              "file": "memory/memory.spec.ts",
+              "line": 796,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-004 trimText with small text returns original",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.886Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-98981b15f490fd4215c1",
+              "file": "memory/memory.spec.ts",
+              "line": 808,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-005 prepareContext returns full breakdown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.907Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-29b9c87e0540e73bcfc2",
+              "file": "memory/memory.spec.ts",
+              "line": 817,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-006 getModelContext handles partial and default matches",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.927Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-9ee57edb1ba5dc731a38",
+              "file": "memory/memory.spec.ts",
+              "line": 837,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-007 estimateTokens works for Chinese and English",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.942Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-aa93dc061421c3cdd487",
+              "file": "memory/memory.spec.ts",
+              "line": 857,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-008 MemoryManager.formatForPrompt returns empty for empty memories",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.964Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-931a6a987fe44ec8fb4c",
+              "file": "memory/memory.spec.ts",
+              "line": 875,
+              "column": 3
+            },
+            {
+              "title": "TC-MEM-L5-009 Default model context values for all providers",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:48.980Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-efc7906822e87a9bdbf8",
+              "file": "memory/memory.spec.ts",
+              "line": 889,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Memory — Full L1→L5 Integration",
+          "file": "memory/memory.spec.ts",
+          "line": 909,
+          "column": 6,
+          "specs": [
+            {
+              "title": "TC-MEM-INT-001 @smoke Full pipeline: Author Profile → Novel Memory → Retrieval → Format",
+              "ok": true,
+              "tags": [
+                "smoke"
+              ],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 32,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": "[AuthorProfile] MEMORY.md 超过 200 行，旧条目将被截断\n"
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-06-13T03:37:49.028Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dc047131395be1f52a77-1494ee12578a9dbc630a",
+              "file": "memory/memory.spec.ts",
+              "line": 913,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-06-13T03:37:20.192Z",
+    "duration": 29271.954999999998,
+    "expected": 82,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

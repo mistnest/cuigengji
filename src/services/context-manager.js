@@ -29,8 +29,15 @@ export const MODEL_CONTEXTS = {
     'gpt-4o': { total: 128000, output: 16384 },
     'gpt-4-turbo': { total: 128000, output: 4096 },
     'gpt-5': { total: 128000, output: 16384 },
-    'deepseek-v3': { total: 128000, output: 8192 },
-    'deepseek-r1': { total: 128000, output: 8192 },
+    'deepseek-v4': { total: 1000000, output: 8192 },
+    'deepseek-v3': { total: 1000000, output: 8192 },
+    'deepseek-r1': { total: 1000000, output: 8192 },
+    'deepseek-chat': { total: 1000000, output: 8192 },
+    'deepseek': { total: 1000000, output: 8192 },
+    'gemini-2.5': { total: 1000000, output: 16384 },
+    'gemini-2.0': { total: 1000000, output: 16384 },
+    'gemini-1.5': { total: 1000000, output: 16384 },
+    'qwen': { total: 1000000, output: 8192 },
     // Default fallback
     'default': { total: 131072, output: 16384 },
 };
