@@ -9,6 +9,7 @@
 </head>
 <body>
     <div id="toast-container"></div>
+    <div id="global-tooltip" class="global-tooltip" style="display:none;"></div>
 
     <div id="welcome-page">
         <div class="welcome-container">
@@ -222,15 +223,12 @@
 
                 <div id="panel-worldbook" class="sidebar-panel">
                     <div class="panel-toolbar">
-                        <div class="panel-toolbar-main">
-                            <button id="btn-add-wb-entry" title="添加世界书条目">新建</button>
-                            <button id="btn-import-wb" title="导入世界书">导入</button>
-                            <button id="btn-export-wb" title="导出世界书">导出</button>
-                        </div>
-                        <div class="panel-toolbar-tools">
-                            <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">搜索</button>
-                            <button class="btn-batch-toggle panel-tool-btn" data-list="worldbook" title="批量管理">批量</button>
-                        </div>
+                        <button id="btn-add-wb-entry" title="添加世界书条目">新建</button>
+                        <button id="btn-import-wb" title="导入世界书">导入</button>
+                        <button id="btn-export-wb" title="导出世界书">导出</button>
+                        <span class="panel-toolbar-spacer"></span>
+                        <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">🔍</button>
+                        <button class="btn-batch-toggle panel-tool-btn" data-list="worldbook" title="批量管理">批量操作</button>
                     </div>
                     <div class="reference-control" data-reference-kind="worldbook">
                         <div class="reference-title">本次写作使用</div>
@@ -253,15 +251,12 @@
 
                 <div id="panel-characters" class="sidebar-panel">
                     <div class="panel-toolbar">
-                        <div class="panel-toolbar-main">
-                            <button id="btn-add-character" title="添加角色">新角色</button>
-                            <button id="btn-import-character" title="导入角色卡">导入</button>
-                            <button id="btn-export-char" title="导出角色卡">导出</button>
-                        </div>
-                        <div class="panel-toolbar-tools">
-                            <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">搜索</button>
-                            <button class="btn-batch-toggle panel-tool-btn" data-list="character" title="批量管理">批量</button>
-                        </div>
+                        <button id="btn-add-character" title="添加角色">新角色</button>
+                        <button id="btn-import-character" title="导入角色卡">导入</button>
+                        <button id="btn-export-char" title="导出角色卡">导出</button>
+                        <span class="panel-toolbar-spacer"></span>
+                        <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">🔍</button>
+                        <button class="btn-batch-toggle panel-tool-btn" data-list="character" title="批量管理">批量操作</button>
                     </div>
                     <div class="reference-control" data-reference-kind="character">
                         <div class="reference-title">本次写作使用</div>
@@ -301,9 +296,9 @@
                     <div class="ai-section">
                         <button id="btn-continue" class="ai-btn-primary ai-action-main">续写正文</button>
                         <div class="ai-action-grid" style="grid-template-columns:1fr 1fr 1fr;">
-                            <button id="btn-plot-suggestions" class="ai-command-btn" style="flex-direction:row;gap:4px;min-height:36px;padding:6px 8px;"><span style="font-size:13px;">情节</span></button>
-                            <button id="btn-inspire" class="ai-command-btn" style="flex-direction:row;gap:4px;min-height:36px;padding:6px 8px;"><span style="font-size:13px;">灵感</span></button>
-                            <button id="btn-infill" class="ai-command-btn" style="flex-direction:row;gap:4px;min-height:36px;padding:6px 8px;"><span style="font-size:13px;">补写</span></button>
+                            <button id="btn-plot-suggestions" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">情节</span><small>发展建议</small></button>
+                            <button id="btn-inspire" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">灵感</span><small>创意启发</small></button>
+                            <button id="btn-infill" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">补写</span><small>中段填空</small></button>
                         </div>
                     </div>
 
@@ -358,7 +353,7 @@
                             <select id="ai-model" class="ai-select" style="flex:1;min-width:0;">
                                 <option value="">— 先选服务商再刷新模型列表 —</option>
                             </select>
-                            <button id="btn-fetch-models" class="ai-btn-compact">刷新</button>
+                            <button id="btn-fetch-models" class="ai-btn-inline">刷新模型列表</button>
                         </div>
                         <div id="model-context-info" class="model-context-info" style="display:none;"></div>
                         <button id="btn-connect-model" class="ai-btn-primary ai-connect-btn">连接模型</button>
@@ -370,11 +365,11 @@
                             <span class="info-tooltip" data-tooltip="控制世界书、角色卡和大纲占用多少上下文。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">预算越高，AI 越容易遵守设定；预算越低，留给正文和对话的空间越多。</span></span>
                         </div>
                         <div class="memory-budget-options">
-                            <label class="budget-option" data-level="3"><input type="radio" name="memory-budget" value="3">轻量</label>
-                            <label class="budget-option" data-level="8"><input type="radio" name="memory-budget" value="8">适中</label>
-                            <label class="budget-option active" data-level="15"><input type="radio" name="memory-budget" value="15" checked>推荐</label>
-                            <label class="budget-option" data-level="25"><input type="radio" name="memory-budget" value="25">充足</label>
-                            <label class="budget-option" data-level="35"><input type="radio" name="memory-budget" value="35">尽量多</label>
+                            <label class="budget-option" data-level="3"><input type="radio" name="memory-budget" value="3"><span>轻量</span></label>
+                            <label class="budget-option" data-level="8"><input type="radio" name="memory-budget" value="8"><span>适中</span></label>
+                            <label class="budget-option active" data-level="15"><input type="radio" name="memory-budget" value="15" checked><span>推荐</span></label>
+                            <label class="budget-option" data-level="25"><input type="radio" name="memory-budget" value="25"><span>充足</span></label>
+                            <label class="budget-option" data-level="35"><input type="radio" name="memory-budget" value="35"><span>尽量多</span></label>
                         </div>
                         <div class="memory-budget-info">约 <span id="memory-tokens-estimate">19,000</span> tokens / 模型上限 <span id="context-total">128K</span></div>
                     </div>
@@ -416,7 +411,7 @@
                         <summary><span>Prompt 模板 <span id="prompt-template-count"></span></span><small>控制写作行为和优先级</small></summary>
                         <div class="prompt-template-tools">
                             <button id="btn-add-prompt-template" class="ai-btn-secondary">新增</button>
-                            <button id="btn-delete-selected-prompts" class="ai-btn-secondary">删除选中</button>
+                            <button id="btn-edit-prompt-templates" class="ai-btn-secondary">编辑模板</button>
                         </div>
                         <input type="text" id="prompt-template-search" class="ai-input prompt-template-search" placeholder="搜索模板名称、内容、角色...">
                         <div id="prompt-templates-list" class="prompt-templates-list">
@@ -540,6 +535,46 @@
             <div class="plot-modal-footer">
                 <span class="settings-save-note">修改会自动保存到本机</span>
                 <button type="button" id="btn-settings-done" class="ai-btn-primary">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="prompt-editor-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal settings-modal" role="dialog" aria-modal="true">
+            <div class="plot-modal-header">
+                <div><h3>Prompt 模板编辑器</h3><p class="settings-subtitle">管理写作模板 — 名称、角色和内容均可编辑</p></div>
+                <button type="button" id="btn-prompt-editor-close" class="plot-modal-close">×</button>
+            </div>
+            <div class="settings-body">
+                <nav class="settings-nav" id="prompt-editor-nav">
+                    <div class="prompt-editor-nav-tools" style="display:none;" id="prompt-editor-nav-tools">
+                        <button type="button" id="btn-prompt-batch-toggle" class="ai-btn-secondary">批量</button>
+                    </div>
+                    <div class="prompt-editor-nav-list" id="prompt-editor-nav-list"></div>
+                    <div class="prompt-editor-batch-actions" style="display:none;" id="prompt-editor-batch-actions">
+                        <button type="button" data-action="enable" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;">启用</button>
+                        <button type="button" data-action="disable" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;">停用</button>
+                        <button type="button" data-action="delete" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;color:var(--error);border-color:rgba(229,72,77,0.4);">删除</button>
+                    </div>
+                    <button type="button" id="btn-prompt-editor-add" class="ai-btn-secondary" style="margin-top:8px;">＋ 新增模板</button>
+                </nav>
+                <div class="settings-content">
+                    <div class="settings-page active" id="prompt-editor-form-area">
+                        <div class="prompt-editor-empty" id="prompt-editor-empty"><p>← 从左侧选择一个模板进行编辑</p><p style="color:var(--text-muted);font-size:12px;">或点击「＋ 新增模板」创建</p></div>
+                        <div class="prompt-editor-form" id="prompt-editor-form" style="display:none;">
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-name">名称</label><input type="text" id="prompt-editor-name" class="ai-input" placeholder="模板名称"></div>
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-role">优先级 <span class="info-tooltip"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">控制模板注入的先后顺序和重要程度。<br><br><b>高</b> — 全局规则，最先注入AI。适合写：世界观约束、禁止事项、文风底线。<br><br><b>中</b> — 用户指令，紧随其后。适合写：当前任务说明、输出格式要求。<br><br><b>低</b> — 写作示例，最后注入。适合写：对话示范、期望的文风样本。</span></span></label><select id="prompt-editor-role" class="ai-select"><option value="system">高 — 全局规则</option><option value="user">中 — 用户指令</option><option value="assistant">低 — 写作示例</option></select></div>
+                            <div class="settings-group"><label class="settings-check"><input type="checkbox" id="prompt-editor-is-system"> 设为系统提示词</label><label class="settings-check" style="border-bottom:none;"><input type="checkbox" id="prompt-editor-is-marker"> 占位标记（无实际内容）</label></div>
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-content">内容</label><textarea id="prompt-editor-content" class="prompt-editor-content" placeholder="Prompt 模板内容..."></textarea></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note" id="prompt-editor-note"></span>
+                <button type="button" id="btn-prompt-editor-delete" class="ai-btn-secondary" style="color:var(--error);border-color:rgba(229,72,77,0.45);width:auto;">删除</button>
+                <button type="button" id="btn-prompt-editor-save" class="ai-btn-primary" style="width:auto;">保存</button>
+                <button type="button" id="btn-prompt-editor-done" class="ai-btn-secondary" style="width:auto;">完成</button>
             </div>
         </div>
     </div>

@@ -64,6 +64,8 @@
     function init() {
         initWelcomePage();
         initSettingsDialog();
+        bindPromptEditor();
+        bindGlobalTooltip();
         loadAppSettings();
         applyAppSettings();
         applyConfigToUI();
@@ -680,6 +682,16 @@
                     <h4>标签</h4>
                     <input type="text" class="wb-edit-input" id="character-edit-tags" placeholder="主角, 调查员, 雾港（逗号分隔）">
                 </div>
+                <div class="char-field">
+                    <h4>分组</h4>
+                    <input type="text" class="wb-edit-input" id="character-edit-group" placeholder="角色分组（可选）" list="char-group-list">
+                    <datalist id="char-group-list">
+                        <option value="主角">
+                        <option value="配角">
+                        <option value="反派">
+                        <option value="NPC">
+                    </datalist>
+                </div>
             </div>
             <div class="plot-modal-footer">
                 <button type="button" class="plot-btn-cancel character-edit-cancel">取消</button>
@@ -813,6 +825,15 @@
             const models = Array.isArray(data.models) ? data.models : [];
             state._modelCache = models;
             populateModelSelect(models);
+            // Update maxContext for currently selected model
+            const selModel = $('#ai-model')?.value;
+            if (selModel) {
+                const found = models.find(m => (typeof m === 'string' ? m : m.id || m.name) === selModel);
+                if (found && typeof found === 'object') {
+                    state.aiConfig.maxContext = Number(found.contextLimit || 0);
+                }
+            }
+            updateMemoryBudgetInfo();
             setStatus(`\u83b7\u53d6\u5230 ${models.length} \u4e2a\u6a21\u578b`, 'success');
         } catch (err) {
             setStatus(`\u83b7\u53d6\u6a21\u578b\u5931\u8d25: ${err.message}`, 'error');
@@ -871,16 +892,8 @@
     }
 
     function addPromptTemplate() {
-        const name = prompt('Prompt \u6a21\u677f\u540d\u79f0');
-        if (!name?.trim()) return;
-        const content = prompt('Prompt \u5185\u5bb9') || '';
-        state.promptTemplates ||= [];
-        state.enabledTemplates ||= {};
-        const identifier = `custom_${Date.now()}`;
-        state.promptTemplates.push({ identifier, name: name.trim(), role: 'user', content });
-        state.enabledTemplates[identifier] = true;
-        renderPromptTemplates();
-        autoSave();
+        openPromptEditor();
+        addPromptInEditor();
     }
 
     function deleteSelectedPromptTemplates() {
@@ -896,6 +909,259 @@
         });
         renderPromptTemplates();
         autoSave();
+    }
+
+    // ==================== Global Tooltip ====================
+    function bindGlobalTooltip() {
+        document.addEventListener('mouseenter', (e) => {
+            const el = e.target instanceof Element ? e.target : null;
+            const icon = el?.closest('.info-tooltip-icon');
+            if (!icon) return;
+            const textEl = icon.parentElement?.querySelector('.info-tooltip-text');
+            if (!textEl) return;
+            const tip = document.getElementById('global-tooltip');
+            if (!tip) return;
+            tip.innerHTML = textEl.innerHTML;
+            tip.style.display = '';
+            const rect = icon.getBoundingClientRect();
+            let left = rect.left + rect.width / 2 - 170;
+            if (left < 8) left = 8;
+            if (left + 340 > window.innerWidth - 8) left = window.innerWidth - 348;
+            tip.style.left = left + 'px';
+            tip.style.top = (rect.bottom + 8) + 'px';
+            requestAnimationFrame(() => tip.classList.add('show'));
+        }, true);
+        document.addEventListener('mouseleave', (e) => {
+            const el = e.target instanceof Element ? e.target : null;
+            if (!el?.closest('.info-tooltip-icon')) return;
+            const tip = document.getElementById('global-tooltip');
+            if (tip) { tip.classList.remove('show'); tip.style.display = 'none'; }
+        }, true);
+    }
+
+    // ==================== Prompt Editor ====================
+    let _promptEditorCurrentId = null;
+
+    function bindPromptEditor() {
+        const overlay = document.getElementById('prompt-editor-overlay');
+        if (!overlay) return;
+
+        const close = () => closePromptEditor();
+        document.getElementById('btn-prompt-editor-close')?.addEventListener('click', close);
+        document.getElementById('btn-prompt-editor-done')?.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && overlay.classList.contains('active')) close();
+        });
+
+        document.getElementById('btn-prompt-editor-add')?.addEventListener('click', addPromptInEditor);
+        document.getElementById('btn-prompt-editor-save')?.addEventListener('click', savePromptFromForm);
+        document.getElementById('btn-prompt-editor-delete')?.addEventListener('click', deletePromptFromEditor);
+
+        // Batch mode
+        const nav = document.getElementById('prompt-editor-nav');
+        const batchToggle = document.getElementById('btn-prompt-batch-toggle');
+        const batchActions = document.getElementById('prompt-editor-batch-actions');
+        const navTools = document.getElementById('prompt-editor-nav-tools');
+        if (navTools) navTools.style.display = '';
+        if (batchToggle) batchToggle.addEventListener('click', () => {
+            const active = !nav.classList.contains('prompt-editor-nav-batch');
+            nav.classList.toggle('prompt-editor-nav-batch', active);
+            batchToggle.textContent = active ? '完成' : '批量';
+            if (batchActions) batchActions.style.display = active ? '' : 'none';
+            _promptEditorCurrentId = null;
+            document.getElementById('prompt-editor-empty').style.display = '';
+            document.getElementById('prompt-editor-form').style.display = 'none';
+            renderPromptNav();
+        });
+        if (batchActions) batchActions.addEventListener('click', (e) => {
+            const action = e.target.closest('button')?.dataset.action;
+            if (!action) return;
+            const checked = nav.querySelectorAll('.prompt-nav-check:checked');
+            if (!checked.length) { setStatus('请先勾选模板', 'warn'); return; }
+            const ids = [...checked].map(cb => cb.dataset.tmplId);
+            if (action === 'delete') {
+                if (!confirm(`删除选中的 ${ids.length} 个模板？`)) return;
+                state.promptTemplates = state.promptTemplates.filter(t => !ids.includes(t.identifier));
+                ids.forEach(id => { delete state.enabledTemplates[id]; delete state.selectedPromptTemplates[id]; });
+            } else if (action === 'enable') {
+                ids.forEach(id => { state.enabledTemplates[id] = true; });
+            } else if (action === 'disable') {
+                ids.forEach(id => { state.enabledTemplates[id] = false; });
+            }
+            renderPromptNav();
+            renderPromptTemplates();
+            autoSave();
+            setStatus(`已${action === 'delete' ? '删除' : action === 'enable' ? '启用' : '停用'} ${ids.length} 个模板`, 'success');
+        });
+    }
+
+    function openPromptEditor(preselectedId) {
+        const overlay = document.getElementById('prompt-editor-overlay');
+        if (!overlay) return;
+        _promptEditorCurrentId = null;
+        overlay.style.display = '';
+        renderPromptNav();
+        if (preselectedId) {
+            selectPromptForEdit(preselectedId);
+        } else {
+            const emptyState = overlay.querySelector('#prompt-editor-empty');
+            const formArea = overlay.querySelector('#prompt-editor-form');
+            if (emptyState) emptyState.style.display = '';
+            if (formArea) formArea.style.display = 'none';
+        }
+        requestAnimationFrame(() => overlay.classList.add('active'));
+    }
+
+    function closePromptEditor() {
+        const overlay = document.getElementById('prompt-editor-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        setTimeout(() => {
+            if (!overlay.classList.contains('active')) overlay.style.display = 'none';
+        }, 200);
+        _promptEditorCurrentId = null;
+        renderPromptTemplates();
+    }
+
+    function renderPromptNav() {
+        const nav = document.querySelector('#prompt-editor-nav');
+        if (!nav) return;
+        const templates = state.promptTemplates || [];
+        if (!templates.length) {
+            nav.innerHTML = '<div class="pe-nav-empty">暂无模板，点击 "+" 添加</div>';
+            return;
+        }
+        nav.innerHTML = templates.map(t => {
+            const isPriority = t.role === 'system' || t.isSystemPrompt;
+            const title = escHtml(t.name) + (isPriority ? ' <span class="pe-priority-label">[系统]</span>' : '');
+            return '<div class="pe-nav-item" data-id="' + escHtml(t.identifier) + '">'
+                + '<input type="checkbox" class="pe-nav-check" data-id="' + escHtml(t.identifier) + '" aria-label="选择模板">'
+                + '<span class="pe-nav-title">' + title + '</span>'
+                + '<span class="pe-nav-role">' + escHtml(t.role || 'user') + '</span>'
+                + '</div>';
+        }).join('');
+        nav.querySelectorAll('.pe-nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.pe-nav-check')) return;
+                if (nav.classList.contains('batch-mode')) {
+                    const cb = item.querySelector('.pe-nav-check');
+                    if (cb) cb.checked = !cb.checked;
+                    return;
+                }
+                selectPromptForEdit(item.dataset.id);
+            });
+        });
+        if (_promptEditorCurrentId) {
+            const current = nav.querySelector('.pe-nav-item.active');
+            if (current) current.classList.remove('active');
+            const target = nav.querySelector('.pe-nav-item[data-id="' + escHtml(_promptEditorCurrentId) + '"]');
+            if (target) target.classList.add('active');
+        }
+    }
+
+    function selectPromptForEdit(id) {
+        const tmpl = state.promptTemplates.find(t => t.identifier === id);
+        if (!tmpl) return;
+        _promptEditorCurrentId = id;
+        const overlay = document.getElementById('prompt-editor-overlay');
+        if (!overlay) return;
+        const emptyState = overlay.querySelector('#prompt-editor-empty');
+        const formArea = overlay.querySelector('#prompt-editor-form');
+        if (emptyState) emptyState.style.display = 'none';
+        if (formArea) formArea.style.display = '';
+        loadPromptToForm(tmpl);
+        renderPromptNav();
+    }
+
+    function loadPromptToForm(tmpl) {
+        const nameInput = document.getElementById('prompt-editor-name');
+        const roleSelect = document.getElementById('prompt-editor-role');
+        const contentTextarea = document.getElementById('prompt-editor-content');
+        const isSystem = document.getElementById('prompt-editor-is-system');
+        const isMarker = document.getElementById('prompt-editor-is-marker');
+        if (nameInput) nameInput.value = tmpl.name || '';
+        if (roleSelect) roleSelect.value = tmpl.role || 'user';
+        if (contentTextarea) contentTextarea.value = tmpl.content || '';
+        if (isSystem) isSystem.checked = !!tmpl.isSystemPrompt;
+        if (isMarker) isMarker.checked = !!tmpl.isMarker;
+        document.getElementById('prompt-editor-note').textContent = '标识符: ' + (tmpl.identifier || '');
+    }
+
+    function savePromptFromForm() {
+        if (!_promptEditorCurrentId) return;
+        const idx = state.promptTemplates.findIndex(t => t.identifier === _promptEditorCurrentId);
+        if (idx === -1) return;
+        const nameInput = document.getElementById('prompt-editor-name');
+        const roleSelect = document.getElementById('prompt-editor-role');
+        const contentTextarea = document.getElementById('prompt-editor-content');
+        const isSystem = document.getElementById('prompt-editor-is-system');
+        const isMarker = document.getElementById('prompt-editor-is-marker');
+        if (!nameInput) return;
+        const name = nameInput.value.trim();
+        if (!name) { setStatus('请输入模板名称', 'warn'); nameInput.focus(); return; }
+        state.promptTemplates[idx].name = name;
+        state.promptTemplates[idx].role = roleSelect?.value || 'user';
+        state.promptTemplates[idx].content = contentTextarea?.value || '';
+        state.promptTemplates[idx].isSystemPrompt = isSystem?.checked || false;
+        state.promptTemplates[idx].isMarker = isMarker?.checked || false;
+        if (!state.enabledTemplates[_promptEditorCurrentId]) {
+            state.enabledTemplates[_promptEditorCurrentId] = true;
+        }
+        renderPromptNav();
+        renderPromptTemplates();
+        autoSave();
+        setStatus('已保存: ' + name, 'success');
+    }
+
+    function deletePromptFromEditor() {
+        if (!_promptEditorCurrentId) return;
+        const idx = state.promptTemplates.findIndex(t => t.identifier === _promptEditorCurrentId);
+        if (idx === -1) return;
+        const tmpl = state.promptTemplates[idx];
+        if (!confirm('确认删除模板 "' + tmpl.name + '"？')) return;
+        state.promptTemplates.splice(idx, 1);
+        delete state.enabledTemplates[_promptEditorCurrentId];
+        _promptEditorCurrentId = null;
+        renderPromptNav();
+        renderPromptTemplates();
+        autoSave();
+        setStatus('已删除模板', 'success');
+    }
+
+    function addPromptInEditor() {
+        const identifier = 'custom_' + Date.now();
+        state.promptTemplates.push({
+            identifier,
+            name: '新模板',
+            role: 'user',
+            content: '',
+        });
+        state.enabledTemplates[identifier] = true;
+        renderPromptNav();
+        selectPromptForEdit(identifier);
+        setTimeout(() => document.getElementById('prompt-editor-name')?.focus(), 100);
+    }
+
+    function collectWorldBookGroups() {
+        const groups = new Set();
+        if (state.worldBook?.entries) {
+            Object.values(state.worldBook.entries).forEach(entry => {
+                if (entry.group?.trim()) groups.add(entry.group.trim());
+            });
+        }
+        return [...groups].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    }
+
+    function collectCharacterGroups() {
+        const groups = new Set();
+        state.characters.forEach(ch => {
+            const tags = ch.data?.tags || [];
+            const group = ch.data?.group || '';
+            if (group) groups.add(group);
+            tags.forEach(tag => { if (tag.trim()) groups.add(tag.trim()); });
+        });
+        return [...groups].sort((a, b) => a.localeCompare(b, 'zh-CN'));
     }
 
     function filterPromptTemplates() {
@@ -986,7 +1252,7 @@
         $('#btn-export-preset')?.addEventListener('click', exportPreset);
         $('#btn-fetch-models')?.addEventListener('click', fetchModels);
         $('#btn-add-prompt-template')?.addEventListener('click', addPromptTemplate);
-        $('#btn-delete-selected-prompts')?.addEventListener('click', deleteSelectedPromptTemplates);
+        $('#btn-edit-prompt-templates')?.addEventListener('click', () => openPromptEditor());
         $('#btn-import-preset-inline')?.addEventListener('click', () => $('#file-input-preset').click());
         $('#prompt-template-search')?.addEventListener('input', filterPromptTemplates);
 
@@ -1783,7 +2049,17 @@
                 <div class="wb-edit-row">
                     <div class="char-field" style="flex:1;">
                         <h4>📁 分组名</h4>
-                        <input type="text" class="wb-edit-input" id="wb-edit-group" value="${escHtml(entry.group || '')}" placeholder="留空则不分组">
+                        <input type="text" class="wb-edit-input" id="wb-edit-group" value="${escHtml(entry.group || '')}" placeholder="选择或输入分组名" list="wb-group-list">
+                        <datalist id="wb-group-list">
+                            <option value="角色">
+                            <option value="地点">
+                            <option value="事件">
+                            <option value="物品">
+                            <option value="组织">
+                            <option value="概念">
+                            <option value="魔法">
+                            <option value="历史">
+                        </datalist>
                     </div>
                     <div class="char-field" style="flex:1;">
                         <h4>⚖️ 分组权重</h4>
@@ -2303,25 +2579,17 @@
 
         list.innerHTML = templates.map(t => {
             const enabled = state.enabledTemplates[t.identifier] !== false;
-            const selected = state.selectedPromptTemplates?.[t.identifier] === true;
             const searchText = `${t.name || ''} ${t.content || ''} ${t.role || ''}`.toLowerCase();
-            return `<div class="prompt-template-toggle-item ${enabled ? '' : 'disabled'}" data-search-text="${escHtml(searchText)}">
-                <input type="checkbox" class="prompt-template-select" data-id="${escHtml(t.identifier)}" ${selected ? 'checked' : ''} title="选中后可批量删除">
+            return `<div class="prompt-template-toggle-item ${enabled ? '' : 'disabled'}" data-search-text="${escHtml(searchText)}" data-id="${escHtml(t.identifier)}">
                 <label class="prompt-toggle-label">
                     <input type="checkbox" class="prompt-toggle-check" data-id="${escHtml(t.identifier)}" ${enabled ? 'checked' : ''}>
                     <span class="prompt-toggle-name">${escHtml(t.name)}</span>
                     ${t.isMarker ? '<span class="prompt-toggle-badge marker">m</span>' : ''}
                 </label>
                 ${t.content ? `<div class="prompt-toggle-preview">${escHtml(t.content.substring(0, 80))}${t.content.length > 80 ? '…' : ''}</div>` : '<div class="prompt-toggle-preview" style="color:var(--text-muted);font-style:italic">占位标记</div>'}
+                <button class="prompt-delete-btn" data-id="${escHtml(t.identifier)}" title="删除模板">×</button>
             </div>`;
         }).join('');
-
-        list.querySelectorAll('.prompt-template-select').forEach(checkbox => {
-            checkbox.addEventListener('change', () => {
-                state.selectedPromptTemplates[checkbox.dataset.id] = checkbox.checked;
-            });
-            checkbox.addEventListener('dblclick', event => event.stopPropagation());
-        });
 
         // Bind toggle events
         list.querySelectorAll('.prompt-toggle-check').forEach(cb => {
@@ -2331,57 +2599,36 @@
                 const item = cb.closest('.prompt-template-toggle-item');
                 if (item) item.classList.toggle('disabled', !cb.checked);
             });
-            // Stop dblclick on checkbox from triggering preview
-            cb.addEventListener('dblclick', (e) => e.stopPropagation());
         });
 
-        // Double-click to view full content
+        // Delete button (visible on hover)
+        list.querySelectorAll('.prompt-delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.id;
+                const tmpl = state.promptTemplates.find(t => t.identifier === id);
+                if (!tmpl) return;
+                if (!confirm('确认删除模板 "' + tmpl.name + '"？')) return;
+                state.promptTemplates = state.promptTemplates.filter(t => t.identifier !== id);
+                delete state.enabledTemplates[id];
+                renderPromptTemplates();
+                autoSave();
+                setStatus('已删除: ' + tmpl.name, 'success');
+            });
+        });
+
+        // Double-click opens editor
         list.querySelectorAll('.prompt-template-toggle-item').forEach(item => {
             item.addEventListener('dblclick', () => {
-                const cb = item.querySelector('.prompt-toggle-check');
-                if (!cb) return;
-                const id = cb.dataset.id;
-                const template = state.promptTemplates.find(t => t.identifier === id);
-                if (template) showPromptTemplateDetail(template);
+                const id = item.dataset.id;
+                if (id) openPromptEditor(id);
             });
         });
         filterPromptTemplates();
     }
 
     function showPromptTemplateDetail(template) {
-        const overlay = document.createElement('div');
-        overlay.className = 'plot-modal-overlay';
-
-        const modal = document.createElement('div');
-        modal.className = 'plot-modal';
-        const content = template.content || '(占位标记 — 运行时由系统自动替换)';
-        const roleBadge = template.role ? `<span class="preset-prompt-badge">${escHtml(template.role)}</span>` : '';
-        const sysBadge = template.isSystemPrompt ? '<span class="preset-prompt-badge sys">system prompt</span>' : '';
-        const markerBadge = template.isMarker ? '<span class="preset-prompt-badge marker">marker</span>' : '';
-
-        modal.innerHTML = `
-            <div class="plot-modal-header">
-                <h3>📋 ${escHtml(template.name)}</h3>
-                <div style="display:flex;gap:6px;">${roleBadge}${sysBadge}${markerBadge}</div>
-                <button class="plot-modal-close">✕</button>
-            </div>
-            <div class="plot-modal-body" style="display:block;max-height:60vh;overflow-y:auto;padding:20px;">
-                <div class="preset-prompt-identifier">标识符: <code>${escHtml(template.identifier)}</code></div>
-                <div style="margin-top:12px;font-size:14px;line-height:1.8;white-space:pre-wrap;font-family:var(--font-sans);color:var(--text-primary);background:var(--bg-primary);padding:16px;border-radius:8px;border:1px solid var(--border-color);">${escHtml(content)}</div>
-            </div>
-            <div class="plot-modal-footer">
-                <button class="plot-btn-cancel detail-close">关闭</button>
-            </div>
-        `;
-
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        const close = () => overlay.remove();
-        overlay.querySelector('.plot-modal-close').addEventListener('click', close);
-        overlay.querySelector('.detail-close').addEventListener('click', close);
-        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-        requestAnimationFrame(() => overlay.classList.add('active'));
+        if (template?.identifier) openPromptEditor(template.identifier);
     }
 
     function showPresetPrompts(filename, templates) {
@@ -2538,6 +2785,20 @@
         if (!currentModel || Object.values(defaultModels).includes(currentModel)) {
             $('#ai-model').value = defaultModels[provider] || '';
         }
+
+        // Auto-fill default endpoint for each provider
+        const defaultEndpoints = {
+            anthropic: 'https://api.anthropic.com',
+            openai: 'https://api.openai.com/v1',
+            deepseek: 'https://api.deepseek.com',
+            openrouter: 'https://openrouter.ai/api/v1',
+            ollama: 'http://localhost:11434',
+        };
+        const endpointInput = $('#ai-endpoint');
+        if (endpointInput && !endpointInput.value.trim()) {
+            endpointInput.value = defaultEndpoints[provider] || '';
+        }
+
         updateMemoryBudgetInfo();
     }
 
@@ -3070,7 +3331,7 @@
             specialPrompts: state.specialPrompts || {},
             formatStrings: state.formatStrings || {},
             writingReference: state.writingReference || {},
-            aiConfig: { ...state.aiConfig, apiKey: '' },
+            aiConfig: { ...state.aiConfig, apiKey: '', maxContext: 0 },
             activeSessionId: state.activeSessionId,
         };
     }

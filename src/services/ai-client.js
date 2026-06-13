@@ -303,7 +303,7 @@ async function enrichModelContexts(models, base, headers, provider) {
     if (hasContext) {
         return models.map(m => ({
             id: m.id, name: m.name || m.id,
-            contextLimit: m.context_length || m.max_context_length || m.context_window || m.max_tokens || 0,
+            contextLimit: m.context_length || m.max_context_length || m.context_window || 0,
         }));
     }
 
@@ -339,7 +339,7 @@ async function probeModelContext(base, modelId, headers) {
             const info = await r.json();
             // Check various possible fields
             const ctx = info.context_length || info.max_context_length
-                || info.context_window || info.max_tokens
+                || info.context_window
                 || info.data?.context_length || info.data?.max_context_length
                 || 0;
             if (ctx) return ctx;

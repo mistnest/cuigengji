@@ -126,14 +126,13 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await expect(page.locator('.character-entry')).toContainText('林冬');
 
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
-    const promptDialogs = ['悬疑风格', '保持克制的悬疑语气'];
-    const handlePromptDialog = async (dialog: import('@playwright/test').Dialog) => {
-        await dialog.accept(promptDialogs.shift() || '');
-    };
-    page.on('dialog', handlePromptDialog);
     await page.locator('#btn-add-prompt-template').click();
+    await expect(page.locator('#prompt-editor-overlay')).toHaveClass(/active/);
+    await page.locator('#prompt-editor-name').fill('悬疑风格');
+    await page.locator('#prompt-editor-content').fill('保持克制的悬疑语气');
+    await page.locator('#btn-prompt-editor-save').click();
+    await page.locator('#btn-prompt-editor-done').click();
     await expect(page.locator('.prompt-template-toggle-item')).toContainText('悬疑风格');
-    page.off('dialog', handlePromptDialog);
     await openSettingsPage(page, 'generation');
     await page.locator('#ai-temperature').fill('1.1');
     await page.locator('#btn-settings-done').click();
@@ -239,18 +238,26 @@ test('Prompt 搜索、勾选删除和记忆预算控件有效 @regression', asyn
     await createWorkspace(page);
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
 
-    const promptAnswers = ['动作模板', '增加动作细节', '对白模板', '保持对白自然'];
-    page.on('dialog', async dialog => dialog.accept(promptAnswers.shift() || ''));
-    for (let i = 0; i < 2; i += 1) {
+    const promptData = [
+        { name: '动作模板', content: '增加动作细节' },
+        { name: '对白模板', content: '保持对白自然' },
+    ];
+    for (const d of promptData) {
         await page.locator('#btn-add-prompt-template').click();
+        await expect(page.locator('#prompt-editor-overlay')).toHaveClass(/active/);
+        await page.locator('#prompt-editor-name').fill(d.name);
+        await page.locator('#prompt-editor-content').fill(d.content);
+        await page.locator('#btn-prompt-editor-save').click();
+        await page.locator('#btn-prompt-editor-done').click();
     }
 
     await page.locator('#prompt-template-search').fill('对白');
     await expect(page.locator('.prompt-template-toggle-item:visible')).toHaveCount(1);
     await page.locator('#prompt-template-search').fill('');
+    await page.locator('.prompt-template-toggle-item', { hasText: '动作模板' }).hover();
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('.prompt-template-toggle-item', { hasText: '动作模板' })
-        .locator('.prompt-template-select').check();
-    await page.locator('#btn-delete-selected-prompts').click();
+        .locator('.prompt-delete-btn').click();
     await expect(page.locator('.prompt-template-toggle-item')).toHaveCount(1);
     await expect(page.locator('.prompt-template-toggle-item')).toContainText('对白模板');
 
