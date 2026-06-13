@@ -977,9 +977,9 @@
         if (batchActions) batchActions.addEventListener('click', (e) => {
             const action = e.target.closest('button')?.dataset.action;
             if (!action) return;
-            const checked = nav.querySelectorAll('.prompt-nav-check:checked');
+            const checked = nav.querySelectorAll('.pe-nav-check:checked');
             if (!checked.length) { setStatus('请先勾选模板', 'warn'); return; }
-            const ids = [...checked].map(cb => cb.dataset.tmplId);
+            const ids = [...checked].map(cb => cb.dataset.id);
             if (action === 'delete') {
                 if (!confirm(`删除选中的 ${ids.length} 个模板？`)) return;
                 state.promptTemplates = state.promptTemplates.filter(t => !ids.includes(t.identifier));
@@ -1025,26 +1025,46 @@
     }
 
     function renderPromptNav() {
-        const nav = document.querySelector('#prompt-editor-nav');
-        if (!nav) return;
+        const list = document.getElementById('prompt-editor-nav-list');
+        if (!list) return;
+        const nav = list.closest('#prompt-editor-nav');
         const templates = state.promptTemplates || [];
+        const batchMode = nav?.classList.contains('prompt-editor-nav-batch');
         if (!templates.length) {
-            nav.innerHTML = '<div class="pe-nav-empty">暂无模板，点击 "+" 添加</div>';
+            list.innerHTML = '<div class="pe-nav-empty">暂无模板，点击 "+" 添加</div>';
             return;
         }
-        nav.innerHTML = templates.map(t => {
-            const isPriority = t.role === 'system' || t.isSystemPrompt;
-            const title = escHtml(t.name) + (isPriority ? ' <span class="pe-priority-label">[系统]</span>' : '');
-            return '<div class="pe-nav-item" data-id="' + escHtml(t.identifier) + '">'
-                + '<input type="checkbox" class="pe-nav-check" data-id="' + escHtml(t.identifier) + '" aria-label="选择模板">'
-                + '<span class="pe-nav-title">' + title + '</span>'
-                + '<span class="pe-nav-role">' + escHtml(t.role || 'user') + '</span>'
-                + '</div>';
+        list.innerHTML = templates.map(t => {
+            const enabled = state.enabledTemplates[t.identifier] !== false;
+            const disabledClass = enabled ? '' : ' pe-nav-disabled';
+            let html = '<div class="pe-nav-item' + disabledClass + '" data-id="' + escHtml(t.identifier) + '">';
+            // Batch checkbox (visible only in batch mode)
+            html += '<input type="checkbox" class="pe-nav-check" style="display:' + (batchMode ? 'inline-block' : 'none') + '" data-id="' + escHtml(t.identifier) + '" aria-label="选择模板">';
+            // Enable/disable indicator dot (clickable, visually distinct from batch checkbox)
+            html += '<span class="pe-nav-dot' + (enabled ? ' pe-nav-dot-on' : '') + '" title="' + (enabled ? '已启用，点击禁用' : '已禁用，点击启用') + '">' + (enabled ? '●' : '○') + '</span>';
+            html += '<span class="pe-nav-title">' + escHtml(t.name) + '</span>';
+            html += '</div>';
+            return html;
         }).join('');
         nav.querySelectorAll('.pe-nav-item').forEach(item => {
+            // Dot click → toggle enable/disable
+            const dot = item.querySelector('.pe-nav-dot');
+            if (dot) dot.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = item.dataset.id;
+                const cur = state.enabledTemplates[id] !== false;
+                state.enabledTemplates[id] = !cur;
+                dot.classList.toggle('pe-nav-dot-on', !cur);
+                dot.textContent = !cur ? '●' : '○';
+                dot.title = !cur ? '已启用，点击禁用' : '已禁用，点击启用';
+                item.classList.toggle('pe-nav-disabled', cur);
+                renderPromptTemplates();
+                autoSave();
+            });
+            // Item click → select or batch toggle
             item.addEventListener('click', (e) => {
-                if (e.target.closest('.pe-nav-check')) return;
-                if (nav.classList.contains('batch-mode')) {
+                if (e.target.closest('.pe-nav-check') || e.target.closest('.pe-nav-dot')) return;
+                if (batchMode) {
                     const cb = item.querySelector('.pe-nav-check');
                     if (cb) cb.checked = !cb.checked;
                     return;

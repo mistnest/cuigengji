@@ -2527,8 +2527,8 @@ button:disabled {
     font-size: 11px;
 }
 
-.prompt-delete-btn { display: none; width: 18px; height: 18px; padding: 0; border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; border-radius: 3px; flex-shrink: 0; }
-.prompt-template-toggle-item:hover .prompt-delete-btn { display: inline-flex; align-items: center; justify-content: center; }
+.prompt-delete-btn { display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0; border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 18px; line-height: 20px; text-align: center; border-radius: 4px; }
+.prompt-template-toggle-item:hover .prompt-delete-btn { display: block; }
 .prompt-delete-btn:hover { background: rgba(252,129,129,0.2); color: var(--error); }
 
 /* ==================== Chat Panel — CC Style ==================== */
@@ -3335,8 +3335,26 @@ button:disabled {
 .prompt-editor-nav-tools { display: flex; gap: 4px; margin-bottom: 6px; flex-shrink: 0; }
 .prompt-editor-nav-tools button { flex: 1; font-size: 11px; padding: 4px 8px; margin-bottom: 0; }
 .prompt-editor-batch-actions { display: flex; gap: 5px; margin-bottom: 6px; flex-shrink: 0; }
-.prompt-editor-nav-batch .prompt-nav-check { display: inline-block; }
-.prompt-nav-check { display: none; margin-right: 4px; accent-color: var(--accent-primary); flex-shrink: 0; }
+
+/* Prompt editor nav items */
+.pe-nav-item {
+    display: flex; align-items: center; gap: 4px;
+    width: 100%; padding: 5px 8px; margin-bottom: 2px;
+    border-radius: var(--radius); cursor: pointer;
+    font-size: 12px; transition: background var(--transition-fast);
+}
+.pe-nav-item:hover { background: var(--bg-hover); }
+.pe-nav-item.active { color: #fff; background: var(--accent-primary); }
+.pe-nav-item.pe-nav-disabled { opacity: 0.45; }
+.pe-nav-check { display: none; flex-shrink: 0; accent-color: var(--accent-primary); }
+.pe-nav-dot { flex-shrink: 0; font-size: 10px; cursor: pointer; line-height: 1; user-select: none; }
+.pe-nav-dot-on { color: var(--success); }
+.pe-nav-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-nav-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }
+.pe-nav-role { font-size: 10px; color: var(--text-muted); flex-shrink: 0; text-transform: uppercase; }
+.pe-priority-label { font-size: 10px; color: var(--accent-primary); }
+
+.prompt-editor-nav-batch .pe-nav-check { display: inline-block; }
 .prompt-editor-empty { padding: 40px 20px; text-align: center; color: var(--text-secondary); font-size: 14px; }
 .prompt-editor-form { display: flex; flex-direction: column; gap: 2px; }
 .prompt-editor-content { width: 100%; min-height: 200px; flex: 1; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono); line-height: 1.6; resize: vertical; outline: none; }
@@ -3363,10 +3381,10 @@ button:disabled {
 .prompt-template-toggle-item {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 6px;
-    padding: 8px 10px;
+    padding: 8px 28px 8px 10px;
     border-bottom: 1px solid var(--border-color);
     transition: background var(--transition);
 }
