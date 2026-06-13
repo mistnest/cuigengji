@@ -3217,6 +3217,16 @@
     }
 
     // ==================== Status ====================
+    function showToast(msg, type = 'info', duration = 6000) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+        const el = document.createElement('div');
+        el.className = 'toast-item toast-' + type;
+        el.textContent = msg;
+        container.appendChild(el);
+        setTimeout(() => { if (el.parentNode) el.remove(); }, duration + 600);
+    }
+
     function setStatus(msg, type = 'info') {
         const el = $('#status-message');
         if (!el) return;
