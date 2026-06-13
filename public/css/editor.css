@@ -685,11 +685,22 @@ button:focus-visible {
                 color var(--transition-slow), box-shadow var(--transition-slow);
 }
 
-.ai-hero-badge.connected {
+.ai-hero-badge.badge-ok {
     color: var(--success);
     border-color: rgba(143, 202, 139, 0.5);
     background: rgba(143, 202, 139, 0.1);
     box-shadow: 0 0 8px rgba(143, 202, 139, 0.2);
+}
+.ai-hero-badge.badge-ready {
+    color: #e8a840;
+    border-color: rgba(232, 168, 64, 0.5);
+    background: rgba(232, 168, 64, 0.08);
+    box-shadow: 0 0 6px rgba(232, 168, 64, 0.15);
+}
+.ai-hero-badge.badge-off {
+    color: var(--text-muted);
+    border-color: var(--border-color);
+    background: rgba(40, 35, 31, 0.85);
 }
 
 /* ---- Onboarding Steps ---- */
@@ -930,61 +941,80 @@ button:focus-visible {
 }
 
 .ai-model-row {
-    grid-template-columns: minmax(0, 1fr) 34px;
-}
-
-.ai-model-row #btn-fetch-models {
-    grid-column: 1 / -1;
-}
-
-/* Model list dropdown */
-.ai-model-dropdown {
-    max-height: 200px;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    background: var(--bg-surface);
-    margin-bottom: 6px;
-}
-
-.ai-model-dropdown-item {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-    font-family: var(--font-mono);
+    gap: 6px;
+    align-items: stretch;
 }
 
-.ai-model-dropdown-item:hover {
-    background: var(--accent-glow);
-    color: var(--accent-primary);
+.ai-model-row > .ai-select {
+    flex: 1;
+    min-width: 0;
 }
 
-.ai-icon-btn {
-    width: 30px;
-    height: 30px;
-    margin-bottom: 6px;
-    padding: 0;
+.ai-model-row > .ai-btn-secondary {
+    flex-shrink: 0;
+}
+
+.ai-connect-btn {
+    display: block;
+    width: 100%;
+    text-align: center;
+    margin-top: 6px;
+}
+
+.ai-btn-compact {
+    flex-shrink: 0;
+    padding: 0 8px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
     background: var(--bg-tertiary);
     color: var(--text-secondary);
     cursor: pointer;
+    font-size: 11px;
+    white-space: nowrap;
+    min-width: fit-content;
+}
+.ai-btn-compact:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.model-context-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.model-context-info .ctx-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    background: rgba(91, 60, 196, 0.08);
+    color: #8b7cf0;
+    font-weight: 600;
+    font-size: 11px;
+}
+.ai-icon-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 28px;
+    text-align: center;
 }
 
 .ai-icon-btn:hover {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
 }
-
-.ai-full-btn {
-    margin-top: 2px;
-}
-
 .ai-current-preset {
     display: block;
     min-height: 14px;
@@ -1084,6 +1114,23 @@ button:focus-visible {
 .ai-connection-section.connected summary span {
     color: var(--success);
 }
+
+#prompt-templates-section summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+}
+#prompt-templates-section summary::-webkit-details-marker { display: none; }
+#prompt-templates-section summary::after {
+    content: "展开";
+    color: var(--text-muted);
+    font-size: 11px;
+}
+#prompt-templates-section[open] summary { margin-bottom: 9px; }
+#prompt-templates-section[open] summary::after { content: "收起"; }
 
 .context-info {
     font-size: 12px;

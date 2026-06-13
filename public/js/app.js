@@ -68,15 +68,72 @@
     }
 
     function initWelcomePage() {
-        window._welcomeCreate = createWorkspaceFromWelcome;
-        window._welcomeImport = () => {
+        // Wire welcome modal buttons
+        const btnCreate = document.getElementById('btn-welcome-create');
+        const btnImport = document.getElementById('btn-welcome-import');
+        if (btnCreate) btnCreate.addEventListener('click', showWelcomeCreateModal);
+        if (btnImport) btnImport.addEventListener('click', () => {
             const input = $('#file-input-document');
             if (!input) return;
             input.dataset.welcomeImport = 'true';
             input.value = '';
             input.click();
-        };
+        });
+        bindWelcomeModal();
+        bindPresetSaveModal();
         loadRecentWorkspaces();
+    }
+
+    function showWelcomeCreateModal() {
+        const overlay = document.getElementById('welcome-modal-overlay');
+        const input = document.getElementById('welcome-modal-input');
+        if (!overlay || !input) return;
+        overlay.style.display = '';
+        input.value = '';
+        requestAnimationFrame(() => overlay.classList.add('active'));
+        input.focus();
+    }
+
+    function bindWelcomeModal() {
+        const overlay = document.getElementById('welcome-modal-overlay');
+        const input = document.getElementById('welcome-modal-input');
+        const confirmBtn = document.getElementById('btn-welcome-modal-confirm');
+        const cancelBtn = document.getElementById('btn-welcome-modal-cancel');
+        if (!overlay) return;
+
+        const close = () => {
+            overlay.classList.remove('active');
+            setTimeout(() => { overlay.style.display = 'none'; }, 200);
+        };
+
+        if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+            const title = (input?.value || '').trim();
+            if (!title) { close(); return; }
+            close();
+            await doCreateWorkspace(title);
+        });
+
+        if (cancelBtn) cancelBtn.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        input?.addEventListener('keydown', e => {
+            if (e.key === 'Enter') confirmBtn?.click();
+            if (e.key === 'Escape') cancelBtn?.click();
+        });
+    }
+
+    async function doCreateWorkspace(title) {
+        try {
+            const response = await fetch('/api/novels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            await enterWorkspace(data.id, data.config?.title || title);
+        } catch (err) {
+            alert(`创建失败: ${err.message}`);
+        }
     }
 
     async function loadRecentWorkspaces() {
@@ -114,7 +171,7 @@
 
                 const icon = document.createElement('span');
                 icon.className = 'welcome-novel-icon';
-                icon.textContent = '\u25a1';
+                icon.textContent = '\ud83d\udcd6';
 
                 const info = document.createElement('span');
                 info.className = 'welcome-novel-info';
@@ -124,11 +181,11 @@
                 title.textContent = novel.title || novel.id;
                 info.appendChild(title);
 
-                const timestamp = novel.updated || novel.created;
+                const timestamp = accessed[novel.id] || novel.updated || novel.created;
                 if (timestamp) {
                     const date = document.createElement('span');
                     date.className = 'welcome-novel-path';
-                    date.textContent = new Date(timestamp).toLocaleDateString('zh-CN');
+                    date.textContent = formatRelativeTime(timestamp);
                     info.appendChild(date);
                 }
 
@@ -158,22 +215,8 @@
         }
     }
 
-    async function createWorkspaceFromWelcome() {
-        const title = prompt('\u8bf7\u8f93\u5165\u5de5\u4f5c\u533a\u540d\u79f0');
-        if (!title?.trim()) return;
-
-        try {
-            const response = await fetch('/api/novels', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: title.trim() }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-            await enterWorkspace(data.id, data.config?.title || title.trim());
-        } catch (err) {
-            alert(`\u521b\u5efa\u5931\u8d25: ${err.message}`);
-        }
+    function createWorkspaceFromWelcome() {
+        showWelcomeCreateModal();
     }
 
     async function enterWorkspace(id, title) {
@@ -506,11 +549,6 @@
         }
     }
 
-    function toggleModelList() {
-        const list = $('#ai-model-list-drop');
-        if (list) list.style.display = list.style.display === 'none' ? '' : 'none';
-    }
-
     async function fetchModels() {
         try {
             setStatus('\u6b63\u5728\u83b7\u53d6\u6a21\u578b\u5217\u8868...', 'loading');
@@ -521,30 +559,63 @@
             });
             const data = await response.json();
             const models = Array.isArray(data.models) ? data.models : [];
-            const inner = $('#ai-model-list-inner');
-            if (inner) {
-                inner.replaceChildren();
-                models.forEach(model => {
-                    const id = typeof model === 'string' ? model : model.id || model.name;
-                    if (!id) return;
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.textContent = id;
-                    button.addEventListener('click', () => {
-                        $('#ai-model').value = id;
-                        state.aiConfig.maxContext = Number(model.contextLimit || 0);
-                        onConfigChange();
-                        updateMemoryBudgetInfo();
-                        toggleModelList();
-                    });
-                    inner.appendChild(button);
-                });
-            }
-            if ($('#ai-model-list-drop')) $('#ai-model-list-drop').style.display = '';
+            state._modelCache = models;
+            populateModelSelect(models);
             setStatus(`\u83b7\u53d6\u5230 ${models.length} \u4e2a\u6a21\u578b`, 'success');
         } catch (err) {
             setStatus(`\u83b7\u53d6\u6a21\u578b\u5931\u8d25: ${err.message}`, 'error');
         }
+    }
+
+    function populateModelSelect(models) {
+        const select = $('#ai-model');
+        if (!select) return;
+        select.replaceChildren();
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = '\u2014 \u9009\u62e9\u6a21\u578b \u2014';
+        select.appendChild(emptyOpt);
+        models.forEach(model => {
+            const id = typeof model === 'string' ? model : model.id || model.name;
+            const limit = typeof model === 'object' ? Number(model.contextLimit || 0) : 0;
+            if (!id) return;
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = id;
+            if (limit > 0) opt.dataset.contextLimit = limit;
+            if (id === state.aiConfig.model) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    function onModelSelectChange() {
+        const select = $('#ai-model');
+        if (!select) return;
+        const selModel = select.value;
+        state.aiConfig.model = selModel;
+        const found = (state._modelCache || []).find(m =>
+            (typeof m === 'string' ? m : m.id || m.name) === selModel
+        );
+        if (found && typeof found === 'object') {
+            state.aiConfig.maxContext = Number(found.contextLimit || 0);
+            updateMemoryBudgetInfo();
+        }
+        updateModelContextInfo(selModel);
+        onConfigChange();
+    }
+
+    function updateModelContextInfo(selModel) {
+        const infoEl = document.getElementById('model-context-info');
+        if (!infoEl) return;
+        if (!selModel) { infoEl.style.display = 'none'; return; }
+        const opt = document.querySelector('#ai-model option:checked');
+        const limit = parseInt(opt?.dataset?.contextLimit || 0);
+        if (!limit) { infoEl.style.display = 'none'; return; }
+        const ctxText = limit >= 1000000
+            ? (limit / 1000000).toFixed(1) + 'M'
+            : Math.round(limit / 1000) + 'K';
+        infoEl.innerHTML = '<span>上下文窗口</span><span class="ctx-tag">' + ctxText + ' tokens</span>';
+        infoEl.style.display = 'flex';
     }
 
     function addPromptTemplate() {
@@ -617,6 +688,7 @@
         $('#ai-api-key').value = '';
         $('#ai-endpoint').value = c.endpoint;
         $('#ai-model').value = c.model;
+        updateModelContextInfo(c.model);
         $('#ai-temperature').value = c.temperature;
         $('#ai-max-tokens').value = c.maxTokens;
         $('#ai-top-p').value = c.topP;
@@ -648,24 +720,25 @@
         $('#btn-inspire').addEventListener('click', onInspire);
         $('#btn-infill')?.addEventListener('click', onInfill);
         $('#btn-debug-chat')?.addEventListener('click', showLastPrompt);
-        $('#btn-test-connection').addEventListener('click', onTestConnection);
+        const btnConnect = $('#btn-connect-model');
+        if (btnConnect) btnConnect.addEventListener('click', onTestConnection);
         $('#btn-import-preset').addEventListener('click', () => $('#file-input-preset').click());
         $('#btn-save-preset').addEventListener('click', () => saveCurrentAsPreset());
         $('#btn-export-preset')?.addEventListener('click', exportPreset);
-        $('#btn-show-models')?.addEventListener('click', toggleModelList);
         $('#btn-fetch-models')?.addEventListener('click', fetchModels);
         $('#btn-add-prompt-template')?.addEventListener('click', addPromptTemplate);
         $('#btn-delete-selected-prompts')?.addEventListener('click', deleteSelectedPromptTemplates);
         $('#btn-import-preset-inline')?.addEventListener('click', () => $('#file-input-preset').click());
         $('#prompt-template-search')?.addEventListener('input', filterPromptTemplates);
 
-        // Preset select → apply selected preset
-        $('#ai-preset').addEventListener('change', () => {
+        // Load preset button — apply selected preset
+        const btnLoadPreset = $('#btn-load-preset');
+        if (btnLoadPreset) btnLoadPreset.addEventListener('click', () => {
             const name = $('#ai-preset').value;
-            if (!name) return;
+            if (!name) { setStatus('请先选择一个配置方案', 'warn'); return; }
             const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
             const preset = savedPresets[name];
-            if (!preset) return;
+            if (!preset) { setStatus('配置方案未找到', 'error'); return; }
 
             if (preset.provider) state.aiConfig.provider = preset.provider;
             if (preset.model) state.aiConfig.model = preset.model;
@@ -699,7 +772,7 @@
         $('#ai-provider').addEventListener('change', onProviderChange);
         $('#ai-api-key').addEventListener('input', debounce(onConfigChange, 500));
         $('#ai-endpoint').addEventListener('input', debounce(onConfigChange, 500));
-        $('#ai-model').addEventListener('input', debounce(onConfigChange, 500));
+        $('#ai-model').addEventListener('change', onModelSelectChange);
         $('#ai-temperature').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
         $('#ai-max-tokens').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
         $('#ai-top-p').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
@@ -1882,12 +1955,38 @@
             $('#file-input-preset').value = '';
 
             // Remember as active preset
-            localStorage.setItem('novel-editor-active-preset', file.name);
-            updatePresetNameDisplay(file.name);
+            const presetName = file.name.replace('.json', '');
+            state.presetName = presetName;
+            localStorage.setItem('novel-editor-active-preset', presetName);
+            updatePresetNameDisplay(presetName);
+
+            // Save to localStorage saved presets list
+            const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
+            savedPresets[presetName] = {
+                name: presetName,
+                provider: state.aiConfig.provider,
+                model: state.aiConfig.model,
+                temperature: state.aiConfig.temperature,
+                maxTokens: state.aiConfig.maxTokens,
+                topP: state.aiConfig.topP,
+                topK: state.aiConfig.topK,
+                memoryBudget: state.aiConfig.memoryBudget,
+                maxContext: state.aiConfig.maxContext,
+                frequencyPenalty: state.aiConfig.frequencyPenalty,
+                presencePenalty: state.aiConfig.presencePenalty,
+                stream: state.aiConfig.stream,
+                prefill: state.aiConfig.prefill,
+                savedAt: Date.now(),
+                templates: state.promptTemplates || [],
+                promptOrder: state.promptOrder || [],
+                enabledTemplates: state.enabledTemplates || {},
+            };
+            localStorage.setItem('novel-editor-saved-presets', JSON.stringify(savedPresets));
+            updatePresetSelect();
 
             // Summary
             const promptCount = state.promptTemplates?.length || 0;
-            setStatus(`✅ 导入预设: T=${state.aiConfig.temperature} | Tokens=${state.aiConfig.maxTokens} | Prompt模板=${promptCount}个`, 'success');
+            setStatus(`✅ 已导入并保存预设: ${presetName}`, 'success');
 
             // Show prompt templates in a dialog
             // Render template toggles in AI panel
@@ -2080,7 +2179,7 @@
 
         tree.innerHTML = state.outline.map(n => `
             <div class="tree-item outline-node" data-id="${n.id}">
-                <span class="outline-check">${n.completed ? '✅' : '⬜'}</span>
+                <span class="outline-check">${n.completed ? '✅' : '☐'}</span>
                 <span class="outline-title">${escHtml(n.title)}</span>
                 ${n.description ? `<span class="outline-desc"> — ${escHtml(n.description)}</span>` : ''}
             </div>
@@ -2458,13 +2557,19 @@
         $('#status-connection').textContent = state.isConnected ? '🟢 已连接' : '🔌 未连接';
         $('#status-model').textContent = state.isConnected ? state.aiConfig.model : '—';
         $('#status-save').textContent = state.isDirty ? '未保存' : '已保存';
+        // Connection badge color
         const badge = $('#ai-connection-badge');
-        if (badge) badge.textContent = state.isConnected ? '已连接' : state.hasSavedApiKey ? '已配置' : '未连接';
+        if (badge) {
+            badge.textContent = state.isConnected ? '已连接' : state.hasSavedApiKey ? '已配置' : '未连接';
+            badge.classList.remove('badge-ok', 'badge-ready', 'badge-off');
+            badge.classList.add(state.isConnected ? 'badge-ok' : state.hasSavedApiKey ? 'badge-ready' : 'badge-off');
+        }
+        // Connection summary
         const summary = $('#ai-connection-summary');
         if (summary) {
             summary.textContent = state.isConnected
                 ? `${state.aiConfig.provider} · ${state.aiConfig.model}`
-                : state.hasSavedApiKey ? '密钥已保存，点击测试连接' : '配置模型服务';
+                : state.hasSavedApiKey ? '密钥已保存，点击连接模型' : '配置模型服务';
         }
         const section = $('#ai-connection-section');
         if (section) {
@@ -2472,6 +2577,10 @@
             if (state.isConnected) section.open = false;
             if (!state.hasSavedApiKey && state.aiConfig.provider !== 'ollama') section.open = true;
         }
+        // Onboarding — hide when connected
+        const onboarding = document.getElementById('ai-onboarding');
+        if (onboarding) onboarding.style.display = state.isConnected ? 'none' : '';
+        // Onboarding steps
         $('#onboard-step-1')?.classList.toggle('done', Boolean(state.aiConfig.provider));
         $('#onboard-step-2')?.classList.toggle('done', state.hasSavedApiKey || state.aiConfig.provider === 'ollama');
         $('#onboard-step-3')?.classList.toggle('done', state.isConnected);
@@ -2493,6 +2602,31 @@
         });
     }
 
+    function formatRelativeTime(ts) {
+        const now = new Date();
+        const d = new Date(ts);
+        const diff = now.getTime() - ts;
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const yesterday = today - 86400000;
+        const dayBefore = yesterday - 86400000;
+        const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+        if (diff < 60000) return '刚刚';
+        if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+        if (diff < 7200000) return '1小时前';
+        if (dDay === today) {
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return '今天 ' + hh + ':' + mm;
+        }
+        if (dDay === yesterday) return '昨天';
+        if (dDay === dayBefore) return '前天';
+        if (d.getFullYear() === now.getFullYear()) {
+            return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+        }
+        return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    }
+
     function escHtml(str) {
         if (!str) return '';
         const el = document.createElement('span');
@@ -2503,9 +2637,48 @@
     // ==================== Preset Management ====================
 
     function saveCurrentAsPreset() {
-        const name = prompt('预设名称:', state.presetName || '我的预设');
-        if (!name) return;
+        showPresetSaveModal();
+    }
 
+    function showPresetSaveModal() {
+        const overlay = document.getElementById('preset-save-overlay');
+        const input = document.getElementById('preset-save-input');
+        if (!overlay || !input) return;
+        overlay.style.display = '';
+        input.value = state.presetName || '';
+        requestAnimationFrame(() => overlay.classList.add('active'));
+        input.focus();
+        input.select();
+    }
+
+    function bindPresetSaveModal() {
+        const overlay = document.getElementById('preset-save-overlay');
+        const input = document.getElementById('preset-save-input');
+        const confirmBtn = document.getElementById('btn-preset-save-confirm');
+        const cancelBtn = document.getElementById('btn-preset-save-cancel');
+        if (!overlay) return;
+
+        const close = () => {
+            overlay.classList.remove('active');
+            setTimeout(() => { overlay.style.display = 'none'; }, 200);
+        };
+
+        if (confirmBtn) confirmBtn.addEventListener('click', () => {
+            const name = (input?.value || '').trim();
+            if (!name) { close(); return; }
+            close();
+            doSavePreset(name);
+        });
+
+        if (cancelBtn) cancelBtn.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        input?.addEventListener('keydown', e => {
+            if (e.key === 'Enter') confirmBtn?.click();
+            if (e.key === 'Escape') cancelBtn?.click();
+        });
+    }
+
+    function doSavePreset(name) {
         const preset = {
             name,
             provider: state.aiConfig.provider,
@@ -2526,12 +2699,10 @@
             enabledTemplates: state.enabledTemplates || {},
         };
 
-        // Save to localStorage
         const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
         savedPresets[name] = preset;
         localStorage.setItem('novel-editor-saved-presets', JSON.stringify(savedPresets));
 
-        // Also save to disk
         fetch('/api/save/preset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2543,7 +2714,7 @@
         updatePresetNameDisplay(name);
         updatePresetSelect();
 
-        setStatus(`✅ 预设已保存: ${name}`, 'success');
+        setStatus(`✅ 配置方案已保存: ${name}`, 'success');
     }
 
     function updatePresetNameDisplay(name) {

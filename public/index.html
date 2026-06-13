@@ -21,12 +21,38 @@
             <div class="welcome-section">
                 <div class="welcome-section-title">开始</div>
                 <div class="welcome-start-actions">
-                    <button class="welcome-start-btn" onclick="window._welcomeCreate()">
+                    <button type="button" class="welcome-start-btn" id="btn-welcome-create">
                         <span class="welcome-start-icon">+</span> 新建工作区
                     </button>
-                    <button class="welcome-start-btn" onclick="window._welcomeImport()">
+                    <button type="button" class="welcome-start-btn" id="btn-welcome-import">
                         <span class="welcome-start-icon">→</span> 导入文档
                     </button>
+                </div>
+            </div>
+            <!-- 欢迎页弹窗 -->
+            <div id="welcome-modal-overlay" class="plot-modal-overlay" style="display:none;">
+                <div class="plot-modal" style="max-width:360px;">
+                    <div class="plot-modal-header"><h3>新建工作区</h3></div>
+                    <div class="plot-modal-body" style="padding:16px;">
+                        <input type="text" id="welcome-modal-input" class="ai-input" placeholder="请输入工作区名称" style="width:100%;">
+                    </div>
+                    <div class="plot-modal-footer">
+                        <button type="button" id="btn-welcome-modal-confirm" class="ai-btn-primary">确认</button>
+                        <button type="button" id="btn-welcome-modal-cancel" class="ai-btn-secondary">取消</button>
+                    </div>
+                </div>
+            </div>
+            <!-- 保存预设弹窗 -->
+            <div id="preset-save-overlay" class="plot-modal-overlay" style="display:none;">
+                <div class="plot-modal" style="max-width:360px;">
+                    <div class="plot-modal-header"><h3>保存配置方案</h3></div>
+                    <div class="plot-modal-body" style="padding:16px;">
+                        <input type="text" id="preset-save-input" class="ai-input" placeholder="输入配置方案名称" style="width:100%;">
+                    </div>
+                    <div class="plot-modal-footer">
+                        <button type="button" id="btn-preset-save-confirm" class="ai-btn-primary">保存</button>
+                        <button type="button" id="btn-preset-save-cancel" class="ai-btn-secondary">取消</button>
+                    </div>
                 </div>
             </div>
 
@@ -131,7 +157,7 @@
                         <span class="chat-header-title" id="chat-header-title">聊天</span>
                         <div class="chat-header-right">
                             <div class="chat-history-popover" id="chat-history-popover">
-                                <button class="chat-header-btn" id="btn-history" title="历史会话">□</button>
+                                <button class="chat-header-btn" id="btn-history" title="历史会话">📋</button>
                                 <div class="chat-history-dropdown" id="chat-history-dropdown">
                                     <div class="chat-history-search">
                                         <input type="text" class="chat-history-search-input" id="session-search" placeholder="搜索会话...">
@@ -274,18 +300,6 @@
                             <span>连接设置</span>
                             <small id="ai-connection-summary">配置模型服务</small>
                         </summary>
-                        <label class="ai-field-label" for="ai-preset">配置方案</label>
-                        <select id="ai-preset" class="ai-select">
-                            <option value="">选择已保存的配置</option>
-                        </select>
-                        <div class="ai-config-actions">
-                            <button id="btn-save-preset" class="ai-btn-secondary">保存</button>
-                            <button id="btn-import-preset" class="ai-btn-secondary">导入</button>
-                            <button id="btn-export-preset" class="ai-btn-secondary">导出</button>
-                            <button id="btn-test-connection" class="ai-btn-secondary">测试</button>
-                        </div>
-                        <span id="current-preset-name" class="ai-current-preset"></span>
-
                         <label class="ai-field-label" for="ai-provider">模型服务商</label>
                         <select id="ai-provider" class="ai-select">
                             <optgroup label="海外主流">
@@ -322,11 +336,13 @@
 
                         <label class="ai-field-label" for="ai-model">模型</label>
                         <div class="ai-model-row">
-                            <input type="text" id="ai-model" placeholder="例如 claude-sonnet-4-6" class="ai-input">
-                            <button id="btn-show-models" class="ai-icon-btn" title="展开模型列表">&#9662;</button>
+                            <select id="ai-model" class="ai-select" style="flex:1;min-width:0;">
+                                <option value="">— 先选服务商再刷新模型列表 —</option>
+                            </select>
+                            <button id="btn-fetch-models" class="ai-btn-compact">刷新</button>
                         </div>
-                        <div id="ai-model-list-drop" class="ai-model-dropdown" style="display:none;"><div id="ai-model-list-inner"></div></div>
-                        <button id="btn-fetch-models" class="ai-btn-secondary ai-full-btn">刷新模型列表</button>
+                        <div id="model-context-info" class="model-context-info" style="display:none;"></div>
+                        <button id="btn-connect-model" class="ai-btn-primary ai-connect-btn">连接模型</button>
                     </details>
 
                     <div class="ai-section">
@@ -360,8 +376,25 @@
                         </div>
                     </details>
 
-                    <div class="ai-section" id="prompt-templates-section">
-                        <div class="ai-section-title"><span>Prompt 模板 <span id="prompt-template-count"></span></span><small>控制写作行为和优先级</small></div>
+                    <div class="ai-section" id="preset-section">
+                        <div class="ai-section-title"><span>配置方案</span><small>保存和加载完整配置</small></div>
+                        <label class="ai-field-label" for="ai-preset">已保存的配置</label>
+                        <div class="ai-model-row">
+                            <select id="ai-preset" class="ai-select" style="flex:1;min-width:0;">
+                                <option value="">— 选择已保存的配置 —</option>
+                            </select>
+                            <button id="btn-load-preset" class="ai-icon-btn" title="加载配置">▶</button>
+                        </div>
+                        <span id="current-preset-name" class="ai-current-preset"></span>
+                        <div class="ai-config-actions" style="margin-top:6px;">
+                            <button id="btn-save-preset" class="ai-btn-secondary">保存当前</button>
+                            <button id="btn-import-preset" class="ai-btn-secondary">导入</button>
+                            <button id="btn-export-preset" class="ai-btn-secondary">导出</button>
+                        </div>
+                    </div>
+
+                    <details class="ai-section" id="prompt-templates-section" open>
+                        <summary><span>Prompt 模板 <span id="prompt-template-count"></span></span><small>控制写作行为和优先级</small></summary>
                         <div class="prompt-template-tools">
                             <button id="btn-add-prompt-template" class="ai-btn-secondary">新增</button>
                             <button id="btn-delete-selected-prompts" class="ai-btn-secondary">删除选中</button>
@@ -370,7 +403,7 @@
                         <div id="prompt-templates-list" class="prompt-templates-list">
                             <div class="list-placeholder" style="font-size:11px;padding:8px;">尚未导入 ST 预设<br><button id="btn-import-preset-inline" style="margin-top:6px;font-size:11px;">导入预设</button></div>
                         </div>
-                    </div>
+                    </details>
 
                     <div class="ai-section">
                         <div class="ai-section-title"><span>本次引用的设定</span><small>续写后自动显示</small></div>

@@ -126,7 +126,7 @@ const ChapterTree = (function () {
         el.dataset.chapterId = chapter.id;
         el.draggable = true;
 
-        const icon = chapter.status === 'completed' ? '✓' : chapter.status === 'revised' ? '✎' : '□';
+        const icon = chapter.status === 'completed' ? '✓' : chapter.status === 'revised' ? '✎' : '📄';
         el.innerHTML = `
             <span class="tree-drag-handle" title="拖拽移动">⋮⋮</span>
             <span class="tree-chapter-icon">${icon}</span>
