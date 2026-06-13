@@ -226,14 +226,13 @@
 
                 card.append(icon, info, delBtn);
                 card.addEventListener('click', (e) => {
-                    if (batchMode) {
-                        const cb = card.querySelector('.welcome-batch-check');
-                        if (cb && e.target !== delBtn) { cb.checked = !cb.checked; }
-                        return;
-                    }
+                    if (batchMode) return;
                     if (e.target.closest('.welcome-delete-btn')) return;
                     enterWorkspace(novel.id, novel.title || novel.id);
                 });
+                // In batch mode, only the checkbox toggles selection
+                const cb = card.querySelector('.welcome-batch-check');
+                if (cb) cb.addEventListener('click', (e) => e.stopPropagation());
                 list.appendChild(card);
                 }
 

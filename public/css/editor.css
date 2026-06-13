@@ -4100,7 +4100,7 @@ button:disabled {
 .welcome-novel-card:hover .welcome-delete-btn { display: block; }
 .welcome-delete-btn:hover { background: rgba(252,129,129,0.2); color: var(--error); }
 
-.welcome-batch-check { flex-shrink: 0; accent-color: var(--accent-primary); margin-right: 6px; }
+.welcome-batch-check { flex-shrink: 0; accent-color: var(--accent-primary); margin-right: 8px; width: 16px; height: 16px; cursor: pointer; }
 .welcome-batch-bar { display: flex; gap: 6px; padding: 6px 0; }
 .welcome-batch-bar button { flex: 1; font-size: 11px; }
 .welcome-batch-toggle { display: block; width: 100%; padding: 4px 0; margin-top: 4px;
