@@ -117,14 +117,13 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await page.locator('.wb-save-btn').click();
 
     await page.locator('.sidebar-tab[data-panel="characters"]').click();
-    const characterDialogs = ['林冬', '调查员'];
-    const handleCharacterDialog = async (dialog: import('@playwright/test').Dialog) => {
-        await dialog.accept(characterDialogs.shift() || '');
-    };
-    page.on('dialog', handleCharacterDialog);
     await page.locator('#btn-add-character').click();
+    await expect(page.locator('.character-edit-modal')).toBeVisible();
+    await page.locator('#character-edit-name').fill('林冬');
+    await page.locator('#character-edit-description').fill('调查员');
+    await page.locator('#character-edit-personality').fill('冷静谨慎');
+    await page.locator('.character-edit-save').click();
     await expect(page.locator('.character-entry')).toContainText('林冬');
-    page.off('dialog', handleCharacterDialog);
 
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
     const promptDialogs = ['悬疑风格', '保持克制的悬疑语气'];
@@ -135,6 +134,13 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await page.locator('#btn-add-prompt-template').click();
     await expect(page.locator('.prompt-template-toggle-item')).toContainText('悬疑风格');
     page.off('dialog', handlePromptDialog);
+    await openSettingsPage(page, 'generation');
+    await page.locator('#ai-temperature').fill('1.1');
+    await page.locator('#btn-settings-done').click();
+    await page.locator('#btn-save-preset').click();
+    await page.locator('#preset-save-input').fill('雾港方案');
+    await page.locator('#btn-preset-save-confirm').click();
+    await expect(page.locator('#ai-preset option')).toContainText(['— 选择预设 —', '雾港方案']);
     await page.evaluate(() => window.saveWorkspaceState());
 
     await page.locator('#btn-home').click();
@@ -145,6 +151,10 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await expect(page.locator('.character-entry')).toHaveCount(0);
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
     await expect(page.locator('.prompt-template-toggle-item')).toHaveCount(0);
+    await expect(page.locator('#ai-preset option')).toHaveCount(1);
+    await openSettingsPage(page, 'generation');
+    await expect(page.locator('#ai-temperature')).toHaveValue('0.7');
+    await page.locator('#btn-settings-done').click();
 
     await openRecent(page, first);
     await page.locator('.sidebar-tab[data-panel="worldbook"]').click();
@@ -153,6 +163,9 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await expect(page.locator('.character-entry')).toContainText('林冬');
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
     await expect(page.locator('.prompt-template-toggle-item')).toContainText('悬疑风格');
+    await expect(page.locator('#ai-preset option')).toContainText(['— 选择预设 —', '雾港方案']);
+    await openSettingsPage(page, 'generation');
+    await expect(page.locator('#ai-temperature')).toHaveValue('1.1');
 });
 
 test('角色卡内嵌世界书提取后会保存到项目 @regression', async ({ page }) => {
@@ -266,6 +279,30 @@ test('高频 AI 配置留在右侧，全局设置使用独立弹窗 @regression'
     await expect(page.locator('#ai-temperature')).toBeVisible();
     await page.locator('#btn-settings-done').click();
     await expect(page.locator('#settings-overlay')).not.toHaveClass(/active/);
+});
+
+test('世界书和角色搜索默认收起，并可清空关闭 @regression', async ({ page }) => {
+    await page.goto('/');
+    await createWorkspace(page);
+
+    await page.locator('.sidebar-tab[data-panel="worldbook"]').click();
+    await expect(page.locator('[data-search-panel="worldbook"]')).toBeHidden();
+    await page.locator('#btn-wb-search').click();
+    await expect(page.locator('[data-search-panel="worldbook"]')).toBeVisible();
+    await page.locator('#wb-search').fill('雾港');
+    await page.locator('[data-search-panel="worldbook"] .panel-search-clear').click();
+    await expect(page.locator('#wb-search')).toHaveValue('');
+    await page.locator('[data-search-panel="worldbook"] .panel-search-close').click();
+    await expect(page.locator('[data-search-panel="worldbook"]')).toBeHidden();
+
+    await page.locator('.sidebar-tab[data-panel="characters"]').click();
+    await expect(page.locator('[data-search-panel="character"]')).toBeHidden();
+    await page.locator('#btn-char-search').click();
+    await expect(page.locator('[data-search-panel="character"]')).toBeVisible();
+    await page.locator('#character-search').fill('林冬');
+    await page.locator('#character-search').press('Escape');
+    await expect(page.locator('[data-search-panel="character"]')).toBeHidden();
+    await expect(page.locator('#character-search')).toHaveValue('');
 });
 
 test('通用与编辑器设置会立即生效并持久化 @regression', async ({ page }) => {

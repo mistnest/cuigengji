@@ -222,11 +222,15 @@
 
                 <div id="panel-worldbook" class="sidebar-panel">
                     <div class="panel-toolbar">
-                        <button id="btn-add-wb-entry" title="添加世界书条目">新建</button>
-                        <button id="btn-import-wb" title="导入世界书">导入</button>
-                        <button id="btn-export-wb" title="导出世界书">导出</button>
-                        <button id="btn-wb-search" title="搜索">搜索</button>
-                        <button class="btn-batch-toggle" data-list="worldbook" title="批量管理">批量</button>
+                        <div class="panel-toolbar-main">
+                            <button id="btn-add-wb-entry" title="添加世界书条目">新建</button>
+                            <button id="btn-import-wb" title="导入世界书">导入</button>
+                            <button id="btn-export-wb" title="导出世界书">导出</button>
+                        </div>
+                        <div class="panel-toolbar-tools">
+                            <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">搜索</button>
+                            <button class="btn-batch-toggle panel-tool-btn" data-list="worldbook" title="批量管理">批量</button>
+                        </div>
                     </div>
                     <div class="reference-control" data-reference-kind="worldbook">
                         <div class="reference-title">本次写作使用</div>
@@ -237,8 +241,10 @@
                         </div>
                         <div class="reference-picks" id="worldbook-reference-picks"></div>
                     </div>
-                    <div class="panel-search">
+                    <div class="panel-search" data-search-panel="worldbook" hidden>
                         <input type="text" id="wb-search" placeholder="搜索世界书条目...">
+                        <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
+                        <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="worldbook-list" class="item-list">
                         <div class="list-placeholder">尚未导入世界书<br>点击“导入”添加 ST 世界书文件</div>
@@ -247,11 +253,15 @@
 
                 <div id="panel-characters" class="sidebar-panel">
                     <div class="panel-toolbar">
-                        <button id="btn-add-character" title="添加角色">新角色</button>
-                        <button id="btn-import-character" title="导入角色卡">导入</button>
-                        <button id="btn-export-char" title="导出角色卡">导出</button>
-                        <button id="btn-char-search" title="搜索">搜索</button>
-                        <button class="btn-batch-toggle" data-list="character" title="批量管理">批量</button>
+                        <div class="panel-toolbar-main">
+                            <button id="btn-add-character" title="添加角色">新角色</button>
+                            <button id="btn-import-character" title="导入角色卡">导入</button>
+                            <button id="btn-export-char" title="导出角色卡">导出</button>
+                        </div>
+                        <div class="panel-toolbar-tools">
+                            <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">搜索</button>
+                            <button class="btn-batch-toggle panel-tool-btn" data-list="character" title="批量管理">批量</button>
+                        </div>
                     </div>
                     <div class="reference-control" data-reference-kind="character">
                         <div class="reference-title">本次写作使用</div>
@@ -262,8 +272,10 @@
                         </div>
                         <div class="reference-picks" id="character-reference-picks"></div>
                     </div>
-                    <div class="panel-search">
+                    <div class="panel-search" data-search-panel="character" hidden>
                         <input type="text" id="character-search" placeholder="搜索角色...">
+                        <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
+                        <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="character-list" class="item-list">
                         <div class="list-placeholder">尚未导入角色<br>点击“导入”添加 ST 角色卡</div>

@@ -6,6 +6,18 @@
     'use strict';
 
     // ==================== State ====================
+    const defaultAiConfig = {
+        provider: 'anthropic',
+        apiKey: '',
+        endpoint: '',
+        model: 'claude-sonnet-4-6',
+        temperature: 0.7,
+        maxTokens: 4096,
+        topP: 0.9,
+        memoryBudget: 15,
+        maxContext: 0,
+    };
+
     const state = {
         currentNovel: { id: 'default', title: '未命名小说' },
         currentChapter: null,
@@ -28,18 +40,9 @@
         sessions: [],
         activeSessionId: null,
         activeSessionName: '',
-        presets: [],
-        aiConfig: {
-            provider: 'anthropic',
-            apiKey: '',
-            endpoint: '',
-            model: 'claude-sonnet-4-6',
-            temperature: 0.7,
-            maxTokens: 4096,
-            topP: 0.9,
-            memoryBudget: 15,
-            maxContext: 0,
-        },
+        presets: {},
+        presetName: '',
+        aiConfig: { ...defaultAiConfig },
         appSettings: {
             theme: 'auto',
             editorFont: 'serif',
@@ -63,8 +66,6 @@
         initSettingsDialog();
         loadAppSettings();
         applyAppSettings();
-        loadConfig();
-        loadLastPreset();         // Load the last used preset
         applyConfigToUI();
         loadAiSecretStatus(true);
         bindEvents();
@@ -272,6 +273,7 @@
             applyWorkspaceState(workspaceData);
             state.workspaceLoaded = true;
             localStorage.setItem('novel-editor-last-workspace', id);
+            await loadAiSecretStatus();
 
             state.currentChapter = null;
             refreshChapterTree();
@@ -311,30 +313,17 @@
         loadRecentWorkspaces();
     }
 
-    function cloneData(value) {
-        return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-    }
-
-    function activePresetDefaults() {
-        try {
-            const name = localStorage.getItem('novel-editor-active-preset');
-            const presets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
-            return name && presets[name] ? presets[name] : {};
-        } catch {
-            return {};
-        }
-    }
-
     function resetWorkspaceState() {
-        const preset = activePresetDefaults();
         state.currentChapter = null;
         state.chapters = [];
         state.outline = [];
         state.worldBook = { entries: {} };
         state.characters = [];
-        state.promptTemplates = cloneData(preset.templates || []);
-        state.promptOrder = cloneData(preset.promptOrder || []);
-        state.enabledTemplates = cloneData(preset.enabledTemplates || {});
+        state.presets = {};
+        state.presetName = '';
+        state.promptTemplates = [];
+        state.promptOrder = [];
+        state.enabledTemplates = {};
         state.selectedPromptTemplates = {};
         state.specialPrompts = {};
         state.formatStrings = {};
@@ -349,12 +338,22 @@
         state.activeSessionName = '';
         state.isDirty = false;
         state.workspaceLoaded = false;
+        state.aiConfig = { ...defaultAiConfig };
+        state.isConnected = false;
+        state.hasSavedApiKey = false;
+        updatePresetNameDisplay('');
+        updatePresetSelect();
+        applyConfigToUI();
         if (typeof ChatPanel !== 'undefined') ChatPanel.clearChat();
     }
 
     function applyWorkspaceState(workspace = {}) {
         if (workspace.worldBook?.entries) state.worldBook = workspace.worldBook;
         if (Array.isArray(workspace.characters)) state.characters = workspace.characters;
+        if (workspace.presets && typeof workspace.presets === 'object' && !Array.isArray(workspace.presets)) {
+            state.presets = workspace.presets;
+        }
+        if (typeof workspace.presetName === 'string') state.presetName = workspace.presetName;
         if (Array.isArray(workspace.promptTemplates)) state.promptTemplates = workspace.promptTemplates;
         if (Array.isArray(workspace.promptOrder)) state.promptOrder = workspace.promptOrder;
         if (workspace.enabledTemplates && typeof workspace.enabledTemplates === 'object') {
@@ -372,6 +371,12 @@
                 ...workspace.writingReference,
             };
         }
+        if (workspace.aiConfig && typeof workspace.aiConfig === 'object') {
+            Object.assign(state.aiConfig, workspace.aiConfig, { apiKey: '' });
+        }
+        updatePresetNameDisplay(state.presetName);
+        updatePresetSelect();
+        applyConfigToUI();
     }
 
     async function onDocumentSelected(event) {
@@ -586,11 +591,45 @@
         setStatus('已清除最近工作区排序', 'success');
     }
 
-    function focusSearch(selector) {
+    function togglePanelSearch(selector, buttonSelector, forceOpen) {
         const input = $(selector);
         if (!input) return;
-        input.closest('.panel-search')?.classList.add('active');
-        input.focus();
+        const search = input.closest('.panel-search');
+        const button = $(buttonSelector);
+        if (!search) return;
+        const shouldOpen = forceOpen ?? search.hidden;
+        search.hidden = !shouldOpen;
+        button?.classList.toggle('active', shouldOpen);
+        button?.setAttribute('aria-expanded', String(shouldOpen));
+        if (shouldOpen) {
+            requestAnimationFrame(() => {
+                input.focus();
+                input.select();
+            });
+        } else {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }
+
+    function bindPanelSearch(selector, buttonSelector) {
+        const input = $(selector);
+        const search = input?.closest('.panel-search');
+        if (!input || !search) return;
+        $(buttonSelector)?.addEventListener('click', () => {
+            togglePanelSearch(selector, buttonSelector);
+        });
+        search.querySelector('.panel-search-clear')?.addEventListener('click', () => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        });
+        search.querySelector('.panel-search-close')?.addEventListener('click', () => {
+            togglePanelSearch(selector, buttonSelector, false);
+        });
+        input.addEventListener('keydown', event => {
+            if (event.key === 'Escape') togglePanelSearch(selector, buttonSelector, false);
+        });
     }
 
     function filterRenderedList(listSelector, itemSelector, query) {
@@ -601,13 +640,104 @@
     }
 
     function addCharacter() {
-        const name = prompt('\u89d2\u8272\u540d\u79f0');
-        if (!name?.trim()) return;
-        const description = prompt('\u89d2\u8272\u7b80\u4ecb\uff08\u53ef\u9009\uff09') || '';
-        state.characters.push({ name: name.trim(), description });
-        renderCharacterList();
-        autoSave();
-        setStatus(`\u5df2\u521b\u5efa\u89d2\u8272: ${name.trim()}`, 'success');
+        const overlay = document.createElement('div');
+        overlay.className = 'plot-modal-overlay';
+        const modal = document.createElement('div');
+        modal.className = 'plot-modal char-detail-modal character-edit-modal';
+        modal.innerHTML = `
+            <div class="plot-modal-header">
+                <div>
+                    <h3>新建角色</h3>
+                    <p class="settings-subtitle">先建立基础角色卡，之后可继续导入或补充详细设定。</p>
+                </div>
+                <button type="button" class="plot-modal-close" aria-label="关闭">×</button>
+            </div>
+            <div class="plot-modal-body char-detail-body">
+                <div class="char-field">
+                    <h4>角色名称 <span class="required-mark">*</span></h4>
+                    <input type="text" class="wb-edit-input" id="character-edit-name" placeholder="例如：林冬" maxlength="80">
+                    <div class="field-error" id="character-name-error"></div>
+                </div>
+                <div class="char-field">
+                    <h4>角色简介</h4>
+                    <textarea class="wb-edit-textarea character-edit-short" id="character-edit-description" placeholder="身份、外貌、经历或核心特征"></textarea>
+                </div>
+                <div class="character-edit-grid">
+                    <div class="char-field">
+                        <h4>性格</h4>
+                        <textarea class="wb-edit-textarea character-edit-short" id="character-edit-personality" placeholder="性格特点、行为习惯"></textarea>
+                    </div>
+                    <div class="char-field">
+                        <h4>背景场景</h4>
+                        <textarea class="wb-edit-textarea character-edit-short" id="character-edit-scenario" placeholder="角色所处环境和当前处境"></textarea>
+                    </div>
+                </div>
+                <div class="char-field">
+                    <h4>开场白</h4>
+                    <textarea class="wb-edit-textarea character-edit-short" id="character-edit-first-message" placeholder="可选：角色第一次出场时的台词或动作"></textarea>
+                </div>
+                <div class="char-field">
+                    <h4>标签</h4>
+                    <input type="text" class="wb-edit-input" id="character-edit-tags" placeholder="主角, 调查员, 雾港（逗号分隔）">
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <button type="button" class="plot-btn-cancel character-edit-cancel">取消</button>
+                <button type="button" class="char-btn-extract-book character-edit-save">创建角色</button>
+            </div>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        const nameInput = overlay.querySelector('#character-edit-name');
+        const error = overlay.querySelector('#character-name-error');
+        const close = () => overlay.remove();
+        overlay.querySelector('.plot-modal-close').addEventListener('click', close);
+        overlay.querySelector('.character-edit-cancel').addEventListener('click', close);
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) close();
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') close();
+        });
+        overlay.querySelector('.character-edit-save').addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (!name) {
+                error.textContent = '请输入角色名称';
+                nameInput.focus();
+                return;
+            }
+            const tags = overlay.querySelector('#character-edit-tags').value
+                .split(/[,，]/)
+                .map(tag => tag.trim())
+                .filter(Boolean);
+            state.characters.push({
+                spec: 'chara_card_v3',
+                spec_version: '3.0',
+                data: {
+                    name,
+                    description: overlay.querySelector('#character-edit-description').value.trim(),
+                    personality: overlay.querySelector('#character-edit-personality').value.trim(),
+                    scenario: overlay.querySelector('#character-edit-scenario').value.trim(),
+                    first_mes: overlay.querySelector('#character-edit-first-message').value.trim(),
+                    mes_example: '',
+                    creator_notes: '',
+                    system_prompt: '',
+                    post_history_instructions: '',
+                    tags,
+                    character_book: { entries: [] },
+                },
+            });
+            renderCharacterList();
+            autoSave();
+            close();
+            setStatus(`已创建角色: ${name}`, 'success');
+        });
+
+        requestAnimationFrame(() => {
+            overlay.classList.add('active');
+            nameInput.focus();
+        });
     }
 
     async function showLastPrompt() {
@@ -791,17 +921,10 @@
         }
     }
 
-    function loadConfig() {
-        try {
-            const saved = localStorage.getItem('novel-ai-editor-config');
-            if (saved) Object.assign(state.aiConfig, JSON.parse(saved));
-        } catch (e) { /* ignore */ }
-        state.aiConfig.apiKey = '';
-    }
-
     function saveConfig() {
-        const safeConfig = { ...state.aiConfig, apiKey: '' };
-        localStorage.setItem('novel-ai-editor-config', JSON.stringify(safeConfig));
+        if (!state.workspaceLoaded) return;
+        saveStateToLocal();
+        autoSave();
     }
 
     function applyConfigToUI() {
@@ -872,8 +995,7 @@
         if (btnLoadPreset) btnLoadPreset.addEventListener('click', () => {
             const name = $('#ai-preset').value;
             if (!name) { setStatus('请先选择一个配置方案', 'warn'); return; }
-            const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
-            const preset = savedPresets[name];
+            const preset = state.presets[name];
             if (!preset) { setStatus('配置方案未找到', 'error'); return; }
 
             if (preset.provider) state.aiConfig.provider = preset.provider;
@@ -890,13 +1012,13 @@
             if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
 
             state.presetName = name;
-            localStorage.setItem('novel-editor-active-preset', name);
             localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
             state.isConnected = false;
             applyConfigToUI();
             saveConfig();
             loadAiSecretStatus();
             updatePresetNameDisplay(name);
+            updatePresetSelect();
             renderPromptTemplates();
             autoSave();
             setStatus(`✅ 已加载预设: ${name}`, 'success');
@@ -962,7 +1084,7 @@
         // World book
         $('#btn-import-wb').addEventListener('click', () => $('#file-input-worldbook').click());
         $('#btn-export-wb')?.addEventListener('click', exportWorldBook);
-        $('#btn-wb-search')?.addEventListener('click', () => focusSearch('#wb-search'));
+        bindPanelSearch('#wb-search', '#btn-wb-search');
         $('#wb-search')?.addEventListener('input', () => filterRenderedList('#worldbook-list', '.wb-entry', $('#wb-search').value));
         $('#btn-add-wb-entry').addEventListener('click', () => {
             if (!state.worldBook) state.worldBook = { entries: {} };
@@ -1000,7 +1122,7 @@
         $('#btn-import-character').addEventListener('click', () => $('#file-input-character').click());
         $('#btn-add-character').addEventListener('click', addCharacter);
         $('#btn-export-char')?.addEventListener('click', exportCharacters);
-        $('#btn-char-search')?.addEventListener('click', () => focusSearch('#character-search'));
+        bindPanelSearch('#character-search', '#btn-char-search');
         $('#character-search')?.addEventListener('input', () => filterRenderedList('#character-list', '.character-entry', $('#character-search').value));
         $$('.btn-batch-toggle').forEach(button => {
             button.addEventListener('click', () => toggleBatchMode(button.dataset.list, button));
@@ -2115,12 +2237,9 @@
             // Remember as active preset
             const presetName = file.name.replace('.json', '');
             state.presetName = presetName;
-            localStorage.setItem('novel-editor-active-preset', presetName);
             updatePresetNameDisplay(presetName);
 
-            // Save to localStorage saved presets list
-            const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
-            savedPresets[presetName] = {
+            state.presets[presetName] = {
                 name: presetName,
                 provider: state.aiConfig.provider,
                 model: state.aiConfig.model,
@@ -2139,8 +2258,8 @@
                 promptOrder: state.promptOrder || [],
                 enabledTemplates: state.enabledTemplates || {},
             };
-            localStorage.setItem('novel-editor-saved-presets', JSON.stringify(savedPresets));
             updatePresetSelect();
+            autoSave();
 
             // Summary
             const promptCount = state.promptTemplates?.length || 0;
@@ -2858,6 +2977,7 @@
         const confirmBtn = document.getElementById('btn-preset-save-confirm');
         const cancelBtn = document.getElementById('btn-preset-save-cancel');
         if (!overlay) return;
+        if (overlay.parentElement !== document.body) document.body.appendChild(overlay);
 
         const close = () => {
             overlay.classList.remove('active');
@@ -2900,20 +3020,11 @@
             enabledTemplates: state.enabledTemplates || {},
         };
 
-        const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
-        savedPresets[name] = preset;
-        localStorage.setItem('novel-editor-saved-presets', JSON.stringify(savedPresets));
-
-        fetch('/api/save/preset', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, data: preset }),
-        }).catch(() => {});
-
+        state.presets[name] = preset;
         state.presetName = name;
-        localStorage.setItem('novel-editor-active-preset', name);
         updatePresetNameDisplay(name);
         updatePresetSelect();
+        autoSave();
 
         setStatus(`✅ 配置方案已保存: ${name}`, 'success');
     }
@@ -2926,42 +3037,10 @@
     function updatePresetSelect() {
         const select = document.getElementById('ai-preset');
         if (!select) return;
-        const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
         select.innerHTML = '<option value="">— 选择预设 —</option>';
-        Object.entries(savedPresets).forEach(([name]) => {
+        Object.keys(state.presets || {}).sort((a, b) => a.localeCompare(b, 'zh-CN')).forEach(name => {
             select.innerHTML += `<option value="${escHtml(name)}" ${name === state.presetName ? 'selected' : ''}>${escHtml(name)}</option>`;
         });
-    }
-
-    function loadLastPreset() {
-        const activeName = localStorage.getItem('novel-editor-active-preset');
-        if (!activeName) return;
-        const savedPresets = JSON.parse(localStorage.getItem('novel-editor-saved-presets') || '{}');
-        const preset = savedPresets[activeName];
-        if (!preset) return;
-
-        // Keep the provider/model explicitly chosen by the user.
-        const providerChosen = localStorage.getItem('novel-ai-provider-chosen');
-        if (!providerChosen && preset.provider) state.aiConfig.provider = preset.provider;
-        if (!providerChosen && preset.model) state.aiConfig.model = preset.model;
-        if (preset.temperature !== undefined) state.aiConfig.temperature = preset.temperature;
-        if (preset.maxTokens) state.aiConfig.maxTokens = preset.maxTokens;
-        if (preset.topP !== undefined) state.aiConfig.topP = preset.topP;
-        if (preset.topK !== undefined) state.aiConfig.topK = preset.topK;
-        if (preset.memoryBudget !== undefined) state.aiConfig.memoryBudget = preset.memoryBudget;
-        if (preset.maxContext !== undefined) state.aiConfig.maxContext = preset.maxContext;
-        if (preset.frequencyPenalty !== undefined) state.aiConfig.frequencyPenalty = preset.frequencyPenalty;
-        if (preset.presencePenalty !== undefined) state.aiConfig.presencePenalty = preset.presencePenalty;
-        if (preset.prefill) state.aiConfig.prefill = preset.prefill;
-        if (preset.templates) state.promptTemplates = preset.templates;
-        if (preset.promptOrder) state.promptOrder = preset.promptOrder;
-        if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
-
-        state.presetName = activeName;
-        applyConfigToUI();
-        updatePresetNameDisplay(activeName);
-        updatePresetSelect();
-        renderPromptTemplates();
     }
 
     // Expose state and render functions for chat-panel.js
@@ -2983,12 +3062,15 @@
             characterNames: state.characters
                 .map(character => character.data?.name || character.name || '')
                 .filter(Boolean),
+            presets: state.presets || {},
+            presetName: state.presetName || '',
             promptTemplates: state.promptTemplates || [],
             promptOrder: state.promptOrder || [],
             enabledTemplates: state.enabledTemplates || {},
             specialPrompts: state.specialPrompts || {},
             formatStrings: state.formatStrings || {},
             writingReference: state.writingReference || {},
+            aiConfig: { ...state.aiConfig, apiKey: '' },
             activeSessionId: state.activeSessionId,
         };
     }
