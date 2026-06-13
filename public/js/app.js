@@ -964,15 +964,25 @@
         const batchActions = document.getElementById('prompt-editor-batch-actions');
         const navTools = document.getElementById('prompt-editor-nav-tools');
         if (navTools) navTools.style.display = '';
+        const selectAllBtn = document.getElementById('btn-prompt-select-all');
+        const invertBtn = document.getElementById('btn-prompt-invert');
         if (batchToggle) batchToggle.addEventListener('click', () => {
             const active = !nav.classList.contains('prompt-editor-nav-batch');
             nav.classList.toggle('prompt-editor-nav-batch', active);
             batchToggle.textContent = active ? '完成' : '批量';
             if (batchActions) batchActions.style.display = active ? '' : 'none';
+            if (selectAllBtn) selectAllBtn.style.display = active ? '' : 'none';
+            if (invertBtn) invertBtn.style.display = active ? '' : 'none';
             _promptEditorCurrentId = null;
             document.getElementById('prompt-editor-empty').style.display = '';
             document.getElementById('prompt-editor-form').style.display = 'none';
             renderPromptNav();
+        });
+        if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
+            nav.querySelectorAll('.pe-nav-check').forEach(cb => { cb.checked = true; });
+        });
+        if (invertBtn) invertBtn.addEventListener('click', () => {
+            nav.querySelectorAll('.pe-nav-check').forEach(cb => { cb.checked = !cb.checked; });
         });
         if (batchActions) batchActions.addEventListener('click', (e) => {
             const action = e.target.closest('button')?.dataset.action;
