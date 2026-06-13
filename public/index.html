@@ -542,8 +542,8 @@
                 <div><h3>Prompt 模板编辑器</h3><p class="settings-subtitle">管理写作模板 — 名称、角色和内容均可编辑</p></div>
                 <button type="button" id="btn-prompt-editor-close" class="plot-modal-close">×</button>
             </div>
-            <div class="settings-body">
-                <nav class="settings-nav" id="prompt-editor-nav">
+            <div class="settings-body" id="prompt-editor-body">
+                <nav class="settings-nav" id="prompt-editor-nav" style="width:200px;min-width:140px;max-width:400px;">
                     <div class="prompt-editor-nav-tools" style="display:none;" id="prompt-editor-nav-tools">
                         <button type="button" id="btn-prompt-batch-toggle" class="ai-btn-secondary">批量</button>
                         <button type="button" id="btn-prompt-select-all" class="ai-btn-secondary" style="display:none;">全选</button>
@@ -557,6 +557,7 @@
                     </div>
                     <button type="button" id="btn-prompt-editor-add" class="ai-btn-secondary" style="margin-top:8px;">＋ 新增模板</button>
                 </nav>
+                <div class="prompt-editor-resizer" id="prompt-editor-resizer"></div>
                 <div class="settings-content">
                     <div class="settings-page active" id="prompt-editor-form-area">
                         <div class="prompt-editor-empty" id="prompt-editor-empty"><p>← 从左侧选择一个模板进行编辑</p><p style="color:var(--text-muted);font-size:12px;">或点击「＋ 新增模板」创建</p></div>

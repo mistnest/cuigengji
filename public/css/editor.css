@@ -3328,7 +3328,9 @@ button:disabled {
 /* ==================== Prompt Template Editor ==================== */
 #prompt-templates-section .prompt-template-tools { grid-template-columns: 1fr 1fr; }
 #prompt-editor-nav { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-#prompt-editor-overlay .settings-body { overflow: hidden; }
+#prompt-editor-body { overflow: hidden; grid-template-columns: auto 6px 1fr; }
+.prompt-editor-resizer { width: 6px; cursor: col-resize; background: transparent; flex-shrink: 0; transition: background 0.15s; }
+.prompt-editor-resizer:hover, .prompt-editor-resizer.active { background: var(--accent-primary); }
 .prompt-editor-nav-list { flex: 1; overflow-y: auto; margin-bottom: 4px; min-height: 0; }
 .prompt-editor-nav-list button { width: 100%; justify-content: flex-start; margin-bottom: 3px; padding: 7px 10px; border-color: transparent; background: transparent; text-align: left; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-editor-nav-list button.active { color: #fff; background: var(--accent-primary); border-color: var(--accent-primary); }

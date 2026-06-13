@@ -958,6 +958,34 @@
         document.getElementById('btn-prompt-editor-save')?.addEventListener('click', savePromptFromForm);
         document.getElementById('btn-prompt-editor-delete')?.addEventListener('click', deletePromptFromEditor);
 
+        // Resizer between nav and content
+        const resizer = document.getElementById('prompt-editor-resizer');
+        const navEl = document.getElementById('prompt-editor-nav');
+        if (resizer && navEl) {
+            let startX, startW;
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                startX = e.clientX;
+                startW = navEl.offsetWidth;
+                resizer.classList.add('active');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!resizer.classList.contains('active')) return;
+                const delta = e.clientX - startX;
+                const newW = Math.max(140, Math.min(400, startW + delta));
+                navEl.style.width = newW + 'px';
+            });
+            document.addEventListener('mouseup', () => {
+                if (resizer.classList.contains('active')) {
+                    resizer.classList.remove('active');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        }
+
         // Batch mode
         const nav = document.getElementById('prompt-editor-nav');
         const batchToggle = document.getElementById('btn-prompt-batch-toggle');
@@ -973,9 +1001,6 @@
             if (batchActions) batchActions.style.display = active ? '' : 'none';
             if (selectAllBtn) selectAllBtn.style.display = active ? '' : 'none';
             if (invertBtn) invertBtn.style.display = active ? '' : 'none';
-            _promptEditorCurrentId = null;
-            document.getElementById('prompt-editor-empty').style.display = '';
-            document.getElementById('prompt-editor-form').style.display = 'none';
             renderPromptNav();
         });
         if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
@@ -1071,13 +1096,12 @@
                 renderPromptTemplates();
                 autoSave();
             });
-            // Item click → select or batch toggle
+            // Item click → select for edit (also toggles checkbox in batch mode)
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.pe-nav-check') || e.target.closest('.pe-nav-dot')) return;
                 if (batchMode) {
                     const cb = item.querySelector('.pe-nav-check');
                     if (cb) cb.checked = !cb.checked;
-                    return;
                 }
                 selectPromptForEdit(item.dataset.id);
             });
