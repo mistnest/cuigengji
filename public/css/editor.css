@@ -1,7 +1,6 @@
 /* ==================== Novel AI Editor — Styles ==================== */
 
 /* ---- Font Import ---- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&display=swap');
 
 /* ---- CSS Variables — Clean Studio (明亮简约) ---- */
 :root {
@@ -3497,14 +3496,32 @@ button:disabled {
 
 /* ==================== Settings Modal ==================== */
 .settings-modal {
-    width: min(760px, calc(100vw - 28px));
-    max-height: min(680px, calc(100vh - 28px));
+    width: min(860px, calc(100vw - 28px));
+    max-width: 860px;
+    height: min(720px, calc(100vh - 28px));
+    max-height: min(720px, calc(100vh - 28px));
+}
+
+.settings-modal .plot-modal-header {
+    flex-shrink: 0;
+}
+
+.settings-modal .plot-modal-header > div {
+    flex: 1;
+}
+
+.settings-subtitle {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
 }
 
 .settings-body {
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    min-height: 420px;
+    grid-template-columns: 170px minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
     border-top: 1px solid var(--border-light);
     border-bottom: 1px solid var(--border-light);
 }
@@ -3535,6 +3552,129 @@ button:disabled {
     min-width: 0;
     padding: 14px 16px;
     overflow-y: auto;
+}
+
+.settings-page-heading {
+    margin-bottom: 14px;
+}
+
+.settings-page-heading h4 {
+    margin-bottom: 4px;
+    font-size: 16px;
+}
+
+.settings-page-heading p {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.settings-group {
+    margin-bottom: 22px;
+}
+
+.settings-group h5 {
+    margin-bottom: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.settings-page .ai-section {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.settings-page .ai-section:first-child {
+    padding-top: 0;
+}
+
+.settings-page .ai-section:last-child {
+    border-bottom: 0;
+}
+
+.settings-page .ai-connection-section > summary,
+.settings-page .ai-advanced > summary,
+.settings-page #prompt-templates-section > summary {
+    display: none;
+}
+
+.settings-page .ai-connection-section,
+.settings-page .ai-advanced,
+.settings-page #prompt-templates-section {
+    display: block;
+}
+
+.settings-page .memory-budget-options {
+    max-width: 560px;
+}
+
+.settings-page .prompt-templates-list {
+    max-height: 260px;
+}
+
+.settings-save-note {
+    margin-right: auto;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+#btn-settings-done {
+    width: auto;
+    min-width: 72px;
+    padding: 7px 18px;
+}
+
+.ai-quick-config {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.ai-quick-model {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-quick-detail {
+    overflow: hidden;
+    margin-bottom: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#ai-quick-status.is-connected {
+    color: var(--success);
+}
+
+#ai-quick-status.is-ready {
+    color: var(--warning);
+}
+
+@media (max-width: 680px) {
+    .settings-body {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-nav {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-light);
+    }
+
+    .settings-nav button {
+        width: auto;
+        min-width: max-content;
+        margin-bottom: 0;
+    }
 }
 
 .settings-page {
@@ -3570,6 +3710,10 @@ button:disabled {
 .settings-row select,
 .settings-row input[type="range"] {
     width: 100%;
+}
+
+.settings-row > span:first-child {
+    min-width: 0;
 }
 
 .settings-row b {
@@ -3658,6 +3802,7 @@ button:disabled {
     }
     .settings-nav {
         display: flex;
+        align-items: center;
         gap: 6px;
         overflow-x: auto;
         border-right: none;
@@ -3665,6 +3810,7 @@ button:disabled {
     }
     .settings-nav button {
         width: auto;
+        min-width: max-content;
         margin-bottom: 0;
     }
     .settings-row {

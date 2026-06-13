@@ -134,12 +134,14 @@ test.describe("Chapters API", () => {
 
   test("POST /api/chapters creates chapter @smoke", async ({ request }) => {
     const response = await request.post("/api/chapters", {
-      data: { novelId, title: "第一章", content: "" },
+      data: { novelId, title: "第一章", content: "开篇正文" },
     });
     expect(response.status()).toBe(201);
     const body = await response.json();
     expect(body).toHaveProperty("id");
     expect(body.title).toBe("第一章");
+    expect(body.content).toBe("开篇正文");
+    expect(body.wordCount).toBe(4);
     expect(body.status).toBe("draft");
     chapterId = body.id;
   });
@@ -328,6 +330,33 @@ test.describe("Import API", () => {
     });
     // Should not 500 crash — handles missing file gracefully
     expect(response.status()).not.toBe(500);
+  });
+
+  test("POST /api/import/document preserves the first line when no chapter heading exists @regression", async ({ request }) => {
+    const title = `plain_import_${Date.now()}`;
+    const created = await request.post("/api/novels", { data: { title } });
+    const { id: novelId } = await created.json();
+
+    try {
+      const response = await request.post("/api/import/document", {
+        multipart: {
+          novelId,
+          autoSplit: "true",
+          file: {
+            name: "plain.txt",
+            mimeType: "text/plain",
+            buffer: Buffer.from("First paragraph.\n\nSecond paragraph.", "utf8"),
+          },
+        },
+      });
+      expect(response.ok()).toBeTruthy();
+
+      const body = await response.json();
+      expect(body.chapters).toHaveLength(1);
+      expect(body.chapters[0].content).toBe("First paragraph.\n\nSecond paragraph.");
+    } finally {
+      await request.delete(`/api/novels/${encodeURIComponent(novelId)}`);
+    }
   });
 });
 

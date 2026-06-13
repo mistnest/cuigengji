@@ -7,8 +7,9 @@ function projectName(prefix: string) {
 }
 
 async function createWorkspace(page: Page, name = projectName('Flow')) {
-    page.once('dialog', dialog => dialog.accept(name));
     await page.getByRole('button', { name: /新建工作区/ }).click();
+    await page.locator('#welcome-modal-input').fill(name);
+    await page.locator('#btn-welcome-modal-confirm').click();
     await expect(page.locator('#app-main')).toBeVisible();
     createdProjects.add(name);
     return name;
@@ -20,6 +21,12 @@ async function openRecent(page: Page, name: string) {
     await expect(page.locator('#current-novel-title')).toHaveText(name);
 }
 
+async function openSettingsPage(page: Page, pageName: 'general' | 'editor' | 'ai-service' | 'generation') {
+    await page.locator('#btn-settings').click();
+    await expect(page.locator('#settings-overlay')).toHaveClass(/active/);
+    await page.locator(`.settings-nav [data-settings-page="${pageName}"]`).click();
+}
+
 async function removeProjects(request: APIRequestContext) {
     for (const id of createdProjects) {
         await request.delete(`/api/novels/${encodeURIComponent(id)}`);
@@ -29,6 +36,46 @@ async function removeProjects(request: APIRequestContext) {
 
 test.afterEach(async ({ request }) => {
     await removeProjects(request);
+});
+
+test('空工作区不会伪装成可保存章节 @regression', async ({ page }) => {
+    await page.goto('/');
+    await createWorkspace(page);
+
+    await expect(page.locator('#current-chapter-title')).toHaveText('- 未选择章节');
+    await expect(page.locator('#chapter-editor')).toBeDisabled();
+    await expect(page.locator('#chapter-title-input')).toBeDisabled();
+
+    await page.locator('#btn-save').click();
+    await expect(page.locator('.tree-chapter-item')).toHaveCount(1);
+    await expect(page.locator('#chapter-editor')).toBeEnabled();
+});
+
+test('编辑后切换章节会先保存当前内容 @regression', async ({ page, request }) => {
+    await page.goto('/');
+    const name = await createWorkspace(page);
+
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-title-input').fill('第一章');
+    await page.locator('#chapter-editor').fill('第一版内容');
+    await page.locator('#btn-save').click();
+
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-title-input').fill('第二章');
+    await page.locator('#chapter-editor').fill('第二章内容');
+    await page.locator('#btn-save').click();
+
+    const chapters = page.locator('.tree-chapter-item');
+    await chapters.nth(0).click();
+    await page.locator('#chapter-editor').fill('切换前必须保存的内容');
+    await expect(page.locator('#status-save')).toHaveText('未保存');
+    await chapters.nth(1).click();
+
+    const response = await request.get(`/api/chapters?novelId=${encodeURIComponent(name)}`);
+    const list = await response.json();
+    const first = list.chapters.find((chapter: { title: string }) => chapter.title === '第一章');
+    const saved = await request.get(`/api/chapters/${first.id}?novelId=${encodeURIComponent(name)}`);
+    await expect(saved.json()).resolves.toMatchObject({ content: '切换前必须保存的内容' });
 });
 
 test('章节可保存、拖入卷，并在重新进入后保持位置 @smoke', async ({ page, request }) => {
@@ -197,6 +244,50 @@ test('Prompt 搜索、勾选删除和记忆预算控件有效 @regression', asyn
     await page.locator('.budget-option[data-level="35"]').click();
     await expect(page.locator('.budget-option[data-level="35"]')).toHaveClass(/active/);
     await expect(page.locator('#memory-tokens-estimate')).not.toHaveText('19,000');
+});
+
+test('高频 AI 配置留在右侧，全局设置使用独立弹窗 @regression', async ({ page }) => {
+    await page.goto('/');
+    await createWorkspace(page);
+
+    await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
+    await expect(page.locator('#btn-manage-ai-settings')).toBeVisible();
+    await expect(page.locator('#ai-memory-settings')).toBeVisible();
+    await expect(page.locator('#preset-section')).toBeVisible();
+    await expect(page.locator('#prompt-templates-section')).toBeVisible();
+    await expect(page.locator('#ai-provider')).not.toBeVisible();
+
+    await page.locator('#btn-manage-ai-settings').click();
+    await expect(page.locator('#settings-overlay')).toHaveClass(/active/);
+    await expect(page.locator('#ai-provider')).toBeVisible();
+    await expect(page.locator('[data-settings-content="ai-service"]')).toBeVisible();
+
+    await page.locator('.settings-nav [data-settings-page="generation"]').click();
+    await expect(page.locator('#ai-temperature')).toBeVisible();
+    await page.locator('#btn-settings-done').click();
+    await expect(page.locator('#settings-overlay')).not.toHaveClass(/active/);
+});
+
+test('通用与编辑器设置会立即生效并持久化 @regression', async ({ page }) => {
+    await page.goto('/');
+    await createWorkspace(page);
+    await openSettingsPage(page, 'general');
+
+    await page.locator('#setting-theme').selectOption('dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.locator('#setting-autosave-delay').selectOption('5000');
+
+    await page.locator('.settings-nav [data-settings-page="editor"]').click();
+    await page.locator('#setting-editor-font').selectOption('sans');
+    await page.locator('#setting-editor-font-size').fill('20');
+    await page.locator('#setting-editor-line-height').fill('2.4');
+    await expect(page.locator('#chapter-editor')).toHaveCSS('font-size', '20px');
+    await expect(page.locator('#chapter-editor')).toHaveCSS('line-height', '48px');
+
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('#chapter-editor')).toHaveCSS('font-size', '20px');
+    await page.evaluate(() => localStorage.removeItem('novel-editor-app-settings'));
 });
 
 declare global {

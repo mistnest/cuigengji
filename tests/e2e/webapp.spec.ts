@@ -7,8 +7,9 @@ function projectName(prefix: string) {
 }
 
 async function createWorkspace(page: Page, name = projectName('E2E')) {
-    page.once('dialog', dialog => dialog.accept(name));
     await page.getByRole('button', { name: /新建工作区/ }).click();
+    await page.locator('#welcome-modal-input').fill(name);
+    await page.locator('#btn-welcome-modal-confirm').click();
     await expect(page.locator('#app-main')).toBeVisible();
     await expect(page.locator('#current-novel-title')).toHaveText(name);
     createdProjects.add(name);

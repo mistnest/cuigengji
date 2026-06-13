@@ -204,7 +204,9 @@ router.post('/document', upload.single('file'), async (req, res) => {
                 if (!part) continue;
                 const titleMatch = part.match(/^(第[一二三四五六七八九十百千\d]+[章卷节回篇]|Chapter\s+\d+|CHAPTER\s+\d+).*/);
                 const title = titleMatch ? titleMatch[0].substring(0, 50).replace(/[^\w一-鿿\s]/g, '').trim() : `第${chapters.length + 1}章`;
-                const content = part.replace(/^.+[\r\n]+/, '').trim(); // Remove first line (title) from content
+                const content = titleMatch
+                    ? part.replace(/^.+(?:\r?\n|$)/, '').trim()
+                    : part;
                 const chapter = {
                     id: uuidv4(), novelId, title, content, status: 'draft', wordCount: countWords(content),
                     created: Date.now(), updated: Date.now(), order: chapters.length,

@@ -100,7 +100,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
     try {
-        const { novelId, title, type, volumeId } = req.body;
+        const { novelId, title, type, volumeId, content = '' } = req.body;
         if (!novelId) return res.status(400).json({ error: 'novelId is required' });
 
         const root = chaptersDir(novelId);
@@ -126,9 +126,9 @@ router.post('/', async (req, res) => {
             id: uuidv4(),
             novelId,
             title: title || '未命名章节',
-            content: '',
+            content,
             status: 'draft',
-            wordCount: 0,
+            wordCount: countWords(content),
             created: Date.now(),
             updated: Date.now(),
             notes: '',
@@ -296,4 +296,10 @@ function getUniquePath(targetPath, currentPath) {
         if (!fs.existsSync(candidate)) return candidate;
     }
     return path.join(parsed.dir, `${parsed.name}-${Date.now()}${parsed.ext}`);
+}
+
+function countWords(content = '') {
+    const chinese = (content.match(/[\u3400-\u9fff]/g) || []).length;
+    const other = (content.match(/[a-zA-Z0-9]+/g) || []).length;
+    return chinese + other;
 }

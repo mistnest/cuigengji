@@ -40,6 +40,13 @@
             memoryBudget: 15,
             maxContext: 0,
         },
+        appSettings: {
+            theme: 'auto',
+            editorFont: 'serif',
+            editorFontSize: 17,
+            editorLineHeight: 2,
+            autoSaveDelay: 2000,
+        },
         isDirty: false,
         isConnected: false,
         isGenerating: false,
@@ -53,6 +60,9 @@
     // ==================== Initialization ====================
     function init() {
         initWelcomePage();
+        initSettingsDialog();
+        loadAppSettings();
+        applyAppSettings();
         loadConfig();
         loadLastPreset();         // Load the last used preset
         applyConfigToUI();
@@ -221,6 +231,7 @@
 
     async function enterWorkspace(id, title) {
         if (state.workspaceLoaded && state.currentNovel?.id !== id) {
+            if (state.isDirty && !await onSave({ silent: true })) return;
             await Promise.allSettled([
                 saveWorkspaceState({ silent: true }),
                 saveActiveSession(),
@@ -280,9 +291,7 @@
                 const response = await fetch(`/api/chapters/${encodeURIComponent(firstChapter.id)}?novelId=${encodeURIComponent(id)}`);
                 loadChapter(response.ok ? await response.json() : firstChapter);
             } else {
-                $('#chapter-editor').value = '';
-                $('#chapter-title-input').value = '';
-                updateWordCount();
+                clearChapterEditor();
             }
         } catch (err) {
             setStatus(`\u5de5\u4f5c\u533a\u52a0\u8f7d\u5931\u8d25: ${err.message}`, 'error');
@@ -291,6 +300,7 @@
 
     async function showWelcomePage() {
         if (state.workspaceLoaded) {
+            if (state.isDirty && !await onSave({ silent: true })) return;
             await Promise.allSettled([
                 saveWorkspaceState({ silent: true }),
                 saveActiveSession(),
@@ -459,9 +469,121 @@
         editor.focus();
     }
 
-    function openAiSettings() {
-        const tab = document.querySelector('.sidebar-tab[data-panel="ai-tools"]');
-        if (tab) switchTab(tab);
+    function initSettingsDialog() {
+        const serviceSlot = $('#settings-ai-service-slot');
+        const generationSlot = $('#settings-generation-slot');
+        const connection = $('#ai-connection-section');
+        const generation = $('#ai-generation-settings');
+
+        if (serviceSlot && connection) serviceSlot.appendChild(connection);
+        if (generationSlot && generation) generationSlot.appendChild(generation);
+
+        const overlay = $('#settings-overlay');
+        const close = () => closeSettings();
+        $('#btn-settings-close')?.addEventListener('click', close);
+        $('#btn-settings-done')?.addEventListener('click', close);
+        overlay?.addEventListener('click', event => {
+            if (event.target === overlay) close();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && overlay?.classList.contains('active')) close();
+        });
+        $$('.settings-nav [data-settings-page]').forEach(button => {
+            button.addEventListener('click', () => showSettingsPage(button.dataset.settingsPage));
+        });
+    }
+
+    function showSettingsPage(pageName = 'general') {
+        $$('.settings-nav [data-settings-page]').forEach(button => {
+            button.classList.toggle('active', button.dataset.settingsPage === pageName);
+        });
+        $$('[data-settings-content]').forEach(page => {
+            page.classList.toggle('active', page.dataset.settingsContent === pageName);
+        });
+    }
+
+    function openAiSettings(pageName = 'general') {
+        const overlay = $('#settings-overlay');
+        if (!overlay) return;
+        showSettingsPage(pageName);
+        overlay.style.display = '';
+        requestAnimationFrame(() => overlay.classList.add('active'));
+    }
+
+    function closeSettings() {
+        const overlay = $('#settings-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        setTimeout(() => {
+            if (!overlay.classList.contains('active')) overlay.style.display = 'none';
+        }, 180);
+    }
+
+    function loadAppSettings() {
+        try {
+            const saved = JSON.parse(localStorage.getItem('novel-editor-app-settings') || '{}');
+            Object.assign(state.appSettings, saved);
+        } catch (e) { /* ignore invalid local settings */ }
+    }
+
+    function saveAppSettings() {
+        localStorage.setItem('novel-editor-app-settings', JSON.stringify(state.appSettings));
+    }
+
+    function applyAppSettings() {
+        const settings = state.appSettings;
+        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        const resolvedTheme = settings.theme === 'auto'
+            ? (prefersDark ? 'dark' : 'light')
+            : settings.theme;
+        document.documentElement.dataset.theme = resolvedTheme;
+
+        const fontMap = {
+            serif: 'var(--font-serif)',
+            sans: 'var(--font-sans)',
+            mono: 'var(--font-mono)',
+        };
+        document.documentElement.style.setProperty(
+            '--editor-font-family',
+            fontMap[settings.editorFont] || fontMap.serif
+        );
+        document.documentElement.style.setProperty('--editor-font-size', `${settings.editorFontSize}px`);
+        document.documentElement.style.setProperty('--editor-line-height', settings.editorLineHeight);
+
+        if ($('#setting-theme')) $('#setting-theme').value = settings.theme;
+        if ($('#setting-editor-font')) $('#setting-editor-font').value = settings.editorFont;
+        if ($('#setting-editor-font-size')) $('#setting-editor-font-size').value = settings.editorFontSize;
+        if ($('#setting-editor-line-height')) $('#setting-editor-line-height').value = settings.editorLineHeight;
+        if ($('#setting-autosave-delay')) $('#setting-autosave-delay').value = settings.autoSaveDelay;
+        if ($('#setting-editor-font-size-value')) {
+            $('#setting-editor-font-size-value').textContent = `${settings.editorFontSize}px`;
+        }
+        if ($('#setting-editor-line-height-value')) {
+            $('#setting-editor-line-height-value').textContent = Number(settings.editorLineHeight).toFixed(1);
+        }
+    }
+
+    function updateAppSetting(key, value) {
+        state.appSettings[key] = value;
+        saveAppSettings();
+        applyAppSettings();
+    }
+
+    function resetPanelLayout() {
+        localStorage.removeItem('panel-left-width');
+        localStorage.removeItem('panel-right-width');
+        ['#left-sidebar', '#right-sidebar'].forEach(selector => {
+            const panel = $(selector);
+            if (!panel) return;
+            panel.style.width = '';
+            panel.style.minWidth = '';
+        });
+        setStatus('已重置侧栏宽度', 'success');
+    }
+
+    function clearRecentOrder() {
+        localStorage.removeItem('novel-editor-accessed');
+        setStatus('已清除最近工作区排序', 'success');
     }
 
     function focusSearch(selector) {
@@ -710,7 +832,21 @@
         $('#btn-save').addEventListener('click', onSave);
         $('#btn-export')?.addEventListener('click', exportCurrentChapter);
         $('#btn-import').addEventListener('click', toggleImportMenu);
-        $('#btn-settings').addEventListener('click', openAiSettings);
+        $('#btn-settings').addEventListener('click', () => openAiSettings());
+        $('#btn-manage-ai-settings')?.addEventListener('click', () => openAiSettings('ai-service'));
+        $('#setting-theme')?.addEventListener('change', event => updateAppSetting('theme', event.target.value));
+        $('#setting-editor-font')?.addEventListener('change', event => updateAppSetting('editorFont', event.target.value));
+        $('#setting-editor-font-size')?.addEventListener('input', event => {
+            updateAppSetting('editorFontSize', Number(event.target.value));
+        });
+        $('#setting-editor-line-height')?.addEventListener('input', event => {
+            updateAppSetting('editorLineHeight', Number(event.target.value));
+        });
+        $('#setting-autosave-delay')?.addEventListener('change', event => {
+            updateAppSetting('autoSaveDelay', Number(event.target.value));
+        });
+        $('#btn-reset-panel-layout')?.addEventListener('click', resetPanelLayout);
+        $('#btn-clear-recent-order')?.addEventListener('click', clearRecentOrder);
         $('#btn-editor-bold')?.addEventListener('click', () => wrapEditorSelection('**', '**'));
         $('#btn-editor-italic')?.addEventListener('click', () => wrapEditorSelection('*', '*'));
 
@@ -1108,24 +1244,34 @@
     }
 
     // ==================== Chapter Management ====================
-    async function onAddChapter() {
-        const title = `第${state.chapters.filter(c => c.type !== 'volume').length + 1}章`;
+    async function createChapter({ title, content = '', silent = false } = {}) {
+        const defaultTitle = `第${state.chapters.filter(c => c.type !== 'volume').length + 1}章`;
+        const chapterTitle = title?.trim() || defaultTitle;
         try {
             const resp = await fetch('/api/chapters', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ novelId: state.currentNovel.id, title, content: '' }),
+                body: JSON.stringify({
+                    novelId: state.currentNovel.id,
+                    title: chapterTitle,
+                    content,
+                }),
             });
             const chapter = await resp.json().catch(() => ({}));
             if (!resp.ok) throw new Error(chapter.error || `HTTP ${resp.status}`);
             state.chapters.push(chapter);
-            state.currentChapter = chapter;
-            refreshChapterTree();
             loadChapter(chapter);
-            setStatus(`已创建: ${title}`, 'success');
+            if (!silent) setStatus(`已创建: ${chapterTitle}`, 'success');
+            return chapter;
         } catch (err) {
             setStatus(`创建章节失败: ${err.message}`, 'error');
+            return null;
         }
+    }
+
+    async function onAddChapter() {
+        if (state.isDirty && !await onSave({ silent: true })) return;
+        await createChapter();
     }
 
     async function onAddVolume() {
@@ -1150,28 +1296,30 @@
         }
     }
 
-    function onChapterSelect(e) {
+    async function onChapterSelect(e) {
         const id = e.target.value;
         if (!id) return;
-        const ch = state.chapters.find(c => c.id === id);
-        if (ch) loadChapter(ch);
+        await switchChapter(id);
     }
 
     function loadChapter(chapter) {
         state.currentChapter = chapter;
+        setChapterEditorEnabled(true);
         $('#chapter-editor').value = chapter.content || '';
         $('#chapter-title-input').value = chapter.title || '';
-        $('#current-chapter-title').textContent = `— ${chapter.title || '无标题'}`;
+        $('#current-chapter-title').textContent = `- ${chapter.title || '无标题'}`;
+        state.isDirty = false;
         updateWordCount();
+        updateStatusBar();
         refreshChapterTree();
         setStatus(`已加载: ${chapter.title}`, 'info');
     }
 
-    async function onSave() {
+    async function onSave({ silent = false } = {}) {
         if (!state.currentChapter) {
-            // Create a new chapter if none exists
-            await onAddChapter();
-            return;
+            const content = $('#chapter-editor').value;
+            const title = $('#chapter-title-input').value;
+            return Boolean(await createChapter({ title, content, silent }));
         }
 
         const ch = state.currentChapter;
@@ -1192,11 +1340,13 @@
             if (idx >= 0) state.chapters[idx] = updated;
             state.currentChapter = updated;
             state.isDirty = false;
-            $('#status-save').textContent = '已保存';
+            updateStatusBar();
             refreshChapterTree();
-            setStatus('已保存', 'success');
+            if (!silent) setStatus('已保存', 'success');
+            return true;
         } catch (err) {
             setStatus(`保存失败: ${err.message}`, 'error');
+            return false;
         }
     }
 
@@ -1206,9 +1356,20 @@
         }
     }
 
-    function onChapterTreeSelect(id) {
-        const ch = state.chapters.find(c => c.id === id);
-        if (ch) loadChapter(ch);
+    async function switchChapter(id) {
+        if (!id || id === state.currentChapter?.id) return true;
+        if (state.isDirty && !await onSave({ silent: true })) {
+            refreshChapterTree();
+            return false;
+        }
+        const chapter = state.chapters.find(item => item.id === id);
+        if (!chapter || chapter.type === 'volume') return false;
+        loadChapter(chapter);
+        return true;
+    }
+
+    async function onChapterTreeSelect(id) {
+        await switchChapter(id);
     }
 
     async function onChapterTreeRename(id) {
@@ -1260,10 +1421,7 @@
             }
             state.chapters = state.chapters.filter(chapter => chapter.id !== id);
             if (state.currentChapter?.id === id) {
-                state.currentChapter = null;
-                $('#chapter-editor').value = '';
-                $('#chapter-title-input').value = '';
-                updateWordCount();
+                clearChapterEditor();
             }
             sortChapterState();
             refreshChapterTree();
@@ -2466,11 +2624,35 @@
     function onEditorInput() {
         state.isDirty = true;
         updateWordCount();
+        updateStatusBar();
+        autoSave();
     }
 
     function onTitleChange() {
         state.isDirty = true;
-        $('#current-chapter-title').textContent = `— ${$('#chapter-title-input').value || '无标题'}`;
+        $('#current-chapter-title').textContent = `- ${$('#chapter-title-input').value || '无标题'}`;
+        updateStatusBar();
+        autoSave();
+    }
+
+    function setChapterEditorEnabled(enabled) {
+        $('#chapter-editor').disabled = !enabled;
+        $('#chapter-title-input').disabled = !enabled;
+        $('#chapter-select').disabled = !enabled;
+        $('#btn-editor-bold').disabled = !enabled;
+        $('#btn-editor-italic').disabled = !enabled;
+    }
+
+    function clearChapterEditor() {
+        state.currentChapter = null;
+        state.isDirty = false;
+        $('#chapter-editor').value = '';
+        $('#chapter-title-input').value = '';
+        $('#current-chapter-title').textContent = '- 未选择章节';
+        setChapterEditorEnabled(false);
+        updateWordCount();
+        updateStatusBar();
+        refreshChapterTree();
     }
 
     function updateWordCount() {
@@ -2571,11 +2753,26 @@
                 ? `${state.aiConfig.provider} · ${state.aiConfig.model}`
                 : state.hasSavedApiKey ? '密钥已保存，点击连接模型' : '配置模型服务';
         }
+        const providerLabel = $('#ai-provider option:checked')?.textContent?.trim()
+            || state.aiConfig.provider
+            || '未选择服务商';
+        const quickStatus = $('#ai-quick-status');
+        const quickModel = $('#ai-quick-model');
+        const quickDetail = $('#ai-quick-detail');
+        if (quickStatus) {
+            quickStatus.textContent = state.isConnected ? '已连接' : state.hasSavedApiKey ? '已配置' : '未连接';
+            quickStatus.className = state.isConnected ? 'is-connected' : state.hasSavedApiKey ? 'is-ready' : '';
+        }
+        if (quickModel) quickModel.textContent = providerLabel;
+        if (quickDetail) {
+            quickDetail.textContent = state.aiConfig.model
+                ? `${state.aiConfig.model} · 记忆预算 ${state.aiConfig.memoryBudget || 15}%`
+                : '尚未选择可用模型';
+        }
         const section = $('#ai-connection-section');
         if (section) {
             section.classList.toggle('connected', state.isConnected);
-            if (state.isConnected) section.open = false;
-            if (!state.hasSavedApiKey && state.aiConfig.provider !== 'ollama') section.open = true;
+            section.open = true;
         }
         // Onboarding — hide when connected
         const onboarding = document.getElementById('ai-onboarding');
@@ -2589,7 +2786,11 @@
     // ==================== Utils ====================
     function debounce(fn, delay) {
         let t;
-        return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
+        return function (...args) {
+            clearTimeout(t);
+            const wait = typeof delay === 'function' ? delay() : delay;
+            t = setTimeout(() => fn.apply(this, args), wait);
+        };
     }
 
     /** Read file as text using FileReader (more compatible than file.text()) */
@@ -2970,6 +3171,18 @@
 
     function persistBeforeUnload() {
         if (!state.workspaceLoaded || !state.currentNovel?.id) return;
+        if (state.isDirty && state.currentChapter?.id) {
+            fetch(`/api/chapters/${encodeURIComponent(state.currentChapter.id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    novelId: state.currentNovel.id,
+                    title: $('#chapter-title-input').value || state.currentChapter.title,
+                    content: $('#chapter-editor').value,
+                }),
+                keepalive: true,
+            }).catch(() => {});
+        }
         const workspaceUrl = `/api/save/workspace/${encodeURIComponent(state.currentNovel.id)}`;
         fetch(workspaceUrl, {
             method: 'POST',
@@ -2995,10 +3208,11 @@
     // Debounced auto-save (fires 2s after last edit)
     const autoSave = debounce(async () => {
         saveStateToLocal();
+        if (state.isDirty && !await onSave({ silent: true })) return;
         await saveWorkspaceState({ silent: true }).catch(() => {});
         $('#status-save').textContent = '已自动保存';
         setTimeout(() => { if ($('#status-save')) $('#status-save').textContent = '已保存'; }, 2000);
-    }, 2000);
+    }, () => state.appSettings.autoSaveDelay);
 
     // Expose autoSave for manual triggers
     window.autoSaveEditor = autoSave;

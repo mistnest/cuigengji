@@ -4,6 +4,15 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 
+const testPort = process.env.TEST_PORT || "8765";
+const testDataRoot = process.env.TEST_DATA_ROOT;
+const baseURL = `http://127.0.0.1:${testPort}`;
+const serverCommand = [
+  "node src/server.js",
+  `--port ${testPort}`,
+  testDataRoot ? `--dataRoot "${testDataRoot}"` : "",
+].filter(Boolean).join(" ");
+
 export default defineConfig({
   testDir: "./tests",
   timeout: 30000,
@@ -19,7 +28,7 @@ export default defineConfig({
   ],
   use: {
     // 催更姬服务器地址
-    baseURL: "http://127.0.0.1:8765",
+    baseURL,
     // 失败时捕获 trace
     trace: "on-first-retry",
     // 仅失败时截图
@@ -35,8 +44,8 @@ export default defineConfig({
   ],
   // 自动启动服务器
   webServer: {
-    command: "node src/server.js",
-    url: "http://127.0.0.1:8765/api/ping",
+    command: serverCommand,
+    url: `${baseURL}/api/ping`,
     reuseExistingServer: !process.env.CI,
     timeout: 10000,
   },

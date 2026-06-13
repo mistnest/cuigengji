@@ -75,7 +75,7 @@
             </div>
             <div class="toolbar-center">
                 <span id="current-novel-title" class="novel-title">未命名小说</span>
-                <span id="current-chapter-title" class="chapter-title">- 第一章</span>
+                <span id="current-chapter-title" class="chapter-title">- 未选择章节</span>
             </div>
             <div class="toolbar-right">
                 <button id="btn-import" title="导入资料或文档">导入</button>
@@ -295,6 +295,13 @@
                         </div>
                     </div>
 
+                    <div class="ai-section ai-quick-config">
+                        <div class="ai-section-title"><span>当前配置</span><small id="ai-quick-status">未连接</small></div>
+                        <div class="ai-quick-model" id="ai-quick-model">Claude (Anthropic)</div>
+                        <div class="ai-quick-detail" id="ai-quick-detail">尚未选择可用模型</div>
+                    <button id="btn-manage-ai-settings" class="ai-btn-secondary">管理 AI 服务</button>
+                    </div>
+
                     <details class="ai-section ai-connection-section" id="ai-connection-section" open>
                         <summary>
                             <span>连接设置</span>
@@ -345,7 +352,7 @@
                         <button id="btn-connect-model" class="ai-btn-primary ai-connect-btn">连接模型</button>
                     </details>
 
-                    <div class="ai-section">
+                    <div class="ai-section" id="ai-memory-settings">
                         <div class="ai-section-title">
                             <span>设定记忆预算</span>
                             <span class="info-tooltip" data-tooltip="控制世界书、角色卡和大纲占用多少上下文。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">预算越高，AI 越容易遵守设定；预算越低，留给正文和对话的空间越多。</span></span>
@@ -360,7 +367,7 @@
                         <div class="memory-budget-info">约 <span id="memory-tokens-estimate">19,000</span> tokens / 模型上限 <span id="context-total">128K</span></div>
                     </div>
 
-                    <details class="ai-section ai-advanced">
+                    <details class="ai-section ai-advanced" id="ai-generation-settings" open>
                         <summary><span>高级参数</span><small>普通用户通常不用修改</small></summary>
                         <div class="ai-control-row">
                             <div><label>创造性 (Temperature) <span id="temp-value">0.7</span></label><p>越高越有变化，越低越稳定。小说通常 0.7-1.1。</p></div>
@@ -425,6 +432,104 @@
             <span id="status-words">字数: 0</span>
             <span id="status-save">已保存</span>
         </footer>
+    </div>
+
+    <div id="settings-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div class="plot-modal-header">
+                <div>
+                    <h3 id="settings-title">设置</h3>
+                    <p class="settings-subtitle">管理界面、编辑器、工作区和 AI 服务</p>
+                </div>
+                <button type="button" id="btn-settings-close" class="plot-modal-close" aria-label="关闭设置">×</button>
+            </div>
+            <div class="settings-body">
+                <nav class="settings-nav" aria-label="设置分类">
+                    <button type="button" class="active" data-settings-page="general">通用</button>
+                    <button type="button" data-settings-page="editor">编辑器</button>
+                    <button type="button" data-settings-page="ai-service">AI 服务</button>
+                    <button type="button" data-settings-page="generation">生成参数</button>
+                </nav>
+                <div class="settings-content">
+                    <section class="settings-page active" data-settings-content="general">
+                        <div class="settings-page-heading">
+                            <h4>通用</h4>
+                            <p>调整应用外观和工作区行为。</p>
+                        </div>
+                        <div class="settings-group">
+                            <h5>外观</h5>
+                            <label class="settings-row" for="setting-theme">
+                                <span><strong>界面主题</strong><span>跟随系统，或固定使用浅色、深色主题。</span></span>
+                                <select id="setting-theme" class="ai-select">
+                                    <option value="auto">跟随系统</option>
+                                    <option value="light">浅色</option>
+                                    <option value="dark">深色</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="settings-group">
+                            <h5>保存与工作区</h5>
+                            <label class="settings-row" for="setting-autosave-delay">
+                                <span><strong>自动保存等待</strong><span>停止输入多久后自动保存当前章节。</span></span>
+                                <select id="setting-autosave-delay" class="ai-select">
+                                    <option value="1000">1 秒</option>
+                                    <option value="2000">2 秒</option>
+                                    <option value="5000">5 秒</option>
+                                </select>
+                            </label>
+                            <div class="settings-actions">
+                                <button type="button" id="btn-reset-panel-layout" class="ai-btn-secondary">重置侧栏宽度</button>
+                                <button type="button" id="btn-clear-recent-order" class="ai-btn-secondary">清除最近排序</button>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="settings-page" data-settings-content="editor">
+                        <div class="settings-page-heading">
+                            <h4>编辑器</h4>
+                            <p>调整正文阅读与输入体验，修改会立即生效。</p>
+                        </div>
+                        <div class="settings-group">
+                            <label class="settings-row" for="setting-editor-font">
+                                <span><strong>正文字体</strong><span>选择更适合长篇阅读或快速输入的字体。</span></span>
+                                <select id="setting-editor-font" class="ai-select">
+                                    <option value="serif">衬线体</option>
+                                    <option value="sans">无衬线体</option>
+                                    <option value="mono">等宽字体</option>
+                                </select>
+                            </label>
+                            <label class="settings-row" for="setting-editor-font-size">
+                                <span><strong>正文字号</strong><span>调整章节正文的显示大小。</span></span>
+                                <input id="setting-editor-font-size" type="range" min="14" max="24" step="1">
+                                <b id="setting-editor-font-size-value">17px</b>
+                            </label>
+                            <label class="settings-row" for="setting-editor-line-height">
+                                <span><strong>正文行距</strong><span>较宽行距适合校阅，较紧行距适合浏览。</span></span>
+                                <input id="setting-editor-line-height" type="range" min="1.5" max="2.6" step="0.1">
+                                <b id="setting-editor-line-height-value">2.0</b>
+                            </label>
+                        </div>
+                    </section>
+                    <section class="settings-page" data-settings-content="ai-service">
+                        <div class="settings-page-heading">
+                            <h4>AI 服务</h4>
+                            <p>配置服务商、密钥、接口地址和模型连接。</p>
+                        </div>
+                        <div id="settings-ai-service-slot"></div>
+                    </section>
+                    <section class="settings-page" data-settings-content="generation">
+                        <div class="settings-page-heading">
+                            <h4>生成参数</h4>
+                            <p>控制模型的创造性、输出长度和候选范围。</p>
+                        </div>
+                        <div id="settings-generation-slot"></div>
+                    </section>
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note">修改会自动保存到本机</span>
+                <button type="button" id="btn-settings-done" class="ai-btn-primary">完成</button>
+            </div>
+        </div>
     </div>
 
     <input type="file" id="file-input-worldbook" accept=".json" style="display:none">
