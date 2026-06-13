@@ -157,7 +157,7 @@
             const response = await fetch('/api/novels');
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            const novels = Array.isArray(data.novels) ? data.novels : [];
+            let novels = Array.isArray(data.novels) ? data.novels : [];
             const accessed = JSON.parse(localStorage.getItem('novel-editor-accessed') || '{}');
             novels.sort((a, b) => {
                 const aTime = accessed[a.id] || a.updated || a.created || 0;
@@ -174,13 +174,22 @@
                 return;
             }
 
+            let batchMode = false;
             const renderCards = (expanded) => {
                 list.replaceChildren();
                 const visible = expanded ? novels : novels.slice(0, 10);
                 for (const novel of visible) {
-                const card = document.createElement('button');
-                card.type = 'button';
+                const card = document.createElement('div');
                 card.className = 'welcome-novel-card';
+                card.dataset.novelId = novel.id;
+
+                if (batchMode) {
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'welcome-batch-check';
+                    cb.dataset.novelId = novel.id;
+                    card.appendChild(cb);
+                }
 
                 const icon = document.createElement('span');
                 icon.className = 'welcome-novel-icon';
@@ -202,9 +211,66 @@
                     info.appendChild(date);
                 }
 
-                card.append(icon, info);
-                card.addEventListener('click', () => enterWorkspace(novel.id, novel.title || novel.id));
+                const delBtn = document.createElement('button');
+                delBtn.className = 'welcome-delete-btn';
+                delBtn.textContent = '\u00d7';
+                delBtn.title = '\u5220\u9664\u9879\u76ee';
+                delBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`\u5220\u9664\u201c${novel.title || novel.id}\u201d\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
+                    await fetch(`/api/novels/${encodeURIComponent(novel.id)}`, { method: 'DELETE' });
+                    delete accessed[novel.id];
+                    novels.splice(novels.indexOf(novel), 1);
+                    renderCards(expanded);
+                });
+
+                card.append(icon, info, delBtn);
+                card.addEventListener('click', (e) => {
+                    if (batchMode) {
+                        const cb = card.querySelector('.welcome-batch-check');
+                        if (cb && e.target !== delBtn) { cb.checked = !cb.checked; }
+                        return;
+                    }
+                    if (e.target.closest('.welcome-delete-btn')) return;
+                    enterWorkspace(novel.id, novel.title || novel.id);
+                });
                 list.appendChild(card);
+                }
+
+                // Batch actions bar
+                const existingBar = list.querySelector('.welcome-batch-bar');
+                if (existingBar) existingBar.remove();
+                if (batchMode) {
+                    const bar = document.createElement('div');
+                    bar.className = 'welcome-batch-bar';
+                    bar.innerHTML = '<button id="btn-welcome-batch-delete" class="ai-btn-secondary" style="color:var(--error);border-color:rgba(229,72,77,0.4);">\u5220\u9664\u9009\u4e2d</button>';
+                    bar.querySelector('button').addEventListener('click', async () => {
+                        const checked = list.querySelectorAll('.welcome-batch-check:checked');
+                        if (!checked.length) { setStatus('\u8bf7\u5148\u52fe\u9009\u9879\u76ee', 'warn'); return; }
+                        const ids = [...checked].map(cb => cb.dataset.novelId);
+                        if (!confirm(`\u5220\u9664\u9009\u4e2d\u7684 ${ids.length} \u4e2a\u9879\u76ee\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
+                        for (const id of ids) {
+                            await fetch(`/api/novels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                            delete accessed[id];
+                        }
+                        novels = novels.filter(n => !ids.includes(n.id));
+                        renderCards(expanded);
+                    });
+                    list.appendChild(bar);
+                }
+
+                // Batch toggle button
+                const existingToggle = list.querySelector('.welcome-batch-toggle');
+                if (existingToggle) existingToggle.remove();
+                if (novels.length > 0) {
+                    const bt = document.createElement('button');
+                    bt.className = 'welcome-batch-toggle';
+                    bt.textContent = batchMode ? '\u5b8c\u6210' : '\u6279\u91cf';
+                    bt.addEventListener('click', () => {
+                        batchMode = !batchMode;
+                        renderCards(expanded);
+                    });
+                    list.appendChild(bt);
                 }
 
                 if (novels.length > 10) {
