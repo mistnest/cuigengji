@@ -251,7 +251,7 @@ export class MemoryManager {
      * @param {string} context - 上下文
      * @returns {object} { newCharacters, newWorldEntries, summary }
      */
-    autoExtract(generatedText, context) {
+    autoExtract(generatedText, _context) {
         const extracted = {
             newCharacters: [],
             newWorldEntries: [],

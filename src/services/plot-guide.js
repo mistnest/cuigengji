@@ -4,7 +4,6 @@
  */
 
 import { buildPlotPrompt, buildInspirePrompt } from './prompt-builder.js';
-import { estimateTokens, getModelContext } from './context-manager.js';
 
 /**
  * @typedef {object} PlotCandidate

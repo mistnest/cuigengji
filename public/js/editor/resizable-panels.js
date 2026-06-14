@@ -76,3 +76,4 @@ const ResizablePanels = (function () {
 
     return { init };
 })();
+window.ResizablePanels = ResizablePanels;

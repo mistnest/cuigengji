@@ -223,7 +223,7 @@ export class AuthorProfile {
 
     // ==================== Index Management ====================
 
-    _updateIndex(name, description, type) {
+    _updateIndex(name, description, _type) {
         const indexPath = path.join(MEMORY_DIR, 'MEMORY.md');
         let content = fs.readFileSync(indexPath, 'utf8');
 
@@ -290,7 +290,7 @@ export class AuthorProfile {
     /**
      * 将作者档案格式化为可注入 prompt 的文本
      */
-    formatForPrompt(includeMemories = true, maxMemoryTokens = 1500) {
+    formatForPrompt(includeMemories = true, _maxMemoryTokens = 1500) {
         const parts = [];
 
         // AUTHOR.md
@@ -325,12 +325,10 @@ export class AuthorProfile {
 
     _parseMemory(raw) {
         const lines = raw.split('\n');
-        let inFrontmatter = false;
         let frontmatterEnd = 0;
         const meta = {};
 
         if (lines[0] === '---') {
-            inFrontmatter = true;
             for (let i = 1; i < lines.length; i++) {
                 if (lines[i] === '---') {
                     frontmatterEnd = i;

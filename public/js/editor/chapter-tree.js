@@ -260,3 +260,4 @@ const ChapterTree = (function () {
         getCurrentId: () => state.currentChapterId,
     };
 })();
+window.ChapterTree = ChapterTree;

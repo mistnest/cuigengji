@@ -2,10 +2,6 @@
  * Novel AI Editor — Prompt Builder
  * 将小说创作上下文组装为 AI prompt
  */
-import { getDataRoot } from '../config.js';
-import path from 'node:path';
-import fs from 'node:fs';
-
 /**
  * 构建小说续写的完整 prompt
  * @param {object} params

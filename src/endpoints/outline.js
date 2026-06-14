@@ -1,172 +1,107 @@
-/**
- * Novel AI Editor — Outline API
- * 大纲 CRUD 操作
- */
 import express from 'express';
-import path from 'node:path';
-import fs from 'node:fs';
-import sanitize from 'sanitize-filename';
 import { v4 as uuidv4 } from 'uuid';
-
-import { getDataRoot } from '../config.js';
+import { ApiError, asyncRoute, requireString } from '../lib/http.js';
+import { readJson, updateJson } from '../lib/json-store.js';
+import { projectFile } from '../lib/project-paths.js';
 
 export const router = express.Router();
 
-function getUserDataDir() {
-    return getDataRoot();
-}
+router.get('/', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.query.novelId, 'novelId', { maxLength: 100 });
+    res.json(await readJson(outlinePath(novelId), { defaultValue: { nodes: [] } }));
+}));
 
-function getOutlinePath(novelId) {
-    return path.join(getUserDataDir(), 'novels', sanitize(novelId), 'outline.json');
-}
+router.post('/', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    const node = {
+        id: uuidv4(),
+        novelId,
+        parentId: req.body.parentId || '',
+        title: req.body.title || '未命名节点',
+        description: req.body.description || '',
+        type: req.body.type || 'plot',
+        chapterId: req.body.chapterId || '',
+        order: 0,
+        completed: false,
+        children: [],
+        created: Date.now(),
+        updated: Date.now(),
+    };
+    await updateJson(outlinePath(novelId), outline => {
+        const nodes = Array.isArray(outline.nodes) ? outline.nodes : [];
+        node.order = nodes.length;
+        return { ...outline, nodes: [...nodes, node] };
+    }, { defaultValue: { nodes: [] } });
+    res.status(201).json(node);
+}));
 
-// GET /api/outline?novelId=xxx — Get full outline tree
-router.get('/', async (req, res) => {
-    try {
-        const { novelId } = req.query;
-        if (!novelId) return res.status(400).json({ error: 'novelId is required' });
-
-        const outlinePath = getOutlinePath(novelId);
-        if (!fs.existsSync(outlinePath)) {
-            return res.json({ nodes: [] });
-        }
-
-        const data = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-        res.json(data);
-    } catch (err) {
-        console.error('[Outline] Get error:', err);
-        res.status(500).json({ error: err.message });
+router.put('/reorder', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    if (!Array.isArray(req.body.nodeIds)) {
+        throw new ApiError(400, 'nodeIds must be an array', 'VALIDATION_ERROR');
     }
-});
-
-// POST /api/outline — Create a new outline node
-router.post('/', async (req, res) => {
-    try {
-        const { novelId, parentId, title, description, type, chapterId } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId is required' });
-
-        const outlinePath = getOutlinePath(novelId);
-        const outlineDir = path.dirname(outlinePath);
-        fs.mkdirSync(outlineDir, { recursive: true });
-
-        let outline = { nodes: [] };
-        if (fs.existsSync(outlinePath)) {
-            outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-        }
-
-        const node = {
-            id: uuidv4(),
-            novelId,
-            parentId: parentId || '',
-            title: title || '未命名节点',
-            description: description || '',
-            type: type || 'plot',
-            chapterId: chapterId || '',
-            order: outline.nodes.length,
-            completed: false,
-            children: [],
-            created: Date.now(),
-            updated: Date.now(),
-        };
-
-        outline.nodes.push(node);
-        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
-
-        res.status(201).json(node);
-    } catch (err) {
-        console.error('[Outline] Create error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// PUT /api/outline/reorder — Reorder outline nodes
-router.put('/reorder', async (req, res) => {
-    try {
-        const { novelId, nodeIds } = req.body;  // nodeIds in new order
-        if (!novelId || !Array.isArray(nodeIds)) {
-            return res.status(400).json({ error: 'novelId and nodeIds array are required' });
-        }
-
-        const outlinePath = getOutlinePath(novelId);
-        if (!fs.existsSync(outlinePath)) return res.status(404).json({ error: 'Outline not found' });
-
-        const outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-
-        nodeIds.forEach((id, index) => {
-            const node = outline.nodes.find(n => n.id === id);
+    await updateExistingOutline(novelId, outline => {
+        req.body.nodeIds.forEach((id, index) => {
+            const node = outline.nodes.find(item => item.id === id);
             if (node) node.order = index;
         });
+        return outline;
+    });
+    res.json({ success: true });
+}));
 
-        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
-        res.json({ success: true });
-    } catch (err) {
-        console.error('[Outline] Reorder error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// PUT /api/outline/:id — Update outline node
-router.put('/:id', async (req, res) => {
-    try {
-        const { novelId, title, description, type, completed, parentId, order, chapterId } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId is required' });
-
-        const outlinePath = getOutlinePath(novelId);
-        if (!fs.existsSync(outlinePath)) return res.status(404).json({ error: 'Outline not found' });
-
-        const outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-        const node = outline.nodes.find(n => n.id === req.params.id);
-        if (!node) return res.status(404).json({ error: 'Node not found' });
-
-        if (title !== undefined) node.title = title;
-        if (description !== undefined) node.description = description;
-        if (type !== undefined) node.type = type;
-        if (completed !== undefined) node.completed = completed;
-        if (parentId !== undefined) node.parentId = parentId;
-        if (order !== undefined) node.order = order;
-        if (chapterId !== undefined) node.chapterId = chapterId;
-        node.updated = Date.now();
-
-        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
-        res.json(node);
-    } catch (err) {
-        console.error('[Outline] Update error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// DELETE /api/outline/:id — Delete outline node
-router.delete('/:id', async (req, res) => {
-    try {
-        const { novelId } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId is required' });
-
-        const outlinePath = getOutlinePath(novelId);
-        if (!fs.existsSync(outlinePath)) return res.status(404).json({ error: 'Outline not found' });
-
-        const outline = JSON.parse(fs.readFileSync(outlinePath, 'utf8'));
-
-        // Recursively remove node and its children
-        function removeNode(nodes, id) {
-            const toRemove = new Set();
-            function collect(nodes, id) {
-                for (const n of nodes) {
-                    if (n.id === id || n.parentId === id) {
-                        toRemove.add(n.id);
-                        collect(nodes, n.id);
-                    }
-                }
-            }
-            collect(nodes, id);
-            return nodes.filter(n => !toRemove.has(n.id));
+router.put('/:id', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    let updatedNode;
+    await updateExistingOutline(novelId, outline => {
+        const node = outline.nodes.find(item => item.id === req.params.id);
+        if (!node) throw new ApiError(404, 'Node not found', 'NOT_FOUND');
+        for (const field of ['title', 'description', 'type', 'completed', 'parentId', 'order', 'chapterId']) {
+            if (req.body[field] !== undefined) node[field] = req.body[field];
         }
+        node.updated = Date.now();
+        updatedNode = { ...node };
+        return outline;
+    });
+    res.json(updatedNode);
+}));
 
-        outline.nodes = removeNode(outline.nodes, req.params.id);
-        fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2), 'utf8');
+router.delete('/:id', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    await updateExistingOutline(novelId, outline => {
+        const ids = collectDescendantIds(outline.nodes, req.params.id);
+        if (!ids.size) throw new ApiError(404, 'Node not found', 'NOT_FOUND');
+        return { ...outline, nodes: outline.nodes.filter(node => !ids.has(node.id)) };
+    });
+    res.json({ success: true });
+}));
 
-        res.json({ success: true });
+function outlinePath(novelId) {
+    return projectFile(novelId, 'outline.json');
+}
+
+async function updateExistingOutline(novelId, updater) {
+    try {
+        return await updateJson(outlinePath(novelId), outline => {
+            if (!Array.isArray(outline.nodes)) outline.nodes = [];
+            return updater(outline);
+        });
     } catch (err) {
-        console.error('[Outline] Delete error:', err);
-        res.status(500).json({ error: err.message });
+        if (err.code === 'ENOENT') throw new ApiError(404, 'Outline not found', 'NOT_FOUND');
+        throw err;
     }
-});
+}
+
+function collectDescendantIds(nodes, rootId) {
+    const ids = new Set();
+    const visit = id => {
+        const matches = nodes.filter(node => node.id === id || node.parentId === id);
+        for (const node of matches) {
+            if (ids.has(node.id)) continue;
+            ids.add(node.id);
+            visit(node.id);
+        }
+    };
+    visit(rootId);
+    return ids;
+}

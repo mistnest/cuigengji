@@ -17,7 +17,7 @@ const DEFAULT_LAYER_PCT = {
     recentPlot: 0.24,
 };
 
-export function buildWritingContext({
+export async function buildWritingContext({
     message = '',
     history = [],
     context = {},
@@ -30,7 +30,7 @@ export function buildWritingContext({
     const layerBudgets = buildLayerBudgets(totalInputBudget, config.memoryBudget);
 
     const reference = normalizeWritingReference(context.writingReference);
-    const project = loadProjectContext(context.novelId || 'default', context);
+    const project = await loadProjectContext(context.novelId || 'default', context);
     const retrievalText = [
         context.currentText || '',
         message || '',

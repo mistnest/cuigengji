@@ -608,7 +608,7 @@ export function getUniqueName(baseName, exists, { nameBuilder = null, maxTries =
  * @param {string} char Character to sanitize
  * @returns {string} Safe replacement character
  */
-export function sanitizeSafeCharacterReplacements(char) {
+export function sanitizeSafeCharacterReplacements(_char) {
     return '_';
 }
 

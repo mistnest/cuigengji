@@ -16,6 +16,7 @@ import { hideBin } from 'yargs/helpers';
 
 import { PROJECT_ROOT } from './config.js';
 import { serverEvents, EVENT_NAMES } from './server-events.js';
+import { errorHandler, notFoundHandler } from './lib/http.js';
 
 // ---- CLI Arguments ----
 const cliArgs = yargs(hideBin(process.argv))
@@ -53,8 +54,8 @@ const app = express();
 
 // app.use(compression()); // Disabled: causes ERR_INVALID_CHUNKED_ENCODING on some browsers
 app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
+app.use(bodyParser.json({ limit: '25mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 
 // ---- Static Files ----
 app.use(express.static(path.join(PROJECT_ROOT, 'public')));
@@ -94,9 +95,8 @@ app.use('/api/debug', debugRouter);
 app.use('/api/ai-secrets', aiSecretsRouter);
 
 // ---- 404 ----
-app.use((_req, res) => {
-    res.status(404).json({ error: 'Not found' });
-});
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 // ---- Start Server ----
 async function startServer(options = {}) {

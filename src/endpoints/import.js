@@ -11,8 +11,10 @@ import iconv from 'iconv-lite';
 import jschardet from 'jschardet';
 import multer from 'multer';
 
-import { PROJECT_ROOT, getDataRoot } from '../config.js';
+import { getDataRoot } from '../config.js';
 import { read as readPngCharCard } from '../character-card-parser.js';
+import { writeJson } from '../lib/json-store.js';
+import { projectFile, resolveInside } from '../lib/project-paths.js';
 
 export const router = express.Router();
 
@@ -21,31 +23,42 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
 });
 
-function getUserDataDir() {
-    return getDataRoot();
-}
+router.use((req, res, next) => {
+    let cleaned = false;
+    const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        const files = [req.file, ...(Array.isArray(req.files) ? req.files : [])].filter(Boolean);
+        for (const file of files) {
+            try {
+                if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            } catch {}
+        }
+    };
+    res.once('finish', cleanup);
+    res.once('close', cleanup);
+    next();
+});
 
 // POST /api/import/worldbook — 导入世界书 JSON
 router.post('/worldbook', async (req, res) => {
     try {
-        const { name, data } = req.body;
+        const { novelId, name, data } = req.body;
 
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
         if (!data || !data.entries) {
             return res.status(400).json({ error: 'Invalid world book format: missing "entries"' });
         }
 
-        const worldsDir = path.join(getUserDataDir(), 'worlds');
-        fs.mkdirSync(worldsDir, { recursive: true });
-
         const filename = sanitize(name || 'imported_world') + '.json';
-        const filePath = path.join(worldsDir, filename);
+        const filePath = projectFile(novelId, 'assets', 'worldbooks', filename);
 
         // Ensure the data has proper structure
         const worldBook = {
             entries: data.entries || {},
         };
 
-        fs.writeFileSync(filePath, JSON.stringify(worldBook, null, 2), 'utf8');
+        await writeJson(filePath, worldBook);
 
         res.json({
             success: true,
@@ -66,6 +79,7 @@ router.post('/character-png', upload.single('file'), async (req, res) => {
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
+        if (!req.body.novelId) return res.status(400).json({ error: 'novelId required' });
 
         // Parse PNG character card using SillyTavern's parser
         const pngBuffer = fs.readFileSync(req.file.path);
@@ -79,20 +93,19 @@ router.post('/character-png', upload.single('file'), async (req, res) => {
             return res.status(400).json({ error: 'Invalid character card PNG: ' + parseErr.message });
         }
 
-        // Save character data
-        const charsDir = path.join(getUserDataDir(), 'characters');
-        fs.mkdirSync(charsDir, { recursive: true });
+        const charsDir = projectFile(req.body.novelId, 'assets', 'characters');
 
         const charName = sanitize(charData.data?.name || req.file.originalname.replace('.png', ''));
         const jsonFilename = `${charName}.json`;
         const jsonPath = path.join(charsDir, jsonFilename);
 
         // Save JSON
-        fs.writeFileSync(jsonPath, JSON.stringify(charData, null, 2), 'utf8');
+        await writeJson(jsonPath, charData);
 
         // Also save PNG as avatar/thumbnail
         const pngFilename = `${charName}.png`;
         const pngPath = path.join(charsDir, pngFilename);
+        fs.mkdirSync(charsDir, { recursive: true });
         fs.copyFileSync(req.file.path, pngPath);
 
         // Clean up multer temp file
@@ -102,6 +115,7 @@ router.post('/character-png', upload.single('file'), async (req, res) => {
             success: true,
             name: charName,
             data: charData,
+            character: charData,
             jsonPath: jsonPath,
             pngPath: pngPath,
             hasEmbeddedWorldBook: hasEmbeddedWorldBook(charData),
@@ -115,25 +129,26 @@ router.post('/character-png', upload.single('file'), async (req, res) => {
 // POST /api/import/character-json — 导入角色卡 JSON
 router.post('/character-json', async (req, res) => {
     try {
-        const { data } = req.body;
+        const { novelId, data } = req.body;
 
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
         if (!data) {
             return res.status(400).json({ error: 'No character data provided' });
         }
 
-        const charsDir = path.join(getUserDataDir(), 'characters');
-        fs.mkdirSync(charsDir, { recursive: true });
+        const charsDir = projectFile(novelId, 'assets', 'characters');
 
         const charName = sanitize(data.data?.name || data.name || 'imported_character');
         const filename = `${charName}.json`;
         const filePath = path.join(charsDir, filename);
 
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        await writeJson(filePath, data);
 
         res.json({
             success: true,
             name: charName,
             data: data,
+            character: data,
             path: filePath,
             hasEmbeddedWorldBook: hasEmbeddedWorldBook(data),
         });
@@ -146,19 +161,17 @@ router.post('/character-json', async (req, res) => {
 // POST /api/import/preset — 导入预设 JSON
 router.post('/preset', async (req, res) => {
     try {
-        const { name, data } = req.body;
+        const { novelId, name, data } = req.body;
 
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
         if (!data) {
             return res.status(400).json({ error: 'No preset data provided' });
         }
 
-        const presetsDir = path.join(getUserDataDir(), 'presets');
-        fs.mkdirSync(presetsDir, { recursive: true });
-
         const filename = sanitize(name || 'imported_preset') + '.json';
-        const filePath = path.join(presetsDir, filename);
+        const filePath = projectFile(novelId, 'assets', 'presets', filename);
 
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        await writeJson(filePath, data);
 
         res.json({
             success: true,
@@ -194,7 +207,7 @@ router.post('/document', upload.single('file'), async (req, res) => {
         if (!text.trim()) return res.status(400).json({ error: 'File is empty' });
 
         const chapters = [];
-        const chaptersDir = path.join(getDataRoot(), 'novels', sanitize(novelId), 'chapters');
+        const chaptersDir = projectFile(novelId, 'chapters');
 
         if (autoSplit === 'true') {
             // Split by chapter markers: "第X章", "Chapter X", "第X卷", etc.
@@ -213,10 +226,8 @@ router.post('/document', upload.single('file'), async (req, res) => {
                 };
                 chapters.push(chapter);
                 const filename = sanitize(`${String(chapters.length).padStart(3, '0')}-${title}`) + '.json';
-                let targetDir = chaptersDir;
-                if (volumeId) { targetDir = path.join(chaptersDir, sanitize(volumeId)); }
-                fs.mkdirSync(targetDir, { recursive: true });
-                fs.writeFileSync(path.join(targetDir, filename), JSON.stringify(chapter, null, 2), 'utf8');
+                const targetDir = importedChapterDir(chaptersDir, volumeId);
+                await writeJson(resolveInside(targetDir, filename), chapter);
             }
         } else {
             // Single chapter import
@@ -226,11 +237,9 @@ router.post('/document', upload.single('file'), async (req, res) => {
                 created: Date.now(), updated: Date.now(), order: 0,
             };
             chapters.push(chapter);
-            let targetDir = chaptersDir;
-            if (volumeId) { targetDir = path.join(chaptersDir, sanitize(volumeId)); }
-            fs.mkdirSync(targetDir, { recursive: true });
             const filename = sanitize(`001-${title}`) + '.json';
-            fs.writeFileSync(path.join(targetDir, filename), JSON.stringify(chapter, null, 2), 'utf8');
+            const targetDir = importedChapterDir(chaptersDir, volumeId);
+            await writeJson(resolveInside(targetDir, filename), chapter);
         }
 
         res.json({ success: true, chapters, count: chapters.length });
@@ -245,7 +254,7 @@ router.post('/folder', upload.array('files', 200), async (req, res) => {
     try {
         const { novelId } = req.body;
         if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const chaptersDir = path.join(getDataRoot(), 'novels', sanitize(novelId), 'chapters');
+        const chaptersDir = projectFile(novelId, 'chapters');
         const results = { volumes: 0, chapters: 0, errors: [] };
 
         for (const file of req.files) {
@@ -264,14 +273,12 @@ router.post('/folder', upload.array('files', 200), async (req, res) => {
 
                 const relPath = file.originalname.replace(/\\/g, '/');
                 const parts = relPath.split('/');
-                let volumeId = '';
                 let targetDir = chaptersDir;
 
                 // If file is inside subfolders, create volumes
                 if (parts.length > 1) {
                     const volName = parts[0];
-                    volumeId = `vol_${volName}`;
-                    targetDir = path.join(chaptersDir, sanitize(volName));
+                    targetDir = resolveInside(chaptersDir, sanitize(volName));
                     if (!fs.existsSync(targetDir)) { fs.mkdirSync(targetDir, { recursive: true }); results.volumes++; }
                 }
 
@@ -280,9 +287,8 @@ router.post('/folder', upload.array('files', 200), async (req, res) => {
                     id: uuidv4(), novelId, title, content: text, status: 'draft', wordCount: countWords(text),
                     created: Date.now(), updated: Date.now(), order: results.chapters,
                 };
-                fs.mkdirSync(targetDir, { recursive: true });
                 const filename = sanitize(`${String(results.chapters + 1).padStart(3, '0')}-${title}`) + '.json';
-                fs.writeFileSync(path.join(targetDir, filename), JSON.stringify(chapter, null, 2), 'utf8');
+                await writeJson(resolveInside(targetDir, filename), chapter);
                 results.chapters++;
             } catch (e) {
                 results.errors.push(`${file.originalname}: ${e.message}`);
@@ -298,6 +304,13 @@ router.post('/folder', upload.array('files', 200), async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+function importedChapterDir(chaptersDir, volumeId) {
+    if (!volumeId) return chaptersDir;
+    const raw = String(volumeId).replace(/^vol_/, '');
+    const safe = sanitize(raw);
+    return safe ? resolveInside(chaptersDir, safe) : chaptersDir;
+}
 
 // Auto-detect encoding and read file as UTF-8 text
 function readTextFile(filePath) {
@@ -352,6 +365,8 @@ function uuidv4() {
 // POST /api/import/batch — 批量导入
 router.post('/batch', upload.array('files', 50), async (req, res) => {
     try {
+        const { novelId } = req.body;
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
         const results = { worldBooks: 0, characters: 0, presets: 0, errors: [] };
 
         for (const file of req.files) {
@@ -362,10 +377,9 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                 if (file.originalname.includes('world') || ext === '.json' && content.includes('"entries"')) {
                     const data = JSON.parse(content);
                     if (data.entries) {
-                        const worldsDir = path.join(getUserDataDir(), 'worlds');
-                        fs.mkdirSync(worldsDir, { recursive: true });
+                        const worldsDir = projectFile(novelId, 'assets', 'worldbooks');
                         const filename = sanitize(file.originalname);
-                        fs.writeFileSync(path.join(worldsDir, filename), JSON.stringify(data, null, 2));
+                        await writeJson(resolveInside(worldsDir, filename), data);
                         results.worldBooks++;
                         continue;
                     }
@@ -375,11 +389,11 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                     const pngBuffer = fs.readFileSync(file.path);
                     const rawData = readPngCharCard(new Uint8Array(pngBuffer));
                     const charData = JSON.parse(rawData);
-                    const charsDir = path.join(getUserDataDir(), 'characters');
+                    const charsDir = projectFile(novelId, 'assets', 'characters');
                     fs.mkdirSync(charsDir, { recursive: true });
                     const charName = sanitize(charData.data?.name || file.originalname.replace('.png', ''));
-                    fs.writeFileSync(path.join(charsDir, `${charName}.json`), JSON.stringify(charData, null, 2));
-                    fs.copyFileSync(file.path, path.join(charsDir, `${charName}.png`));
+                    await writeJson(resolveInside(charsDir, `${charName}.json`), charData);
+                    fs.copyFileSync(file.path, resolveInside(charsDir, `${charName}.png`));
                     results.characters++;
                     continue;
                 }
@@ -387,9 +401,8 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                 // Try as preset
                 const data = JSON.parse(content);
                 if (data.temperature !== undefined || data.max_tokens !== undefined) {
-                    const presetsDir = path.join(getUserDataDir(), 'presets');
-                    fs.mkdirSync(presetsDir, { recursive: true });
-                    fs.writeFileSync(path.join(presetsDir, sanitize(file.originalname)), JSON.stringify(data, null, 2));
+                    const presetsDir = projectFile(novelId, 'assets', 'presets');
+                    await writeJson(resolveInside(presetsDir, sanitize(file.originalname)), data);
                     results.presets++;
                     continue;
                 }

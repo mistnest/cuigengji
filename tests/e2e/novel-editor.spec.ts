@@ -334,6 +334,40 @@ test('通用与编辑器设置会立即生效并持久化 @regression', async ({
     await page.evaluate(() => localStorage.removeItem('novel-editor-app-settings'));
 });
 
+test('快速切换工作区时旧响应不会覆盖新项目 @regression', async ({ page, request }) => {
+    const firstTitle = `switch_slow_${Date.now()}`;
+    const secondTitle = `switch_fast_${Date.now()}`;
+    const first = await request.post('/api/novels', { data: { title: firstTitle } }).then(r => r.json());
+    const second = await request.post('/api/novels', { data: { title: secondTitle } }).then(r => r.json());
+
+    try {
+        await page.route(`**/api/save/workspace/${encodeURIComponent(first.id)}`, async route => {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await route.continue();
+        });
+        await page.goto('/');
+        await page.evaluate(({ first, second }) => {
+            const app = window as typeof window & {
+                enterWorkspace: (id: string, title: string) => Promise<void>;
+            };
+            void app.enterWorkspace(first.id, first.title);
+            void app.enterWorkspace(second.id, second.title);
+        }, {
+            first: { id: first.id, title: firstTitle },
+            second: { id: second.id, title: secondTitle },
+        });
+
+        await expect.poll(() => page.evaluate(() => {
+            const app = window as typeof window & { editorState: { currentNovel: { id: string } } };
+            return app.editorState.currentNovel.id;
+        })).toBe(second.id);
+        await expect(page.locator('#current-novel-title')).toHaveText(secondTitle);
+    } finally {
+        await request.delete(`/api/novels/${encodeURIComponent(first.id)}`);
+        await request.delete(`/api/novels/${encodeURIComponent(second.id)}`);
+    }
+});
+
 declare global {
     interface Window {
         saveWorkspaceState: () => Promise<void>;

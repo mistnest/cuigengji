@@ -252,15 +252,11 @@ test.describe("AI API — Validation", () => {
     expect(body.error).toContain("text");
   });
 
-  // BUG-KEY-001: applyAiSecret() throws before hasApiKey() check reaches.
-  // Server returns 500 instead of expected 400. To be fixed by moving
-  // the hasApiKey check before the applyAiSecret call in endpoints/ai.js.
   test("POST /continue requires API key @regression @negative", async ({ request }) => {
     const response = await request.post(`${baseUrl}/continue`, {
       data: { text: "test content", config: { provider: "anthropic" } },
     });
-    // Expected: 400, Actual: 500 (BUG-KEY-001)
-    expect([400, 500]).toContain(response.status());
+    expect(response.status()).toBe(400);
   });
 
   test("POST /plot-suggestions requires text @regression @negative", async ({ request }) => {
@@ -360,6 +356,84 @@ test.describe("Import API", () => {
   });
 });
 
+// ==================== Robustness & Isolation ====================
+
+test.describe("Persistence robustness", () => {
+  test("project assets with the same name stay isolated @regression", async ({ request }) => {
+    const firstTitle = `asset_scope_a_${Date.now()}`;
+    const secondTitle = `asset_scope_b_${Date.now()}`;
+    const first = await request.post("/api/novels", { data: { title: firstTitle } }).then(r => r.json());
+    const second = await request.post("/api/novels", { data: { title: secondTitle } }).then(r => r.json());
+
+    try {
+      for (const [novelId, content] of [[first.id, "alpha"], [second.id, "beta"]]) {
+        const imported = await request.post("/api/import/worldbook", {
+          data: {
+            novelId,
+            name: "shared",
+            data: { entries: { 1: { uid: 1, key: ["shared"], content } } },
+          },
+        });
+        expect(imported.ok()).toBeTruthy();
+      }
+
+      const firstBook = await request.get(`/api/save/worldbook/shared?novelId=${encodeURIComponent(first.id)}`).then(r => r.json());
+      const secondBook = await request.get(`/api/save/worldbook/shared?novelId=${encodeURIComponent(second.id)}`).then(r => r.json());
+      expect(firstBook.entries["1"].content).toBe("alpha");
+      expect(secondBook.entries["1"].content).toBe("beta");
+    } finally {
+      await request.delete(`/api/novels/${encodeURIComponent(first.id)}`);
+      await request.delete(`/api/novels/${encodeURIComponent(second.id)}`);
+    }
+  });
+
+  test("workspace writes remain valid under concurrency @regression", async ({ request }) => {
+    const title = `workspace_concurrency_${Date.now()}`;
+    const created = await request.post("/api/novels", { data: { title } }).then(r => r.json());
+    try {
+      const writes = Array.from({ length: 20 }, (_, revision) =>
+        request.post(`/api/save/workspace/${encodeURIComponent(created.id)}`, {
+          data: { revision, worldBook: { entries: {} }, characters: [] },
+        }));
+      const responses = await Promise.all(writes);
+      expect(responses.every(response => response.ok())).toBe(true);
+
+      await request.post(`/api/save/workspace/${encodeURIComponent(created.id)}`, {
+        data: { revision: 999, worldBook: { entries: {} }, characters: [] },
+      });
+      const workspace = await request.get(`/api/save/workspace/${encodeURIComponent(created.id)}`).then(r => r.json());
+      expect(workspace.revision).toBe(999);
+      expect(workspace.savedAt).toEqual(expect.any(Number));
+    } finally {
+      await request.delete(`/api/novels/${encodeURIComponent(created.id)}`);
+    }
+  });
+
+  test("late autosaves cannot recreate a deleted project @regression", async ({ request }) => {
+    const title = `delete_race_${Date.now()}`;
+    const created = await request.post("/api/novels", { data: { title } }).then(r => r.json());
+    const url = `/api/save/workspace/${encodeURIComponent(created.id)}`;
+
+    const writes = Array.from({ length: 12 }, (_, revision) =>
+      request.post(url, { data: { revision } }));
+    const deletion = request.delete(`/api/novels/${encodeURIComponent(created.id)}`);
+    const results = await Promise.all([...writes, deletion]);
+    expect(results.every(response => response.status() < 500)).toBe(true);
+    expect(results.at(-1)?.ok()).toBe(true);
+
+    const lateWrite = await request.post(url, { data: { revision: 999 } });
+    expect([404, 409]).toContain(lateWrite.status());
+    const projects = await request.get("/api/novels").then(r => r.json());
+    expect(projects.novels.some((novel: { id: string }) => novel.id === created.id)).toBe(false);
+
+    const recreated = await request.post("/api/novels", { data: { title } });
+    expect(recreated.status()).toBe(201);
+    const saveAfterRecreate = await request.post(url, { data: { revision: 1000 } });
+    expect(saveAfterRecreate.ok()).toBe(true);
+    await request.delete(`/api/novels/${encodeURIComponent(created.id)}`);
+  });
+});
+
 // ==================== 404 Handling ====================
 
 test.describe("Global Error Handling", () => {
@@ -377,5 +451,7 @@ test.describe("Global Error Handling", () => {
     });
     // Express body-parser returns 400 for malformed JSON
     expect(response.status()).toBeGreaterThanOrEqual(400);
+    const body = await response.json();
+    expect(body.code).toBe("MALFORMED_JSON");
   });
 });

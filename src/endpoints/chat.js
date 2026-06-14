@@ -8,7 +8,7 @@ import express from 'express';
 import { applyAiSecret } from '../services/ai-secrets.js';
 import { callAIChat } from '../services/ai-client.js';
 import { capturePrompt } from './debug.js';
-import { buildWritingContext } from '../services/context-orchestrator.js';
+import { generateWriting } from '../services/writing-service.js';
 
 export const router = express.Router();
 
@@ -90,34 +90,32 @@ function buildPlanSystemPrompt(ctx) {
 
 // POST /api/chat/write — 续写模式 (酒馆风格)
 router.post('/write', async (req, res) => {
+    const requestController = createRequestAbortController(req, res);
     try {
         const { message, history, context, config, promptTemplates, promptOrder, presetName } = req.body;
         const aiConfig = applyAiSecret(config, presetName);
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
-        const builtPrompt = buildWritingContext({
+        const generated = await generateWriting({
             message,
             history,
             context: context || {},
             config: aiConfig,
             promptTemplates,
             promptOrder,
+            signal: requestController.signal,
+            onPromptBuilt: prompt => captureWritingPrompt(aiConfig, prompt),
         });
 
-        capturePrompt({
-            provider: aiConfig.provider,
-            model: aiConfig.model,
-            temperature: aiConfig.temperature ?? 0.7,
-            maxTokens: 4096,
-            topP: aiConfig.topP ?? 0.9,
-            systemPrompt: builtPrompt.systemPrompt,
-            userPrompt: JSON.stringify({ messages: builtPrompt.messages, context: builtPrompt.debug }),
+        res.json({
+            reply: generated.reply,
+            context: generated.context,
+            memory: generated.memory,
+            contextDebug: generated.prompt.debug,
         });
-        const reply = await callAIChat(aiConfig, builtPrompt.systemPrompt, builtPrompt.messages);
-
-        res.json({ reply, contextDebug: builtPrompt.debug });
     } catch (err) {
+        if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Write]', err.message);
         res.status(500).json({ error: err.message });
     }
@@ -125,6 +123,7 @@ router.post('/write', async (req, res) => {
 
 // POST /api/chat/infill — Fill the selected gap between before/after prose.
 router.post('/infill', async (req, res) => {
+    const requestController = createRequestAbortController(req, res);
     try {
         const {
             beforeText = '',
@@ -143,7 +142,7 @@ router.post('/infill', async (req, res) => {
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         const message = buildInfillUserMessage({ beforeText, afterText, instruction, lengthMode });
-        const builtPrompt = buildWritingContext({
+        const generated = await generateWriting({
             message,
             history: [],
             context: {
@@ -155,25 +154,46 @@ router.post('/infill', async (req, res) => {
             config: aiConfig,
             promptTemplates,
             promptOrder,
+            signal: requestController.signal,
+            onPromptBuilt: prompt => captureWritingPrompt(aiConfig, prompt),
         });
 
-        capturePrompt({
-            provider: aiConfig.provider,
-            model: aiConfig.model,
-            temperature: aiConfig.temperature ?? 0.7,
-            maxTokens: 4096,
-            topP: aiConfig.topP ?? 0.9,
-            systemPrompt: builtPrompt.systemPrompt,
-            userPrompt: JSON.stringify({ messages: builtPrompt.messages, context: builtPrompt.debug }),
+        res.json({
+            reply: cleanInfillReply(generated.reply),
+            context: generated.context,
+            memory: generated.memory,
+            contextDebug: generated.prompt.debug,
         });
-        const reply = await callAIChat(aiConfig, builtPrompt.systemPrompt, builtPrompt.messages);
-
-        res.json({ reply: cleanInfillReply(reply), contextDebug: builtPrompt.debug });
     } catch (err) {
+        if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Infill]', err.message);
         res.status(500).json({ error: err.message });
     }
 });
+
+function createRequestAbortController(req, res) {
+    const controller = new AbortController();
+    const abort = () => {
+        if (!controller.signal.aborted) controller.abort();
+    };
+    req.once('aborted', abort);
+    res.once('close', () => {
+        if (!res.writableEnded) abort();
+    });
+    return controller;
+}
+
+function captureWritingPrompt(config, prompt) {
+    capturePrompt({
+        provider: config.provider,
+        model: config.model,
+        temperature: config.temperature ?? 0.7,
+        maxTokens: config.maxTokens ?? 4096,
+        topP: config.topP ?? 0.9,
+        systemPrompt: prompt.systemPrompt,
+        userPrompt: JSON.stringify({ messages: prompt.messages, context: prompt.debug }),
+    });
+}
 
 function buildInfillUserMessage({ beforeText, afterText, instruction, lengthMode }) {
     const lengthText = {
@@ -292,6 +312,8 @@ function buildAssistSystemPrompt(ctx) {
     return p.join('\n');
 }
 
+// Kept temporarily for migration comparison with preset-orchestrator.
+// eslint-disable-next-line no-unused-vars
 function buildWriteSystemPrompt(ctx, templates, memoryText, authorContext, novelMemoryText) {
     const p = [];
 
@@ -374,6 +396,7 @@ function buildMessageArray(history, currentMsg) {
     return msgs;
 }
 
+// eslint-disable-next-line no-unused-vars
 function buildWriteMessages(history, currentMsg, ctx) {
     const msgs = [];
 

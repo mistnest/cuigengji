@@ -1911,6 +1911,10 @@ button:focus-visible {
     to   { opacity: 0; transform: translateY(10px); }
 }
 
+/* ---- Extraction Results ---- */
+.extract-check-row { display: flex; align-items: start; gap: 8px; padding: 5px 0; font-size: 13px; }
+.extract-check-row input { margin-top: 3px; flex-shrink: 0; accent-color: var(--accent-primary); }
+
 /* ---- Scrollbar ---- */
 ::-webkit-scrollbar {
     width: 6px;

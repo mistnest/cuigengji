@@ -174,6 +174,7 @@ const PlotCandidates = (function () {
         quickInsert,
     };
 })();
+window.PlotCandidates = PlotCandidates;
 
 function escHtml(str) {
     if (!str) return '';

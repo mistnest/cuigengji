@@ -1,17 +1,101 @@
-/**
- * Novel AI Editor — Sessions API
- * AI 多会话管理，类似 CC 的会话切换
- */
 import express from 'express';
-import path from 'node:path';
-import fs from 'node:fs';
-import sanitize from 'sanitize-filename';
-import { getDataRoot } from '../config.js';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { ApiError, asyncRoute, requireString } from '../lib/http.js';
+import { readJson, removeFile, updateJson, writeJson } from '../lib/json-store.js';
+import { projectFile, resolveInside } from '../lib/project-paths.js';
 
 export const router = express.Router();
 
+router.get('/', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.query.novelId, 'novelId', { maxLength: 100 });
+    const dir = sessionsDir(novelId);
+    let files;
+    try {
+        files = (await fs.readdir(dir)).filter(file => file.endsWith('.json'));
+    } catch (err) {
+        if (err.code === 'ENOENT') return res.json({ sessions: [] });
+        throw err;
+    }
+
+    const sessions = (await Promise.all(files.map(async file => {
+        try {
+            const data = await readJson(resolveInside(dir, file));
+            return {
+                id: data.id,
+                name: data.name,
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt || data.createdAt,
+                mode: data.mode || 'write',
+                messageCount: countMessages(data.messages),
+            };
+        } catch (err) {
+            if (err.code === 'CORRUPT_JSON') return null;
+            throw err;
+        }
+    }))).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
+    res.json({ sessions });
+}));
+
+router.post('/', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    const now = Date.now();
+    const id = `${now.toString(36)}-${randomUUID().slice(0, 8)}`;
+    const session = {
+        id,
+        name: req.body.name || '新会话',
+        createdAt: now,
+        updatedAt: now,
+        mode: 'write',
+        messages: [],
+    };
+    await writeJson(sessionFile(novelId, id), session);
+    res.status(201).json(session);
+}));
+
+router.get('/:id', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.query.novelId, 'novelId', { maxLength: 100 });
+    try {
+        res.json(await readJson(sessionFile(novelId, req.params.id)));
+    } catch (err) {
+        if (err.code === 'ENOENT') throw new ApiError(404, 'Session not found', 'NOT_FOUND');
+        throw err;
+    }
+}));
+
+router.put('/:id', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    const file = sessionFile(novelId, req.params.id);
+    const session = await updateJson(file, existing => ({
+        ...existing,
+        id: req.params.id,
+        name: req.body.name !== undefined ? req.body.name : existing.name,
+        mode: req.body.mode !== undefined ? req.body.mode : existing.mode,
+        messages: req.body.messages !== undefined ? req.body.messages : existing.messages,
+        updatedAt: Date.now(),
+    }), {
+        defaultValue: {
+            id: req.params.id,
+            createdAt: Date.now(),
+            messages: { write: [], assist: [] },
+        },
+    });
+    res.json(session);
+}));
+
+router.delete('/:id', asyncRoute(async (req, res) => {
+    const novelId = requireString(req.body.novelId, 'novelId', { maxLength: 100 });
+    await removeFile(sessionFile(novelId, req.params.id));
+    res.json({ success: true });
+}));
+
 function sessionsDir(novelId) {
-    return path.join(getDataRoot(), 'novels', sanitize(novelId), 'sessions');
+    return projectFile(novelId, 'sessions');
+}
+
+function sessionFile(novelId, sessionId) {
+    requireString(sessionId, 'session id', { maxLength: 150 });
+    return resolveInside(sessionsDir(novelId), `${sessionId}.json`);
 }
 
 function countMessages(messages) {
@@ -20,82 +104,3 @@ function countMessages(messages) {
     return Object.values(messages).reduce((total, value) =>
         total + (Array.isArray(value) ? value.length : 0), 0);
 }
-
-// GET /api/sessions?novelId=xxx — List all sessions
-router.get('/', async (req, res) => {
-    try {
-        const { novelId } = req.query;
-        if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const dir = sessionsDir(novelId);
-        if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); return res.json({ sessions: [] }); }
-        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-        const sessions = files.map(f => {
-            try {
-                const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-                return {
-                    id: d.id,
-                    name: d.name,
-                    createdAt: d.createdAt,
-                    updatedAt: d.updatedAt || d.createdAt,
-                    mode: d.mode || 'write',
-                    messageCount: countMessages(d.messages),
-                };
-            } catch { return null; }
-        }).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
-        res.json({ sessions });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// POST /api/sessions — Create new session
-router.post('/', async (req, res) => {
-    try {
-        const { novelId, name } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const dir = sessionsDir(novelId);
-        fs.mkdirSync(dir, { recursive: true });
-        const id = Date.now().toString(36);
-        const session = { id, name: name || '新会话', createdAt: Date.now(), updatedAt: Date.now(), mode: 'write', messages: [] };
-        fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(session, null, 2), 'utf8');
-        res.status(201).json(session);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// GET /api/sessions/:id?novelId=xxx — Load session content
-router.get('/:id', async (req, res) => {
-    try {
-        const { novelId } = req.query;
-        if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const file = path.join(sessionsDir(novelId), `${req.params.id}.json`);
-        if (!fs.existsSync(file)) return res.status(404).json({ error: 'Not found' });
-        res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// PUT /api/sessions/:id — Save session
-router.put('/:id', async (req, res) => {
-    try {
-        const { novelId, name, messages, mode } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const dir = sessionsDir(novelId);
-        fs.mkdirSync(dir, { recursive: true });
-        const file = path.join(dir, `${req.params.id}.json`);
-        const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { id: req.params.id, createdAt: Date.now(), messages: { write: [], assist: [] } };
-        if (name !== undefined) existing.name = name;
-        if (mode !== undefined) existing.mode = mode;
-        if (messages !== undefined) existing.messages = messages;
-        existing.updatedAt = Date.now();
-        fs.writeFileSync(file, JSON.stringify(existing, null, 2), 'utf8');
-        res.json(existing);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// DELETE /api/sessions/:id — Delete session
-router.delete('/:id', async (req, res) => {
-    try {
-        const { novelId } = req.body;
-        if (!novelId) return res.status(400).json({ error: 'novelId required' });
-        const file = path.join(sessionsDir(novelId), `${req.params.id}.json`);
-        if (fs.existsSync(file)) fs.unlinkSync(file);
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});

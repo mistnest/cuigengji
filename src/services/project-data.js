@@ -1,90 +1,81 @@
-import fs from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import sanitize from 'sanitize-filename';
-import { getDataRoot } from '../config.js';
+import { ApiError } from '../lib/http.js';
+import { novelDir as resolveNovelDir } from '../lib/project-paths.js';
 
-export function loadProjectContext(novelId, fallback = {}) {
-    const workspace = readWorkspace(novelId);
-    const novelConfig = readJson(path.join(novelDir(novelId), 'novel.json')) || {};
-    const worldBook = loadWorldBook(novelId, workspace, novelConfig, fallback.worldBookEntries);
-    const characters = loadCharacters(workspace, novelConfig, fallback.characters);
-    const chapters = loadChapters(novelId);
+export async function loadProjectContext(novelId, fallback = {}) {
+    const workspace = await readWorkspace(novelId);
+    const novelConfig = await readJson(path.join(novelDir(novelId), 'novel.json')) || {};
+    const worldBookResult = await loadWorldBook(novelId, workspace, fallback.worldBookEntries);
+    const characterResult = await loadCharacters(novelId, workspace, fallback.characters);
+    const chapters = await loadChapters(novelId);
     const plotMemory = buildPlotMemory({ chapters, outline: fallback.outline || [] });
 
     return {
         workspace,
         novelConfig,
-        worldBook,
-        characters,
+        worldBook: worldBookResult.data,
+        characters: characterResult.data,
         chapters,
         plotMemory,
         sources: {
-            worldBook: worldBook._source || 'fallback',
-            characters: characters._source || 'fallback',
+            worldBook: worldBookResult.source,
+            characters: characterResult.source,
             chapters: chapters.length,
         },
     };
 }
 
-export function readWorkspace(novelId) {
-    return readJson(path.join(novelDir(novelId), 'workspace.json')) || {};
+export async function readWorkspace(novelId) {
+    return await readJson(path.join(novelDir(novelId), 'workspace.json')) || {};
 }
 
-function loadWorldBook(novelId, workspace, novelConfig, fallbackEntries = []) {
+async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
     if (workspace.worldBook?.entries) {
-        return { ...workspace.worldBook, _source: 'workspace' };
+        return { data: workspace.worldBook, source: 'workspace' };
     }
 
-    const names = [
-        workspace.worldBookName,
-        ...(novelConfig.linkedWorldBooks || []),
-        novelId,
-        'worldbook',
-    ].filter(Boolean);
-
-    for (const name of names) {
-        const book = readJson(path.join(getDataRoot(), 'worlds', `${sanitize(name)}.json`));
-        if (book?.entries) {
-            return { ...book, _source: name };
+    const assetDir = path.join(novelDir(novelId), 'assets', 'worldbooks');
+    if (await exists(assetDir)) {
+        const files = (await fs.readdir(assetDir)).filter(file => file.endsWith('.json')).sort();
+        for (const file of files) {
+            const book = await readJson(path.join(assetDir, file));
+            if (book?.entries) return { data: book, source: `project_asset:${file}` };
         }
     }
 
     return {
-        entries: Object.fromEntries((fallbackEntries || []).map((entry, index) => [index, {
-            uid: index,
-            key: [entry.name].filter(Boolean),
-            comment: entry.name || '',
-            content: entry.content || '',
-            selective: true,
-            disable: false,
-            order: 100,
-            position: 0,
-        }])),
-        _source: 'request_summary',
+        data: {
+            entries: Object.fromEntries((fallbackEntries || []).map((entry, index) => [index, {
+                uid: index,
+                key: [entry.name].filter(Boolean),
+                comment: entry.name || '',
+                content: entry.content || '',
+                selective: true,
+                disable: false,
+                order: 100,
+                position: 0,
+            }])),
+        },
+        source: 'request_summary',
     };
 }
 
-function loadCharacters(workspace, novelConfig, fallbackCharacters = []) {
+async function loadCharacters(novelId, workspace, fallbackCharacters = []) {
     if (Array.isArray(workspace.characters)) {
-        const characters = [...workspace.characters];
-        characters._source = 'workspace';
-        return characters;
+        return { data: workspace.characters, source: 'workspace' };
     }
 
-    const requestedNames = new Set([
-        ...(workspace.characterNames || []),
-        ...(novelConfig.linkedCharacters || []),
-    ].filter(Boolean));
-    const dir = path.join(getDataRoot(), 'characters');
     const result = [];
     const seen = new Set();
-
-    if (requestedNames.size && fs.existsSync(dir)) {
-        for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
-            const data = readJson(path.join(dir, file));
+    const assetDir = path.join(novelDir(novelId), 'assets', 'characters');
+    const hasAssets = await exists(assetDir);
+    if (hasAssets) {
+        for (const file of (await fs.readdir(assetDir)).filter(item => item.endsWith('.json')).sort()) {
+            const data = await readJson(path.join(assetDir, file));
             if (!data) continue;
             const name = data.data?.name || data.name || file.replace(/\.json$/i, '');
-            if (requestedNames.size && !requestedNames.has(name) && !requestedNames.has(file.replace(/\.json$/i, ''))) continue;
+            if (seen.has(name)) continue;
             result.push(data);
             seen.add(name);
         }
@@ -97,26 +88,28 @@ function loadCharacters(workspace, novelConfig, fallbackCharacters = []) {
         seen.add(name);
     }
 
-    result._source = result.length && requestedNames.size ? 'workspace' : 'request_summary';
-    return result;
+    return {
+        data: result,
+        source: result.length && hasAssets ? 'project_assets' : 'request_summary',
+    };
 }
 
-function loadChapters(novelId) {
+async function loadChapters(novelId) {
     const root = path.join(novelDir(novelId), 'chapters');
-    if (!fs.existsSync(root)) return [];
+    if (!await exists(root)) return [];
     const chapters = [];
 
-    const visit = (dir, volumeTitle = '') => {
-        const entries = fs.readdirSync(dir, { withFileTypes: true })
+    const visit = async (dir, volumeTitle = '') => {
+        const entries = (await fs.readdir(dir, { withFileTypes: true }))
             .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
         for (const entry of entries) {
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                visit(full, entry.name);
+                await visit(full, entry.name);
                 continue;
             }
             if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name.startsWith('vol_')) continue;
-            const chapter = readJson(full);
+            const chapter = await readJson(full);
             if (!chapter || chapter.type === 'volume') continue;
             chapters.push({
                 ...chapter,
@@ -126,7 +119,7 @@ function loadChapters(novelId) {
         }
     };
 
-    visit(root);
+    await visit(root);
     return chapters.sort((a, b) => {
         const ao = Number(a.order || 0);
         const bo = Number(b.order || 0);
@@ -189,14 +182,27 @@ function buildChapterDigest(chapter) {
 }
 
 function novelDir(novelId) {
-    return path.join(getDataRoot(), 'novels', sanitize(novelId || 'default'));
+    return resolveNovelDir(novelId || 'default');
 }
 
-function readJson(filePath) {
+async function readJson(filePath) {
     try {
-        if (!fs.existsSync(filePath)) return null;
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    } catch {
-        return null;
+        return JSON.parse(await fs.readFile(filePath, 'utf8'));
+    } catch (err) {
+        if (err.code === 'ENOENT') return null;
+        if (err instanceof SyntaxError) {
+            throw new ApiError(500, `Corrupt project data: ${path.basename(filePath)}`, 'CORRUPT_JSON');
+        }
+        throw err;
+    }
+}
+
+async function exists(filePath) {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch (err) {
+        if (err.code === 'ENOENT') return false;
+        throw err;
     }
 }

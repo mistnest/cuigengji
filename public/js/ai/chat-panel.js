@@ -4,6 +4,7 @@
  */
 const ChatPanel = (function () {
     'use strict';
+    const ApiClient = window.ApiClient;
 
     const messages = [];
     let currentMode = 'write';
@@ -215,14 +216,12 @@ const ChatPanel = (function () {
 
     async function callAPI(endpoint, userMessage, context, signal) {
         const config = { ...getConfig() };
-        const presetName = window.editorState?.presetName || localStorage.getItem('novel-editor-active-preset') || '__default__';
+        const presetName = window.editorState?.presetName || '__default__';
 
         // Use AI panel settings as-is
         const history = messages.slice(0, -1).slice(-20)
             .map(m => ({ role: m.role, content: m.rawContent || m.content }));
-        const resp = await fetch(endpoint, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-            body: JSON.stringify({
+        const data = await ApiClient.post(endpoint, {
                 message: userMessage,
                 history,
                 context,
@@ -230,10 +229,7 @@ const ChatPanel = (function () {
                 presetName,
                 promptTemplates: getEnabledTemplates(),
                 promptOrder: window.editorState?.promptOrder || [],
-            }),
-        });
-        if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(e.error||`HTTP ${resp.status}`); }
-        const data = await resp.json();
+        }, { signal, timeout: 120000 });
         if (data.contextDebug) window.lastContextDebug = data.contextDebug;
         return data.reply;
     }
@@ -528,7 +524,7 @@ const ChatPanel = (function () {
         ).join('\n');
 
         const config = getConfig();
-        const presetName = window.editorState?.presetName || localStorage.getItem('novel-editor-active-preset') || '__default__';
+        const presetName = window.editorState?.presetName || '__default__';
 
         isLoading = true; updateButtons();
         try {
@@ -632,5 +628,7 @@ const ChatPanel = (function () {
             }
         },
         renderSessionList, setActiveSession, registerSessionCallbacks,
+        cancelActiveRequest: stopGeneration,
     };
 })();
+window.ChatPanel = ChatPanel;

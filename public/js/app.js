@@ -4,6 +4,7 @@
  */
 (function () {
     'use strict';
+    const ApiClient = window.ApiClient;
 
     // ==================== State ====================
     const defaultAiConfig = {
@@ -59,6 +60,8 @@
 
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
+    let workspaceLoadController = null;
+    let workspaceLoadVersion = 0;
 
     // ==================== Initialization ====================
     function init() {
@@ -306,6 +309,11 @@
             ]);
         }
 
+        workspaceLoadController?.abort();
+        workspaceLoadController = new AbortController();
+        const loadSignal = workspaceLoadController.signal;
+        const loadVersion = ++workspaceLoadVersion;
+
         try {
             const accessed = JSON.parse(localStorage.getItem('novel-editor-accessed') || '{}');
             accessed[id] = Date.now();
@@ -319,20 +327,15 @@
         if ($('#app-main')) $('#app-main').style.display = '';
 
         try {
-            const [chapterResponse, outlineResponse, workspaceResponse] = await Promise.all([
-                fetch(`/api/chapters?novelId=${encodeURIComponent(id)}`),
-                fetch(`/api/outline?novelId=${encodeURIComponent(id)}`),
-                fetch(`/api/save/workspace/${encodeURIComponent(id)}`),
+            const [chapterData, outlineData, diskWorkspace] = await Promise.all([
+                ApiClient.get(`/api/chapters?novelId=${encodeURIComponent(id)}`, { signal: loadSignal }),
+                ApiClient.get(`/api/outline?novelId=${encodeURIComponent(id)}`, { signal: loadSignal }),
+                ApiClient.get(`/api/save/workspace/${encodeURIComponent(id)}`, { signal: loadSignal }),
             ]);
-
-            if (!chapterResponse.ok) throw new Error(`章节加载失败: HTTP ${chapterResponse.status}`);
-            if (!outlineResponse.ok) throw new Error(`大纲加载失败: HTTP ${outlineResponse.status}`);
-
-            const chapterData = await chapterResponse.json();
-            const outlineData = await outlineResponse.json();
-            const diskWorkspace = workspaceResponse.ok ? await workspaceResponse.json() : {};
+            if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
             const localWorkspace = loadWorkspaceFallback(id) || {};
-            const workspaceData = Number(localWorkspace.savedAt || 0) > Number(diskWorkspace.savedAt || 0)
+            const workspaceData = localWorkspace.pendingSync
+                || Number(localWorkspace.savedAt || 0) > Number(diskWorkspace.savedAt || 0)
                 ? localWorkspace
                 : diskWorkspace;
             state.chapters = Array.isArray(chapterData.chapters) ? chapterData.chapters : [];
@@ -341,6 +344,7 @@
             state.workspaceLoaded = true;
             localStorage.setItem('novel-editor-last-workspace', id);
             await loadAiSecretStatus();
+            if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
 
             state.currentChapter = null;
             refreshChapterTree();
@@ -349,7 +353,8 @@
             renderCharacterList();
             renderPromptTemplates();
             try {
-                await loadSessions(workspaceData.activeSessionId);
+                await loadSessions(workspaceData.activeSessionId, { novelId: id, signal: loadSignal });
+                if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
             } catch (sessionError) {
                 ChatPanel?.clearChat();
                 setStatus(`会话加载失败: ${sessionError.message}`, 'error');
@@ -357,12 +362,17 @@
 
             const firstChapter = state.chapters.find(item => item.type !== 'volume');
             if (firstChapter) {
-                const response = await fetch(`/api/chapters/${encodeURIComponent(firstChapter.id)}?novelId=${encodeURIComponent(id)}`);
-                loadChapter(response.ok ? await response.json() : firstChapter);
+                const chapter = await ApiClient.get(
+                    `/api/chapters/${encodeURIComponent(firstChapter.id)}?novelId=${encodeURIComponent(id)}`,
+                    { signal: loadSignal },
+                );
+                if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
+                loadChapter(chapter || firstChapter);
             } else {
                 clearChapterEditor();
             }
         } catch (err) {
+            if (err.name === 'AbortError') return;
             setStatus(`\u5de5\u4f5c\u533a\u52a0\u8f7d\u5931\u8d25: ${err.message}`, 'error');
         }
     }
@@ -411,7 +421,10 @@
         updatePresetNameDisplay('');
         updatePresetSelect();
         applyConfigToUI();
-        if (typeof ChatPanel !== 'undefined') ChatPanel.clearChat();
+        if (typeof ChatPanel !== 'undefined') {
+            ChatPanel.cancelActiveRequest?.();
+            ChatPanel.clearChat();
+        }
     }
 
     function applyWorkspaceState(workspace = {}) {
@@ -961,6 +974,7 @@
         addPromptInEditor();
     }
 
+    // eslint-disable-next-line no-unused-vars
     function deleteSelectedPromptTemplates() {
         const ids = new Set(Object.entries(state.selectedPromptTemplates || {})
             .filter(([, selected]) => selected)
@@ -1262,6 +1276,7 @@
         setTimeout(() => document.getElementById('prompt-editor-name')?.focus(), 100);
     }
 
+    // eslint-disable-next-line no-unused-vars
     function collectWorldBookGroups() {
         const groups = new Set();
         if (state.worldBook?.entries) {
@@ -1272,6 +1287,7 @@
         return [...groups].sort((a, b) => a.localeCompare(b, 'zh-CN'));
     }
 
+    // eslint-disable-next-line no-unused-vars
     function collectCharacterGroups() {
         const groups = new Set();
         state.characters.forEach(ch => {
@@ -1359,6 +1375,7 @@
         $('#btn-editor-italic')?.addEventListener('click', () => wrapEditorSelection('*', '*'));
 
         // AI buttons
+        $('#btn-extract-setting')?.addEventListener('click', onExtractSetting);
         $('#btn-continue').addEventListener('click', onContinue);
         $('#btn-plot-suggestions').addEventListener('click', onPlotSuggestions);
         $('#btn-inspire').addEventListener('click', onInspire);
@@ -1580,19 +1597,27 @@
         $('#btn-continue').textContent = '⏳ 生成中...';
 
         try {
-            const response = await fetch('/api/ai/continue', {
+            const response = await fetch('/api/chat/write', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    text,
+                    message: '请从当前正文结尾自然续写下一段，只输出小说正文，不要解释。',
+                    history: [],
                     config: state.aiConfig,
-                    worldBook: getReferencedWorldBook(),
-                    characters: getReferencedCharacters(text),
-                    outline: getIncompleteOutline(),
-                    styleGuide: state.currentNovel?.styleGuide || '',
-                    novelId: state.currentNovel?.id,
-                    memoryBudget: state.aiConfig.memoryBudget || 15,
+                    context: {
+                        currentText: text,
+                        worldBookEntries: Object.values(getReferencedWorldBook().entries || {}),
+                        characters: getReferencedCharacters(text),
+                        outline: getIncompleteOutline(),
+                        styleGuide: state.currentNovel?.styleGuide || '',
+                        novelId: state.currentNovel?.id,
+                        novelTitle: state.currentNovel?.title || '',
+                        chapterTitle: state.currentChapter?.title || '',
+                    },
                     presetName: state.presetName || '__default__',
+                    promptTemplates: (state.promptTemplates || [])
+                        .filter(template => state.enabledTemplates?.[template.identifier] !== false),
+                    promptOrder: state.promptOrder || [],
                 }),
             });
 
@@ -1602,10 +1627,10 @@
             }
 
             const data = await response.json();
-            if (!data.content?.trim()) throw new Error('模型没有返回正文，请提高单次输出长度后重试');
+            if (!data.reply?.trim()) throw new Error('模型没有返回正文，请提高单次输出长度后重试');
             const editor = $('#chapter-editor');
             // Append generated content
-            editor.value = text + '\n\n' + data.content;
+            editor.value = text + '\n\n' + data.reply;
             editor.scrollTop = editor.scrollHeight;
             state.isDirty = true;
             updateWordCount();
@@ -1706,6 +1731,79 @@
         } finally {
             state.isGenerating = false;
         }
+    }
+
+    async function onExtractSetting() {
+        const text = $('#chapter-editor').value;
+        if (!text.trim()) { setStatus('请先编写正文再提取设定', 'warn'); return; }
+        if (!state.aiConfig.apiKey && state.aiConfig.provider !== 'ollama') {
+            setStatus('请先配置 API Key', 'error'); return;
+        }
+        setStatus('正在分析正文提取设定...', 'loading');
+        showToast('AI 正在提取角色和世界观...', 'loading', 0);
+        try {
+            const resp = await fetch('/api/ai/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: text.slice(-12000),
+                    config: state.aiConfig,
+                    presetName: state.presetName || '__default__',
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Extraction failed');
+            document.querySelectorAll('.toast-item').forEach(e => e.remove());
+            showExtractionResults(data);
+        } catch (err) {
+            document.querySelectorAll('.toast-item').forEach(e => e.remove());
+            setStatus(`提取失败: ${err.message}`, 'error');
+        }
+    }
+
+    function showExtractionResults(data) {
+        const chars = data.characters || [];
+        const entries = data.worldEntries || [];
+        const overlay = document.createElement('div');
+        overlay.className = 'plot-modal-overlay';
+        const charRows = chars.map((c, i) => `<div class="extract-check-row"><input type="checkbox" class="extract-char-check" data-idx="${i}" checked><span><b>${escHtml(c.name)}</b> — ${escHtml(c.description?.substring(0, 60) || '')}</span></div>`).join('');
+        const entryRows = entries.map((e, i) => `<div class="extract-check-row"><input type="checkbox" class="extract-entry-check" data-idx="${i}" checked><span><b>${escHtml(e.comment || e.key?.[0] || '条目')}</b> [${escHtml(e.group || '')}] — ${escHtml((e.key || []).join(', '))}</span></div>`).join('');
+        overlay.innerHTML = `<div class="plot-modal" style="max-width:700px;max-height:80vh;"><div class="plot-modal-header"><h3>提取结果</h3><p class="settings-subtitle">${data.summary || ''}</p><button class="plot-modal-close">×</button></div>
+        <div class="plot-modal-body" style="max-height:55vh;overflow-y:auto;padding:16px;">
+        <h4>角色 (${chars.length})</h4>${charRows || '<p style="color:var(--text-muted)">未提取到角色</p>'}
+        <h4 style="margin-top:16px;">世界观条目 (${entries.length})</h4>${entryRows || '<p style="color:var(--text-muted)">未提取到世界观</p>'}
+        </div>
+        <div class="plot-modal-footer"><div style="display:flex;gap:8px;"><label><input type="checkbox" id="extract-import-full" checked> 包含内容到正文</label></div><button class="ai-btn-secondary extract-close-btn">取消</button><button class="ai-btn-primary extract-import-btn">导入选中</button></div></div>`;
+        document.body.appendChild(overlay);
+        const close = () => overlay.remove();
+        overlay.querySelector('.plot-modal-close')?.addEventListener('click', close);
+        overlay.querySelector('.extract-close-btn')?.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        overlay.querySelector('.extract-import-btn')?.addEventListener('click', () => {
+            const selChars = overlay.querySelectorAll('.extract-char-check:checked');
+            const selEntries = overlay.querySelectorAll('.extract-entry-check:checked');
+            if (!chars.length && !entries.length) { close(); return; }
+            // Import selected characters
+            selChars.forEach(cb => {
+                const c = chars[parseInt(cb.dataset.idx)];
+                if (c) state.characters.push({ spec: 'chara_card_v3', spec_version: '3.0', data: { name: c.name, description: c.description || '', personality: c.personality || '', scenario: c.scenario || '', first_mes: c.first_mes || '', mes_example: '', creator_notes: '', system_prompt: '', post_history_instructions: '', tags: [], group: c.group || '', character_book: { entries: [] } } });
+            });
+            // Import selected world entries
+            selEntries.forEach(cb => {
+                const e = entries[parseInt(cb.dataset.idx)];
+                if (e) {
+                    if (!state.worldBook) state.worldBook = { entries: {} };
+                    const uid = Date.now() + Math.random();
+                    state.worldBook.entries[uid] = { uid, key: e.key || [], keysecondary: [], content: e.content || '', comment: e.comment || '', group: e.group || '', constant: false, selective: true, order: 100, position: 0, disable: false, probability: 100, depth: 4 };
+                }
+            });
+            renderCharacterList();
+            renderWorldBookList();
+            autoSave();
+            close();
+            showToast(`已导入 ${selChars.length} 个角色 + ${selEntries.length} 条世界书`, 'success');
+        });
+        requestAnimationFrame(() => overlay.classList.add('active'));
     }
 
     async function onTestConnection() {
@@ -2005,13 +2103,17 @@
             const resp = await fetch('/api/import/worldbook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: file.name.replace('.json', ''), data }),
+                body: JSON.stringify({
+                    novelId: state.currentNovel.id,
+                    name: file.name.replace('.json', ''),
+                    data,
+                }),
             });
 
             if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
 
             const result = await resp.json();
-            state.worldBook = result;
+            state.worldBook = { entries: result.entries || {} };
             renderWorldBookList();
             autoSave();
             setStatus(`✅ 世界书导入成功: ${result.entryCount} 个条目`, 'success');
@@ -2249,20 +2351,22 @@
                 if (file.name.endsWith('.png')) {
                     const form = new FormData();
                     form.append('file', file);
+                    form.append('novelId', state.currentNovel.id);
                     const resp = await fetch('/api/import/character-png', { method: 'POST', body: form });
                     if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
-                    const data = await resp.json();
-                    state.characters.push(data);
+                    const result = await resp.json();
+                    state.characters.push(result.character || result.data);
                 } else if (file.name.endsWith('.json')) {
                     const text = await readFileAsText(file);
                     const data = JSON.parse(text);
                     const resp = await fetch('/api/import/character-json', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ data }),
+                        body: JSON.stringify({ novelId: state.currentNovel.id, data }),
                     });
                     if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
-                    state.characters.push(data);
+                    const result = await resp.json();
+                    state.characters.push(result.character || data);
                 }
             } catch (err) {
                 setStatus(`导入 ${file.name} 失败: ${err.message}`, 'error');
@@ -2560,6 +2664,19 @@
         try {
             const text = await readFileAsText(file);
             const data = JSON.parse(text);
+            const importResponse = await fetch('/api/import/preset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    novelId: state.currentNovel.id,
+                    name: file.name.replace('.json', ''),
+                    data,
+                }),
+            });
+            if (!importResponse.ok) {
+                const error = await importResponse.json().catch(() => ({}));
+                throw new Error(error.error || `HTTP ${importResponse.status}`);
+            }
 
             // Store full preset for reference
             state.importedPreset = data;
@@ -2743,6 +2860,7 @@
         filterPromptTemplates();
     }
 
+    // eslint-disable-next-line no-unused-vars
     function showPromptTemplateDetail(template) {
         if (template?.identifier) openPromptEditor(template.identifier);
     }
@@ -3432,6 +3550,7 @@
 
     // Expose state and render functions for chat-panel.js
     window.editorState = state;
+    window.enterWorkspace = enterWorkspace;
     window.renderCharacterList = renderCharacterList;
     window.renderWorldBookList = renderWorldBookList;
 
@@ -3464,16 +3583,14 @@
 
     async function saveWorkspaceState({ silent = false } = {}) {
         if (!state.workspaceLoaded || !state.currentNovel?.id) return;
+        const novelId = state.currentNovel.id;
         const workspace = serializeWorkspace();
-        saveStateToLocal(workspace);
+        saveStateToLocal(workspace, { novelId, pendingSync: true });
         try {
-            const response = await fetch(`/api/save/workspace/${encodeURIComponent(state.currentNovel.id)}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(workspace),
+            const data = await ApiClient.post(`/api/save/workspace/${encodeURIComponent(novelId)}`, workspace, {
+                queueKey: `workspace:${novelId}`,
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            saveStateToLocal(workspace, { novelId, savedAt: data.savedAt, pendingSync: false });
             if (!silent) setStatus('工作区已保存', 'success');
         } catch (err) {
             if (!silent) setStatus(`工作区保存失败: ${err.message}`, 'error');
@@ -3490,12 +3607,14 @@
         }
     }
 
-    function saveStateToLocal(workspace = serializeWorkspace()) {
-        if (!state.workspaceLoaded || !state.currentNovel?.id) return;
+    function saveStateToLocal(workspace = serializeWorkspace(), options = {}) {
+        const novelId = options.novelId || state.currentNovel?.id;
+        if (!state.workspaceLoaded || !novelId) return;
         try {
-            localStorage.setItem(workspaceStorageKey(), JSON.stringify({
+            localStorage.setItem(workspaceStorageKey(novelId), JSON.stringify({
                 ...workspace,
-                savedAt: Date.now(),
+                savedAt: options.savedAt || Date.now(),
+                pendingSync: options.pendingSync === true,
             }));
         } catch (e) { /* quota exceeded? */ }
     }
@@ -3508,22 +3627,26 @@
         return Object.values(session.messages).find(Array.isArray) || [];
     }
 
-    async function loadSessions(preferredId) {
-        if (!state.currentNovel?.id || typeof ChatPanel === 'undefined') return;
-        const response = await fetch(`/api/sessions?novelId=${encodeURIComponent(state.currentNovel.id)}`);
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    async function loadSessions(preferredId, options = {}) {
+        const novelId = options.novelId || state.currentNovel?.id;
+        if (!novelId || typeof ChatPanel === 'undefined') return;
+        const data = await ApiClient.get(
+            `/api/sessions?novelId=${encodeURIComponent(novelId)}`,
+            { signal: options.signal },
+        );
+        if (state.currentNovel?.id !== novelId) return;
         state.sessions = Array.isArray(data.sessions) ? data.sessions : [];
         if (!state.sessions.length) {
             await createChatSession({ initial: true });
             return;
         }
         const target = state.sessions.find(session => session.id === preferredId) || state.sessions[0];
-        await openChatSession(target.id);
+        await openChatSession(target.id, { novelId, signal: options.signal });
     }
 
     async function createChatSession({ initial = false } = {}) {
         if (!state.currentNovel?.id || typeof ChatPanel === 'undefined') return;
+        const novelId = state.currentNovel.id;
         if (!initial) await saveActiveSession();
         try {
             const response = await fetch('/api/sessions', {
@@ -3536,6 +3659,7 @@
             });
             const session = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(session.error || `HTTP ${response.status}`);
+            if (state.currentNovel?.id !== novelId) return;
             state.sessions = [session, ...state.sessions.filter(item => item.id !== session.id)];
             state.activeSessionId = session.id;
             state.activeSessionName = session.name;
@@ -3548,11 +3672,14 @@
         }
     }
 
-    async function openChatSession(id) {
-        if (!id || !state.currentNovel?.id || typeof ChatPanel === 'undefined') return;
-        const response = await fetch(`/api/sessions/${encodeURIComponent(id)}?novelId=${encodeURIComponent(state.currentNovel.id)}`);
-        const session = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(session.error || `HTTP ${response.status}`);
+    async function openChatSession(id, options = {}) {
+        const novelId = options.novelId || state.currentNovel?.id;
+        if (!id || !novelId || typeof ChatPanel === 'undefined') return;
+        const session = await ApiClient.get(
+            `/api/sessions/${encodeURIComponent(id)}?novelId=${encodeURIComponent(novelId)}`,
+            { signal: options.signal },
+        );
+        if (state.currentNovel?.id !== novelId) return;
         state.activeSessionId = session.id;
         state.activeSessionName = session.name || '新会话';
         ChatPanel.loadMessages(sessionMessages(session));
@@ -3573,13 +3700,9 @@
     async function deleteChatSession(id) {
         if (!id || !state.currentNovel?.id) return;
         try {
-            const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ novelId: state.currentNovel.id }),
+            await ApiClient.delete(`/api/sessions/${encodeURIComponent(id)}`, {
+                novelId: state.currentNovel.id,
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
             state.sessions = state.sessions.filter(session => session.id !== id);
             if (state.activeSessionId === id) {
                 state.activeSessionId = null;
@@ -3595,6 +3718,8 @@
 
     async function saveActiveSession() {
         if (!state.workspaceLoaded || !state.activeSessionId || typeof ChatPanel === 'undefined') return;
+        const novelId = state.currentNovel.id;
+        const sessionId = state.activeSessionId;
         const messages = ChatPanel.getMessages();
         const response = await fetch(`/api/sessions/${encodeURIComponent(state.activeSessionId)}`, {
             method: 'PUT',
@@ -3608,6 +3733,7 @@
         });
         const session = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(session.error || `HTTP ${response.status}`);
+        if (state.currentNovel?.id !== novelId || state.activeSessionId !== sessionId) return;
         const meta = {
             id: session.id,
             name: session.name,

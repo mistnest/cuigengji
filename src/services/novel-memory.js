@@ -162,7 +162,7 @@ export class NovelMemory {
      * @param {object} context - 当前上下文
      * @returns {object} 提取结果
      */
-    extractFromText(generatedText, context = {}) {
+    extractFromText(generatedText, _context = {}) {
         const extractions = {
             newCharacters: this._extractCharacters(generatedText),
             newWorldElements: this._extractWorldElements(generatedText),

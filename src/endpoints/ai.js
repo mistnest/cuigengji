@@ -302,7 +302,7 @@ router.post('/list-models', async (req, res) => {
         res.json({ models });
     } catch (err) {
         console.error('[AI] List models error:', err.message);
-        res.json({ models: [], error: err.message });
+        res.status(502).json({ models: [], error: err.message, code: 'UPSTREAM_ERROR' });
     }
 });
 
@@ -397,6 +397,100 @@ router.post('/memory-status', async (_req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ==================== POST /extract — AI 提取角色与世界书 ====================
+router.post('/extract', async (req, res) => {
+    try {
+        const { text, config, presetName } = req.body;
+        const aiConfig = applyAiSecret(config, presetName);
+        if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
+        if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
+
+        const sysPrompt = buildExtractSystemPrompt();
+        const userPrompt = buildExtractUserPrompt(text);
+        capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, systemPrompt: sysPrompt, userPrompt });
+        const result = await callAIText(aiConfig, sysPrompt, userPrompt, { maxTokens: 8000 });
+        const parsed = parseExtractionResult(result);
+
+        res.json({ ...parsed, rawResponse: result });
+    } catch (err) {
+        console.error('[AI Extract]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+function buildExtractSystemPrompt() {
+    return `## 角色
+你是专业的小说设定提取助手。你的任务是从小说正文中提取角色信息和世界观元素。
+
+## 工作流程
+1. 通读全文，找出所有有名字的角色
+2. 找出所有虚构世界观元素（地点、势力、规则、物品等）
+3. 对每个发现，注明原文中的关键描述
+
+## 角色提取规则
+- 只提取有明确名字的出场角色
+- 外貌只写差异特征（疤痕、异色瞳、特殊发色等），不写默认特征
+- 描述用白描，不用比喻（"眸如星辰"→提炼为特征而非保留比喻）
+- 性格从角色言行推断，不写形容词堆砌
+
+## 世界观提取规则
+- 地点：虚构城市/国家/建筑
+- 势力：门派/组织/家族
+- 规则：魔法体系/社会规则/特殊法则
+- 物品：重要道具/武器/神器
+- 每个条目配2-4个触发关键词
+
+## 输出格式（严格JSON，不输出其他文字）
+{
+  "characters": [
+    {
+      "name": "角色名",
+      "description": "外貌+身份白描（50-120字）",
+      "personality": "性格特征（20-40字）",
+      "scenario": "当前处境或首次出场场景（30-60字）",
+      "first_mes": "一句角色口吻的发言",
+      "group": "分组建议"
+    }
+  ],
+  "worldEntries": [
+    {
+      "comment": "条目名称",
+      "key": ["触发词1", "触发词2"],
+      "content": "注入内容（100-200字白描设定）",
+      "group": "地点/势力/规则/物品"
+    }
+  ],
+  "summary": "一句话概括提取结果"
+}`;
+}
+
+function buildExtractUserPrompt(text) {
+    const maxLen = 12000;
+    const scanText = text.length > maxLen ? text.slice(0, maxLen) + '\n\n…[后续内容省略]…' : text;
+    return [
+        '请分析以下小说正文，提取所有角色和世界观元素。',
+        '如果需要分组：使用"地点""势力""规则""物品""角色"',
+        '',
+        '【小说正文】',
+        scanText,
+    ].join('\n');
+}
+
+function parseExtractionResult(raw) {
+    try {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) return { characters: [], worldEntries: [], summary: '未能解析AI输出' };
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+            characters: Array.isArray(parsed.characters) ? parsed.characters : [],
+            worldEntries: Array.isArray(parsed.worldEntries) ? parsed.worldEntries : [],
+            summary: parsed.summary || '',
+        };
+    } catch {
+        return { characters: [], worldEntries: [], summary: '解析失败，请重试' };
+    }
+}
 
 function parsePlotCandidates(text) {
     const blocks = text.split('---').map(s => s.trim()).filter(Boolean);

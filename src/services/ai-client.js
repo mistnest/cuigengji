@@ -47,13 +47,19 @@ function generationOptions(config = {}, options = {}) {
     };
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = 60000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort(options.signal?.reason);
+    if (options.signal) {
+        if (options.signal.aborted) abort();
+        else options.signal.addEventListener('abort', abort, { once: true });
+    }
     try {
         return await fetch(url, { ...options, signal: controller.signal });
     } finally {
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
     }
 }
 
@@ -118,13 +124,13 @@ export async function callAIChat(config = {}, systemPrompt, messages, options = 
 
     switch (provider) {
         case 'anthropic':
-            return callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK });
+            return callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal });
         case 'google':
-            return callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP });
+            return callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
         case 'openrouter':
-            return callOpenRouter({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP });
+            return callOpenRouter({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
         case 'ollama':
-            return callOllama({ endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK });
+            return callOllama({ endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal });
         case 'openai':
         case 'deepseek':
         case 'qwen':
@@ -138,13 +144,13 @@ export async function callAIChat(config = {}, systemPrompt, messages, options = 
         case 'zai':
         case 'minimax':
         case 'custom':
-            return callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP });
+            return callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
         default:
             throw new Error(`Unsupported: ${provider}`);
     }
 }
 
-async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP }) {
+async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
     const body = {
         systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
         contents: toGeminiContents(messages),
@@ -154,26 +160,28 @@ async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal,
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Gemini ${r.status}`); }
     const d = await r.json();
     return d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
-async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK }) {
+async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal }) {
     const body = { model: model || DEFAULT_MODELS.anthropic, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages };
     if (topK) body.top_k = topK;
     const r = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),
+        signal,
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
     const d = await r.json();
     return d.content?.map(c => c.text || '').join('') || '';
 }
 
-async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP }) {
+async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
     const base = cleanBase(endpoint, provider);
     const r = await fetchWithTimeout(`${base}/chat/completions`, {
         method: 'POST',
@@ -185,6 +193,7 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
             top_p: topP,
             messages: [{ role: 'system', content: systemPrompt }, ...messages],
         }),
+        signal,
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
     const d = await r.json();
@@ -196,7 +205,7 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
     return content;
 }
 
-async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP }) {
+async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
     const r = await fetchWithTimeout(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -207,19 +216,21 @@ async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperatu
             top_p: topP,
             messages: [{ role: 'system', content: systemPrompt }, ...messages],
         }),
+        signal,
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
     const d = await r.json();
     return d.choices?.[0]?.message?.content || '';
 }
 
-async function callOllama({ endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, topK }) {
+async function callOllama({ endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal }) {
     const base = (endpoint || 'http://localhost:11434').replace(/\/+$/, '');
     const prompt = `### System:\n${systemPrompt}\n\n### Conversation:\n${toText(messages)}\n\n### Assistant:\n`;
     const r = await fetchWithTimeout(`${base}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: model || DEFAULT_MODELS.ollama, prompt, stream: false, options: { temperature, num_predict: maxTokens, top_p: topP, top_k: topK } }),
+        signal,
     });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Ollama ${r.status}`); }
     const d = await r.json();
@@ -294,7 +305,7 @@ export async function fetchModelList(config = {}) {
  * Try to get real context limits per model via API queries.
  * Runs in parallel with concurrency limit to avoid rate-limiting.
  */
-async function enrichModelContexts(models, base, headers, provider) {
+async function enrichModelContexts(models, base, headers, _provider) {
     const CONCURRENCY = 3;
     const MAX_PROBE = 20; // don't probe more than 20 models
 
