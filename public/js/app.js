@@ -3632,10 +3632,15 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         let result = text;
         for (const rule of state.regexBindings) {
             try {
-                // Parse /pattern/flags format from ST
-                const m = rule.find.match(/^\/(.+)\/([gimsuy]*)$/);
-                if (!m) continue;
-                const re = new RegExp(m[1], m[2] || 'g');
+                // Parse /pattern/flags format from ST. Pattern may contain /, so
+                // split at last / to separate pattern body from flags.
+                const str = rule.find;
+                if (!str.startsWith('/')) continue;
+                const lastSlash = str.lastIndexOf('/');
+                if (lastSlash <= 0) continue;
+                const pattern = str.substring(1, lastSlash);
+                const flags = str.substring(lastSlash + 1);
+                const re = new RegExp(pattern, flags || 'g');
                 result = result.replace(re, rule.replace);
             } catch { /* skip invalid regex */ }
         }
