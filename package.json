@@ -15,6 +15,7 @@
         "test:smoke": "npx playwright test --grep @smoke",
         "test:api": "npx playwright test tests/api/",
         "test:e2e": "npx playwright test tests/e2e/",
+        "test:electron": "node scripts/test-electron.js",
         "test:regression": "npx playwright test --grep @regression",
         "test:ui": "npx playwright test --ui",
         "test:report": "npx playwright show-report test-results/html",

@@ -221,10 +221,15 @@
                 delBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     if (!confirm(`\u5220\u9664\u201c${novel.title || novel.id}\u201d\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
-                    await fetch(`/api/novels/${encodeURIComponent(novel.id)}`, { method: 'DELETE' });
-                    delete accessed[novel.id];
-                    novels.splice(novels.indexOf(novel), 1);
-                    renderCards(expanded);
+                    try {
+                        await deleteWorkspace(novel.id);
+                        delete accessed[novel.id];
+                        localStorage.setItem('novel-editor-accessed', JSON.stringify(accessed));
+                        novels.splice(novels.indexOf(novel), 1);
+                        renderCards(expanded);
+                    } catch (error) {
+                        setStatus(`删除项目失败: ${error.message}`, 'error');
+                    }
                 });
 
                 card.append(icon, info, delBtn);
@@ -251,11 +256,19 @@
                         if (!checked.length) { setStatus('\u8bf7\u5148\u52fe\u9009\u9879\u76ee', 'warn'); return; }
                         const ids = [...checked].map(cb => cb.dataset.novelId);
                         if (!confirm(`\u5220\u9664\u9009\u4e2d\u7684 ${ids.length} \u4e2a\u9879\u76ee\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
+                        const deleted = [];
                         for (const id of ids) {
-                            await fetch(`/api/novels/${encodeURIComponent(id)}`, { method: 'DELETE' });
-                            delete accessed[id];
+                            try {
+                                await deleteWorkspace(id);
+                                deleted.push(id);
+                                delete accessed[id];
+                            } catch (error) {
+                                setStatus(`删除项目失败: ${error.message}`, 'error');
+                                break;
+                            }
                         }
-                        novels = novels.filter(n => !ids.includes(n.id));
+                        localStorage.setItem('novel-editor-accessed', JSON.stringify(accessed));
+                        novels = novels.filter(n => !deleted.includes(n.id));
                         renderCards(expanded);
                     });
                     list.appendChild(bar);
@@ -294,6 +307,12 @@
             error.textContent = `\u52a0\u8f7d\u5931\u8d25: ${err.message}`;
             list.appendChild(error);
         }
+    }
+
+    async function deleteWorkspace(id) {
+        const response = await fetch(`/api/novels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     }
 
     function createWorkspaceFromWelcome() {
@@ -343,6 +362,7 @@
             applyWorkspaceState(workspaceData);
             state.workspaceLoaded = true;
             localStorage.setItem('novel-editor-last-workspace', id);
+            syncWorkspaceInteractivity();
 
             state.currentChapter = null;
             const firstChapter = state.chapters.find(item => item.type !== 'volume');
@@ -369,6 +389,7 @@
                 .catch(sessionError => {
                     if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
                     ChatPanel?.clearChat();
+                    syncWorkspaceInteractivity();
                     setStatus(`会话加载失败: ${sessionError.message}`, 'error');
                 });
         } catch (err) {
@@ -425,6 +446,7 @@
             ChatPanel.cancelActiveRequest?.();
             ChatPanel.clearChat();
         }
+        syncWorkspaceInteractivity();
     }
 
     function applyWorkspaceState(workspace = {}) {
@@ -838,15 +860,36 @@
             overlay.className = 'plot-modal-overlay active';
             const modal = document.createElement('div');
             modal.className = 'plot-modal';
+            modal.style.cssText = 'max-width:800px;max-height:85vh;';
             const close = document.createElement('button');
             close.type = 'button';
             close.className = 'plot-modal-close';
             close.textContent = '\u00d7';
             close.addEventListener('click', () => overlay.remove());
-            const pre = document.createElement('pre');
-            pre.style.cssText = 'white-space:pre-wrap;max-height:70vh;overflow:auto;padding:16px;';
-            pre.textContent = data.empty ? '\u8fd8\u6ca1\u6709\u53d1\u9001\u8fc7 AI \u8bf7\u6c42' : JSON.stringify(data, null, 2);
-            modal.append(close, pre);
+            const body = document.createElement('div');
+            body.style.cssText = 'max-height:75vh;overflow-y:auto;padding:20px;font-size:13px;line-height:1.7;';
+            if (data.empty) {
+                body.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">\u8fd8\u6ca1\u6709\u53d1\u9001\u8fc7 AI \u8bf7\u6c42</p>';
+            } else {
+                const tokenTotal = data.tokenEstimate?.total || 0;
+                const memTotal = data.memoryStats?.totalTokens || 0;
+                body.innerHTML = `
+<div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;">
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">Provider: <b>${escHtml(data.provider || '-')}</b></span>
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">Model: <b>${escHtml(data.model || '-')}</b></span>
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">Temp: <b>${data.temperature ?? '-'}</b></span>
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">MaxTokens: <b>${data.maxTokens ?? '-'}</b></span>
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">Total Est: <b>${tokenTotal} tokens</b></span>
+  <span style="background:var(--bg-tertiary);padding:3px 10px;border-radius:4px;font-size:12px;">Memory: <b>${memTotal}/??budget?? tokens</b></span>
+</div>
+<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px 0;color:var(--accent-primary);">System Prompt (${Math.round((data.systemPrompt||'').length/2.5)} tok)</h4>
+<pre style="white-space:pre-wrap;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:12px;max-height:300px;overflow:auto;font-size:12px;color:var(--text-primary);">${escHtml(data.systemPrompt || '(\u65e0)')}</pre></div>
+<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px 0;color:var(--accent-primary);">User Prompt (${Math.round((data.userPrompt||'').length/2.5)} tok)</h4>
+<pre style="white-space:pre-wrap;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:12px;max-height:300px;overflow:auto;font-size:12px;color:var(--text-primary);">${escHtml(data.userPrompt || '(\u65e0)')}</pre></div>
+${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px 0;color:var(--accent-primary);">Memory Stats</h4><pre style="white-space:pre-wrap;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:12px;font-size:12px;color:var(--text-primary);">' + escHtml(JSON.stringify(data.memoryStats, null, 2)) + '</pre></div>' : ''}
+`;
+            }
+            modal.append(close, body);
             overlay.appendChild(modal);
             overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
             document.body.appendChild(overlay);
@@ -1892,11 +1935,19 @@
     }
 
     async function onAddChapter() {
+        if (!state.workspaceLoaded) {
+            setStatus('工作区正在加载，请稍候', 'loading');
+            return;
+        }
         if (state.isDirty && !await onSave({ silent: true })) return;
         await createChapter();
     }
 
     async function onAddVolume() {
+        if (!state.workspaceLoaded) {
+            setStatus('工作区正在加载，请稍候', 'loading');
+            return;
+        }
         const title = `第${state.chapters.filter(c => c.type === 'volume').length + 1}卷`;
         try {
             const response = await fetch('/api/chapters', {
@@ -1927,11 +1978,11 @@
     function loadChapter(chapter, { refreshTree = true } = {}) {
         if (!chapter) return;
         state.currentChapter = chapter;
-        setChapterEditorEnabled(true);
+        syncWorkspaceInteractivity();
         // Defensive: after a tick, ensure editor is still enabled
         // (async operations during load might race with disable calls)
         setTimeout(() => {
-            if (state.currentChapter?.id === chapter.id) setChapterEditorEnabled(true);
+            if (state.currentChapter?.id === chapter.id) syncWorkspaceInteractivity();
         }, 100);
         $('#chapter-editor').value = chapter.content || '';
         $('#chapter-title-input').value = chapter.title || '';
@@ -3363,6 +3414,19 @@
         $('#btn-editor-italic').disabled = !enabled;
     }
 
+    function syncWorkspaceInteractivity() {
+        setChapterEditorEnabled(Boolean(state.workspaceLoaded && state.currentChapter));
+        const workspaceReady = Boolean(state.workspaceLoaded);
+        const addChapterButton = $('#btn-add-chapter');
+        if (addChapterButton) addChapterButton.disabled = !workspaceReady;
+        const addVolumeButton = $('#btn-add-volume');
+        if (addVolumeButton) addVolumeButton.disabled = !workspaceReady;
+        const chatInput = $('#chat-input');
+        if (chatInput) chatInput.disabled = !workspaceReady;
+        const sendButton = $('#btn-send');
+        if (sendButton) sendButton.disabled = !workspaceReady;
+    }
+
     function clearChapterEditor() {
         state.currentChapter = null;
         state.isDirty = false;
@@ -3783,6 +3847,7 @@
             ChatPanel.clearChat();
             ChatPanel.renderSessionList(state.sessions, session.id);
             ChatPanel.setActiveSession(session.id);
+            syncWorkspaceInteractivity();
             saveWorkspaceState({ silent: true }).catch(() => {});
         } catch (err) {
             setStatus(`新建会话失败: ${err.message}`, 'error');
@@ -3802,6 +3867,7 @@
         ChatPanel.loadMessages(sessionMessages(session));
         ChatPanel.renderSessionList(state.sessions, session.id);
         ChatPanel.setActiveSession(session.id);
+        syncWorkspaceInteractivity();
     }
 
     async function switchChatSession(id) {

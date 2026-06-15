@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, dialog } from 'electron';
+import fs from 'node:fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -9,11 +10,73 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
 let embeddedServer;
 
+async function pathExists(target) {
+    try {
+        await fs.access(target);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function mergeNewerFiles(sourceRoot, targetRoot, backupRoot, relative = '') {
+    const sourceDir = path.join(sourceRoot, relative);
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const nextRelative = path.join(relative, entry.name);
+        const source = path.join(sourceRoot, nextRelative);
+        const target = path.join(targetRoot, nextRelative);
+        if (entry.isDirectory()) {
+            await fs.mkdir(target, { recursive: true });
+            await mergeNewerFiles(sourceRoot, targetRoot, backupRoot, nextRelative);
+            continue;
+        }
+        if (!entry.isFile()) continue;
+
+        const targetExists = await pathExists(target);
+        if (targetExists) {
+            const [sourceStat, targetStat] = await Promise.all([fs.stat(source), fs.stat(target)]);
+            if (sourceStat.mtimeMs <= targetStat.mtimeMs) continue;
+            const backup = path.join(backupRoot, nextRelative);
+            await fs.mkdir(path.dirname(backup), { recursive: true });
+            await fs.copyFile(target, backup);
+        }
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.copyFile(source, target);
+    }
+}
+
+async function prepareDevelopmentDataRoot() {
+    const projectDataRoot = path.join(__dirname, '..', 'data');
+    const electronDataRoot = path.join(app.getPath('userData'), 'data');
+    const marker = path.join(projectDataRoot, '.migrations', 'electron-user-data-v1.json');
+    if (await pathExists(marker) || !await pathExists(electronDataRoot)) return projectDataRoot;
+
+    const migratedAt = Date.now();
+    const backupRoot = path.join(projectDataRoot, 'backups', `electron-data-migration-${migratedAt}`);
+    await fs.mkdir(projectDataRoot, { recursive: true });
+    await mergeNewerFiles(electronDataRoot, projectDataRoot, backupRoot);
+    await fs.mkdir(path.dirname(marker), { recursive: true });
+    await fs.writeFile(marker, JSON.stringify({
+        migratedAt,
+        source: electronDataRoot,
+        target: projectDataRoot,
+        backup: backupRoot,
+    }, null, 2), 'utf8');
+    return projectDataRoot;
+}
+
 async function ensureServer() {
+    const dataRoot = process.env.CUIGENGJI_DATA_ROOT
+        ? path.resolve(process.env.CUIGENGJI_DATA_ROOT)
+        : app.isPackaged
+            ? path.join(app.getPath('userData'), 'data')
+            : await prepareDevelopmentDataRoot();
     const started = await startServer({
         port: 0,
-        dataRoot: path.join(app.getPath('userData'), 'data'),
+        dataRoot,
     });
+    console.log(`[Data] ${dataRoot}`);
     embeddedServer = started.server;
     return started.url;
 }

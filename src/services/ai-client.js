@@ -39,8 +39,12 @@ function cleanBase(endpoint, provider) {
 }
 
 function generationOptions(config = {}, options = {}) {
+    const rawMax = options.maxTokens || config.maxTokens || 4096;
+    // DeepSeek models need room for reasoning tokens; minimum 1024 to avoid
+    // "output budget for reasoning" error
+    const minTokens = config.provider === 'deepseek' ? 1024 : 0;
     return {
-        maxTokens: options.maxTokens || config.maxTokens || 4096,
+        maxTokens: Math.max(rawMax, minTokens),
         temperature: config.temperature ?? 0.7,
         topP: config.topP ?? 0.9,
         topK: config.topK ?? 40,

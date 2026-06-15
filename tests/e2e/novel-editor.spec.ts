@@ -317,6 +317,79 @@ test('切换模型服务商会更新接口地址，并可查看已保存 API Key
     await expect(page.locator('#ai-api-key')).toHaveAttribute('type', 'password');
 });
 
+test('新项目完成模型、预设和设定初始化后仍可编辑正文与聊天 @regression', async ({ page }) => {
+    await page.route('**/api/ai/test-connection', async route => {
+        await route.fulfill({ json: { success: true } });
+    });
+
+    await page.goto('/');
+    await createWorkspace(page);
+    await openSettingsPage(page, 'ai-service');
+    await page.locator('#ai-provider').selectOption('openai');
+    await page.locator('#ai-api-key').fill('test-key');
+    await page.locator('#btn-connect-model').click();
+    await expect(page.locator('#ai-connection-badge')).toContainText('已连接');
+
+    const preset = {
+        chat_completion_source: 'openai',
+        openai_model: 'gpt-test',
+        prompts: [{ identifier: 'main', name: '测试预设', role: 'system', content: '保持叙事连贯。' }],
+    };
+    await page.locator('#file-input-preset').setInputFiles({
+        name: 'flow-preset.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify(preset), 'utf8'),
+    });
+    await expect(page.locator('.preset-info-close')).toBeVisible();
+    await page.locator('.preset-info-close').click();
+    await page.locator('#btn-settings-done').click();
+
+    await page.locator('.sidebar-tab[data-panel="worldbook"]').click();
+    await page.locator('#btn-add-wb-entry').click();
+    await page.locator('#wb-edit-comment').fill('测试世界');
+    await page.locator('#wb-edit-content').fill('用于验证初始化流程。');
+    await page.locator('.wb-save-btn').click();
+
+    await page.locator('.sidebar-tab[data-panel="characters"]').click();
+    await page.locator('#btn-add-character').click();
+    await page.locator('#character-edit-name').fill('测试角色');
+    await page.locator('.character-edit-save').click();
+
+    await page.locator('.sidebar-tab[data-panel="chapters"]').click();
+    await page.locator('#btn-add-volume').click();
+    await page.locator('#btn-add-chapter').click();
+    await expect(page.locator('#chapter-editor')).toBeEnabled();
+    await page.locator('#chapter-editor').fill('正文可以正常输入。');
+    await expect(page.locator('#chapter-editor')).toHaveValue('正文可以正常输入。');
+
+    await page.locator('.sidebar-tab[data-panel="chat"]').click();
+    await expect(page.locator('#chat-input')).toBeEnabled();
+    await page.locator('#chat-input').fill('聊天框可以正常输入。');
+    await expect(page.locator('#chat-input')).toHaveValue('聊天框可以正常输入。');
+});
+
+test('欢迎页删除失败时保留项目卡片并显示错误 @regression', async ({ page }) => {
+    await page.goto('/');
+    const name = await createWorkspace(page);
+    await page.locator('#btn-home').click();
+    await expect(page.locator('.welcome-novel-card', { hasText: name })).toBeVisible();
+
+    await page.route(`**/api/novels/${encodeURIComponent(name)}`, async route => {
+        if (route.request().method() === 'DELETE') {
+            await route.fulfill({ status: 500, json: { error: '磁盘删除失败' } });
+        } else {
+            await route.continue();
+        }
+    });
+    page.once('dialog', dialog => dialog.accept());
+    const card = page.locator('.welcome-novel-card', { hasText: name });
+    await card.hover();
+    await card.locator('.welcome-delete-btn').click();
+
+    await expect(card).toBeVisible();
+    await expect(page.locator('#status-message')).toContainText('删除项目失败');
+});
+
 test('世界书和角色搜索默认收起，并可清空关闭 @regression', async ({ page }) => {
     await page.goto('/');
     await createWorkspace(page);

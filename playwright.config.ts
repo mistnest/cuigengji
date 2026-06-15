@@ -3,13 +3,11 @@
  * 遵循 playwright-e2e-testing + playwright-regression-testing skill 规范
  */
 import { defineConfig, devices } from "@playwright/test";
-import fs from "node:fs";
 import path from "node:path";
 
 const testPort = process.env.TEST_PORT || "18765";
 const testDataRoot = path.resolve(process.env.TEST_DATA_ROOT || "test-results/runtime-data");
 const baseURL = `http://127.0.0.1:${testPort}`;
-fs.rmSync(testDataRoot, { recursive: true, force: true });
 const serverCommand = [
   "node src/server.js",
   `--port ${testPort}`,
@@ -18,6 +16,7 @@ const serverCommand = [
 
 export default defineConfig({
   testDir: "./tests",
+  globalSetup: "./tests/global-setup.ts",
   timeout: 30000,
   expect: { timeout: 10000 },
   // CI 环境重试 2 次，本地不重试
