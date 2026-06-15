@@ -388,8 +388,8 @@
                             <input type="range" id="ai-temperature" min="0" max="2" step="0.05" value="0.7" class="ai-range">
                         </div>
                         <div class="ai-control-row">
-                            <div><label>单次输出长度 (Max Tokens) <span id="max-tokens-value">4096</span></label><p>控制一次最多生成多长。更高会更慢。</p></div>
-                            <input type="range" id="ai-max-tokens" min="256" max="32768" step="256" value="4096" class="ai-range">
+                            <div><label>单次输出长度 <span id="max-tokens-value">5%</span></label><p>占模型上下文窗口的百分比。例如 1M 上下文中 5% = 50K tokens。</p></div>
+                            <input type="range" id="ai-max-tokens" min="1" max="50" step="1" value="5" class="ai-range">
                         </div>
                         <div class="ai-control-row">
                             <div><label>Top P (候选范围) <span id="top-p-value">0.9</span></label><p>通常固定即可，避免和创造性一起大幅调整。</p></div>

@@ -14,6 +14,7 @@
         model: 'claude-sonnet-4-6',
         temperature: 0.7,
         maxTokens: 4096,
+        maxTokensPct: 5,
         topP: 0.9,
         memoryBudget: 15,
         maxContext: 0,
@@ -1390,7 +1391,9 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         $('#ai-model').value = c.model;
         updateModelContextInfo(c.model);
         $('#ai-temperature').value = c.temperature;
-        $('#ai-max-tokens').value = c.maxTokens;
+        // Show percentage slider; compute from stored pct or fall back to absolute/default
+        const pct = c.maxTokensPct || 5;
+        $('#ai-max-tokens').value = pct;
         $('#ai-top-p').value = c.topP;
         const memoryBudget = Number(c.memoryBudget || 15);
         document.querySelectorAll('input[name="memory-budget"]').forEach(input => {
@@ -1458,6 +1461,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             if (preset.model) state.aiConfig.model = preset.model;
             if (preset.temperature !== undefined) state.aiConfig.temperature = preset.temperature;
             if (preset.maxTokens) state.aiConfig.maxTokens = preset.maxTokens;
+            if (preset.maxTokensPct) state.aiConfig.maxTokensPct = preset.maxTokensPct;
             if (preset.topP !== undefined) state.aiConfig.topP = preset.topP;
             if (preset.topK !== undefined) state.aiConfig.topK = preset.topK;
             if (preset.memoryBudget !== undefined) state.aiConfig.memoryBudget = preset.memoryBudget;
@@ -3199,7 +3203,8 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         state.aiConfig.endpoint = $('#ai-endpoint').value;
         state.aiConfig.model = $('#ai-model').value;
         state.aiConfig.temperature = parseFloat($('#ai-temperature').value);
-        state.aiConfig.maxTokens = parseInt($('#ai-max-tokens').value);
+        state.aiConfig.maxTokensPct = parseInt($('#ai-max-tokens').value) || 5;
+        state.aiConfig.maxTokens = Math.round(getModelContextLimit() * state.aiConfig.maxTokensPct / 100);
         state.aiConfig.topP = parseFloat($('#ai-top-p').value);
         saveConfig();
         updateMemoryBudgetInfo();
@@ -3273,7 +3278,10 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         }
         if (tokens) {
             const label = tokens.closest('.ai-section')?.querySelector('#max-tokens-value');
-            if (label) label.textContent = tokens.value;
+            const pct = parseInt(tokens.value) || 5;
+            const ctx = getModelContextLimit();
+            const abs = Math.round(ctx * pct / 100);
+            if (label) label.textContent = pct + '%（约 ' + formatTokenLimit(abs) + ' tokens）';
         }
         if (topP) {
             const label = topP.closest('.ai-section')?.querySelector('#top-p-value');
@@ -3692,6 +3700,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             model: state.aiConfig.model,
             temperature: state.aiConfig.temperature,
             maxTokens: state.aiConfig.maxTokens,
+            maxTokensPct: state.aiConfig.maxTokensPct || 5,
             topP: state.aiConfig.topP,
             topK: state.aiConfig.topK,
             memoryBudget: state.aiConfig.memoryBudget,
