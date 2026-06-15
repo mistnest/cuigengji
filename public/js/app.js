@@ -343,23 +343,8 @@
             applyWorkspaceState(workspaceData);
             state.workspaceLoaded = true;
             localStorage.setItem('novel-editor-last-workspace', id);
-            await loadAiSecretStatus();
-            if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
 
             state.currentChapter = null;
-            refreshChapterTree();
-            renderOutlineTree();
-            renderWorldBookList();
-            renderCharacterList();
-            renderPromptTemplates();
-            try {
-                await loadSessions(workspaceData.activeSessionId, { novelId: id, signal: loadSignal });
-                if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
-            } catch (sessionError) {
-                ChatPanel?.clearChat();
-                setStatus(`会话加载失败: ${sessionError.message}`, 'error');
-            }
-
             const firstChapter = state.chapters.find(item => item.type !== 'volume');
             if (firstChapter) {
                 const chapter = await ApiClient.get(
@@ -367,10 +352,25 @@
                     { signal: loadSignal },
                 );
                 if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
-                loadChapter(chapter || firstChapter);
+                Object.assign(firstChapter, chapter);
+                loadChapter(firstChapter, { refreshTree: false });
             } else {
                 clearChapterEditor();
             }
+
+            refreshChapterTree();
+            renderOutlineTree();
+            renderWorldBookList();
+            renderCharacterList();
+            renderPromptTemplates();
+
+            void loadAiSecretStatus();
+            void loadSessions(workspaceData.activeSessionId, { novelId: id, signal: loadSignal })
+                .catch(sessionError => {
+                    if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
+                    ChatPanel?.clearChat();
+                    setStatus(`会话加载失败: ${sessionError.message}`, 'error');
+                });
         } catch (err) {
             if (err.name === 'AbortError') return;
             setStatus(`\u5de5\u4f5c\u533a\u52a0\u8f7d\u5931\u8d25: ${err.message}`, 'error');
@@ -858,10 +858,18 @@
     async function onInfill() {
         const editor = $('#chapter-editor');
         if (!editor) return;
+        if (!state.aiConfig.apiKey && !state.hasSavedApiKey && state.aiConfig.provider !== 'ollama') {
+            setStatus('请先配置 API Key', 'error');
+            return;
+        }
+        if (state.isGenerating) return;
         const instruction = prompt('\u8bf7\u63cf\u8ff0\u4e2d\u95f4\u9700\u8981\u8865\u5199\u7684\u5185\u5bb9');
         if (!instruction?.trim()) return;
         const start = editor.selectionStart;
         const end = editor.selectionEnd;
+        const button = $('#btn-infill');
+        state.isGenerating = true;
+        if (button) button.disabled = true;
         try {
             setStatus('AI \u6b63\u5728\u8865\u5199...', 'loading');
             const response = await fetch('/api/chat/infill', {
@@ -888,6 +896,9 @@
             setStatus('\u8865\u5199\u5b8c\u6210', 'success');
         } catch (err) {
             setStatus(`\u8865\u5199\u5931\u8d25: ${err.message}`, 'error');
+        } finally {
+            state.isGenerating = false;
+            if (button) button.disabled = false;
         }
     }
 
@@ -1331,7 +1342,7 @@
     function applyConfigToUI() {
         const c = state.aiConfig;
         $('#ai-provider').value = c.provider;
-        $('#ai-api-key').value = '';
+        resetApiKeyField();
         $('#ai-endpoint').value = c.endpoint;
         $('#ai-model').value = c.model;
         updateModelContextInfo(c.model);
@@ -1428,6 +1439,7 @@
         // AI config
         $('#ai-provider').addEventListener('change', onProviderChange);
         $('#ai-api-key').addEventListener('input', debounce(onConfigChange, 500));
+        $('#btn-toggle-api-key').addEventListener('click', onToggleApiKey);
         $('#ai-endpoint').addEventListener('input', debounce(onConfigChange, 500));
         $('#ai-model').addEventListener('change', onModelSelectChange);
         $('#ai-temperature').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
@@ -1641,7 +1653,7 @@
         } finally {
             state.isGenerating = false;
             $('#btn-continue').disabled = false;
-            $('#btn-continue').textContent = '✨ 续写下一段';
+            $('#btn-continue').textContent = '续写正文';
         }
     }
 
@@ -1708,6 +1720,7 @@
 
         state.isGenerating = true;
         setStatus('正在生成灵感...', 'loading');
+        $('#btn-inspire').disabled = true;
 
         try {
             const response = await fetch('/api/ai/inspire', {
@@ -1730,15 +1743,19 @@
             setStatus(`灵感生成失败: ${err.message}`, 'error');
         } finally {
             state.isGenerating = false;
+            $('#btn-inspire').disabled = false;
         }
     }
 
     async function onExtractSetting() {
         const text = $('#chapter-editor').value;
         if (!text.trim()) { setStatus('请先编写正文再提取设定', 'warn'); return; }
-        if (!state.aiConfig.apiKey && state.aiConfig.provider !== 'ollama') {
+        if (!state.aiConfig.apiKey && !state.hasSavedApiKey && state.aiConfig.provider !== 'ollama') {
             setStatus('请先配置 API Key', 'error'); return;
         }
+        if (state.isGenerating) return;
+        state.isGenerating = true;
+        $('#btn-extract-setting').disabled = true;
         setStatus('正在分析正文提取设定...', 'loading');
         showToast('AI 正在提取角色和世界观...', 'loading', 0);
         try {
@@ -1758,6 +1775,9 @@
         } catch (err) {
             document.querySelectorAll('.toast-item').forEach(e => e.remove());
             setStatus(`提取失败: ${err.message}`, 'error');
+        } finally {
+            state.isGenerating = false;
+            $('#btn-extract-setting').disabled = false;
         }
     }
 
@@ -1904,16 +1924,22 @@
         await switchChapter(id);
     }
 
-    function loadChapter(chapter) {
+    function loadChapter(chapter, { refreshTree = true } = {}) {
+        if (!chapter) return;
         state.currentChapter = chapter;
         setChapterEditorEnabled(true);
+        // Defensive: after a tick, ensure editor is still enabled
+        // (async operations during load might race with disable calls)
+        setTimeout(() => {
+            if (state.currentChapter?.id === chapter.id) setChapterEditorEnabled(true);
+        }, 100);
         $('#chapter-editor').value = chapter.content || '';
         $('#chapter-title-input').value = chapter.title || '';
         $('#current-chapter-title').textContent = `- ${chapter.title || '无标题'}`;
         state.isDirty = false;
         updateWordCount();
         updateStatusBar();
-        refreshChapterTree();
+        if (refreshTree) refreshChapterTree();
         setStatus(`已加载: ${chapter.title}`, 'info');
     }
 
@@ -1964,10 +1990,24 @@
             refreshChapterTree();
             return false;
         }
-        const chapter = state.chapters.find(item => item.id === id);
-        if (!chapter || chapter.type === 'volume') return false;
-        loadChapter(chapter);
-        return true;
+        const chapterMeta = state.chapters.find(item => item.id === id);
+        if (!chapterMeta || chapterMeta.type === 'volume') return false;
+        try {
+            setStatus(`正在加载: ${chapterMeta.title}`, 'loading');
+            const chapter = typeof chapterMeta.content === 'string'
+                ? chapterMeta
+                : await ApiClient.get(
+                    `/api/chapters/${encodeURIComponent(id)}?novelId=${encodeURIComponent(state.currentNovel.id)}`,
+                );
+            Object.assign(chapterMeta, chapter);
+            loadChapter(chapterMeta, { refreshTree: false });
+            ChapterTree?.select?.(chapterMeta.id);
+            return true;
+        } catch (error) {
+            setStatus(`章节加载失败: ${error.message}`, 'error');
+            refreshChapterTree();
+            return false;
+        }
     }
 
     async function onChapterTreeSelect(id) {
@@ -2919,7 +2959,9 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ novelId: state.currentNovel.id, title, description: '', type: 'plot' }),
             });
-            const node = await resp.json();
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+            const node = data;
             state.outline.push(node);
             renderOutlineTree();
             setStatus(`大纲节点已添加: ${title}`, 'success');
@@ -2951,15 +2993,22 @@
     async function toggleOutlineNode(id) {
         const node = state.outline.find(n => n.id === id);
         if (!node) return;
-        node.completed = !node.completed;
+        const previous = node.completed;
+        node.completed = !previous;
+        renderOutlineTree();
         try {
-            await fetch(`/api/outline/${id}`, {
+            const response = await fetch(`/api/outline/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ novelId: state.currentNovel.id, completed: node.completed }),
             });
-        } catch (e) { /* ignore */ }
-        renderOutlineTree();
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        } catch (error) {
+            node.completed = previous;
+            renderOutlineTree();
+            setStatus(`更新大纲失败: ${error.message}`, 'error');
+        }
     }
 
     function getIncompleteOutline() {
@@ -2996,16 +3045,19 @@
         localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
         state.hasSavedApiKey = false;
         state.isConnected = false;
+        resetApiKeyField();
+        updateProviderUI({ providerChanged: true });
+        state.aiConfig.endpoint = $('#ai-endpoint').value.trim();
+        state.aiConfig.model = $('#ai-model').value.trim();
         saveConfig();
-        updateProviderUI();
         loadAiSecretStatus();
         updateStatusBar();
     }
 
-    function updateProviderUI() {
+    function updateProviderUI({ providerChanged = false } = {}) {
         const provider = state.aiConfig.provider;
         const isOllama = provider === 'ollama';
-        $('#ai-api-key').style.display = isOllama ? 'none' : '';
+        $('#ai-api-key-field').style.display = isOllama ? 'none' : '';
 
         // Auto-fill default model for each provider
         const defaultModels = {
@@ -3016,7 +3068,7 @@
             ollama: 'llama3',
         };
         const currentModel = $('#ai-model').value;
-        if (!currentModel || Object.values(defaultModels).includes(currentModel)) {
+        if (providerChanged || !currentModel || Object.values(defaultModels).includes(currentModel)) {
             $('#ai-model').value = defaultModels[provider] || '';
         }
 
@@ -3024,16 +3076,70 @@
         const defaultEndpoints = {
             anthropic: 'https://api.anthropic.com',
             openai: 'https://api.openai.com/v1',
-            deepseek: 'https://api.deepseek.com',
+            google: 'https://generativelanguage.googleapis.com/v1beta',
+            mistral: 'https://api.mistral.ai/v1',
+            xai: 'https://api.x.ai/v1',
+            groq: 'https://api.groq.com/openai/v1',
+            deepseek: 'https://api.deepseek.com/v1',
+            qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+            spark: 'https://spark-api-open.xf-yun.com/v1',
+            zai: 'https://api.z.ai/api/paas/v4',
+            moonshot: 'https://api.moonshot.cn/v1',
+            siliconflow: 'https://api.siliconflow.cn/v1',
+            minimax: 'https://api.minimax.io/v1',
             openrouter: 'https://openrouter.ai/api/v1',
             ollama: 'http://localhost:11434',
         };
         const endpointInput = $('#ai-endpoint');
-        if (endpointInput && !endpointInput.value.trim()) {
+        if (endpointInput && (providerChanged || !endpointInput.value.trim())) {
             endpointInput.value = defaultEndpoints[provider] || '';
         }
 
         updateMemoryBudgetInfo();
+    }
+
+    function setApiKeyVisibility(revealed) {
+        const input = $('#ai-api-key');
+        const button = $('#btn-toggle-api-key');
+        input.type = revealed ? 'text' : 'password';
+        button.classList.toggle('revealed', revealed);
+        button.setAttribute('aria-pressed', String(revealed));
+        button.setAttribute('aria-label', revealed ? '隐藏 API Key' : '显示 API Key');
+        button.title = revealed ? '隐藏 API Key' : '显示 API Key';
+    }
+
+    function resetApiKeyField() {
+        $('#ai-api-key').value = '';
+        $('#ai-api-key').placeholder = '粘贴后自动保存到本机';
+        setApiKeyVisibility(false);
+    }
+
+    async function onToggleApiKey() {
+        const input = $('#ai-api-key');
+        if (input.type === 'text') {
+            setApiKeyVisibility(false);
+            return;
+        }
+        if (!input.value && state.hasSavedApiKey) {
+            try {
+                const response = await fetch('/api/ai-secrets/reveal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: state.aiConfig.provider,
+                        profile: state.presetName || '__default__',
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+                input.value = data.apiKey || '';
+            } catch (err) {
+                setStatus(`API Key 读取失败: ${err.message}`, 'error');
+                return;
+            }
+        }
+        setApiKeyVisibility(true);
     }
 
     function onConfigChange() {
@@ -3083,7 +3189,7 @@
                     state.isConnected = localStorage.getItem('novel-ai-connected-provider') === 'deepseek';
                     $('#ai-provider').value = 'deepseek';
                     $('#ai-model').value = 'deepseek-v4-flash';
-                    $('#ai-endpoint').value = '';
+                    $('#ai-endpoint').value = 'https://api.deepseek.com/v1';
                     $('#ai-api-key').placeholder = 'DeepSeek API Key 已安全保存到本机';
                     localStorage.setItem('novel-ai-provider-chosen', 'deepseek');
                     saveConfig();
@@ -3188,11 +3294,11 @@
 
         // Show extraction results
         if (memory?.extractions) {
-            showExtractionResults(memory.extractions);
+            showMemoryExtractionResults(memory.extractions);
         }
     }
 
-    function showExtractionResults(extractions) {
+    function showMemoryExtractionResults(extractions) {
         const section = document.getElementById('extraction-section');
         const results = document.getElementById('extraction-results');
         if (!section || !results) return;
@@ -3342,7 +3448,9 @@
         el.className = 'toast-item toast-' + type;
         el.textContent = msg;
         container.appendChild(el);
-        setTimeout(() => { if (el.parentNode) el.remove(); }, duration + 600);
+        if (duration > 0) {
+            setTimeout(() => { if (el.parentNode) el.remove(); }, duration + 600);
+        }
     }
 
     function setStatus(msg, type = 'info') {
@@ -3376,6 +3484,15 @@
             summary.textContent = state.isConnected
                 ? `${state.aiConfig.provider} · ${state.aiConfig.model}`
                 : state.hasSavedApiKey ? '密钥已保存，点击连接模型' : '配置模型服务';
+        }
+        const keyStatus = $('#ai-api-key-status');
+        if (keyStatus) {
+            const isOllama = state.aiConfig.provider === 'ollama';
+            keyStatus.textContent = isOllama
+                ? '本地服务无需 API Key'
+                : state.isConnected ? 'API Key 已验证可用'
+                    : state.hasSavedApiKey ? 'API Key 已保存，尚未验证连接' : '未配置 API Key';
+            keyStatus.className = `ai-key-status${state.isConnected ? ' verified' : state.hasSavedApiKey ? ' saved' : ''}`;
         }
         const providerLabel = $('#ai-provider option:checked')?.textContent?.trim()
             || state.aiConfig.provider

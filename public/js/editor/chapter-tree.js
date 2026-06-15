@@ -34,10 +34,17 @@ const ChapterTree = (function () {
 
         const volumes = state.chapters.filter(c => c.type === 'volume');
         const orphan = state.chapters.filter(c => c.type !== 'volume' && !c.volumeId);
+        const chaptersByVolume = new Map();
+        for (const chapter of state.chapters) {
+            if (chapter.type === 'volume' || !chapter.volumeId) continue;
+            const group = chaptersByVolume.get(chapter.volumeId) || [];
+            group.push(chapter);
+            chaptersByVolume.set(chapter.volumeId, group);
+        }
+        const fragment = document.createDocumentFragment();
 
         volumes.forEach(volume => {
-            const volumeChapters = state.chapters.filter(c => c.type !== 'volume' && c.volumeId === volume.id);
-            tree.appendChild(buildVolume(volume, volumeChapters));
+            fragment.appendChild(buildVolume(volume, chaptersByVolume.get(volume.id) || []));
         });
 
         const orphanArea = document.createElement('div');
@@ -53,12 +60,13 @@ const ChapterTree = (function () {
             orphanArea.appendChild(empty);
         }
         makeDropTarget(orphanArea, null);
-        tree.appendChild(orphanArea);
+        fragment.appendChild(orphanArea);
+        tree.appendChild(fragment);
 
         updateSelect();
 
         requestAnimationFrame(() => {
-            if (window.DomAnimator) {
+            if (window.DomAnimator && state.chapters.length <= 300) {
                 window.DomAnimator.staggerIn(tree, '.tree-chapter-item, .tree-volume-wrapper', 0.04);
             }
         });
@@ -241,10 +249,37 @@ const ChapterTree = (function () {
             return !c.volumeId;
         });
 
-        select.innerHTML = '<option value="">— 选择章节 —</option>';
+        const fragment = document.createDocumentFragment();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '— 选择章节 —';
+        fragment.appendChild(placeholder);
         chapters.forEach(chapter => {
-            select.innerHTML += `<option value="${chapter.id}"${chapter.id === state.currentChapterId ? ' selected' : ''}>${esc(chapter.title)}</option>`;
+            const option = document.createElement('option');
+            option.value = chapter.id;
+            option.textContent = chapter.title || '';
+            option.selected = chapter.id === state.currentChapterId;
+            fragment.appendChild(option);
         });
+        select.replaceChildren(fragment);
+    }
+
+    function select(currentId) {
+        const previous = state.chapters.find(chapter => chapter.id === state.currentChapterId);
+        const current = state.chapters.find(chapter => chapter.id === currentId);
+        state.currentChapterId = currentId;
+
+        document.querySelector('.tree-chapter-item.active')?.classList.remove('active');
+        const active = [...document.querySelectorAll('.tree-chapter-item')]
+            .find(item => item.dataset.chapterId === currentId);
+        active?.classList.add('active');
+
+        if (previous?.volumeId !== current?.volumeId) {
+            updateSelect();
+        } else {
+            const chapterSelect = document.getElementById('chapter-select');
+            if (chapterSelect) chapterSelect.value = currentId || '';
+        }
     }
 
     function esc(value) {
@@ -255,6 +290,7 @@ const ChapterTree = (function () {
 
     return {
         render,
+        select,
         on,
         getState: () => state,
         getCurrentId: () => state.currentChapterId,

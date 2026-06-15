@@ -5,29 +5,20 @@ import { fileURLToPath } from 'url';
 import { startServer } from '../src/server.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const APP_URL = 'http://127.0.0.1:8765';
 
 let mainWindow;
 let embeddedServer;
 
-async function isServerReachable() {
-    try {
-        const response = await fetch(`${APP_URL}/api/ping`, { method: 'GET' });
-        return response.status === 204;
-    } catch {
-        return false;
-    }
-}
-
 async function ensureServer() {
-    if (await isServerReachable()) return;
     const started = await startServer({
+        port: 0,
         dataRoot: path.join(app.getPath('userData'), 'data'),
     });
     embeddedServer = started.server;
+    return started.url;
 }
 
-function createWindow() {
+function createWindow(appUrl) {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
@@ -93,15 +84,15 @@ function createWindow() {
     ];
 
     Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));
-    mainWindow.loadURL(APP_URL);
+    mainWindow.loadURL(appUrl);
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 app.whenReady().then(async () => {
-    await ensureServer();
-    createWindow();
+    const appUrl = await ensureServer();
+    createWindow(appUrl);
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        if (BrowserWindow.getAllWindows().length === 0) createWindow(appUrl);
     });
 });
 

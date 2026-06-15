@@ -108,13 +108,15 @@ async function startServer(options = {}) {
     }
     return new Promise((resolve) => {
         const server = app.listen(port, host, () => {
-            const url = `http://${host}:${port}`;
+            const address = server.address();
+            const actualPort = typeof address === 'object' && address ? address.port : port;
+            const url = `http://${host}:${actualPort}`;
             console.log(`\n  📖 Novel AI Editor v0.1.0`);
             console.log(`  🚀 Server running at ${url}\n`);
 
             serverEvents.emit(EVENT_NAMES.SERVER_STARTED, {
                 url: new URL(url),
-                port,
+                port: actualPort,
                 host,
             });
 

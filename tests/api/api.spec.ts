@@ -309,6 +309,29 @@ test.describe("AI API — Validation", () => {
   });
 });
 
+test.describe("AI secrets API", () => {
+  test("saved API Key can be revealed only to a same-origin caller @regression", async ({ request }) => {
+    const profile = `reveal-test-${Date.now()}`;
+    const apiKey = "local-test-secret";
+    const saved = await request.post("/api/ai-secrets", {
+      data: { provider: "xai", profile, apiKey },
+    });
+    expect(saved.ok()).toBeTruthy();
+
+    const revealed = await request.post("/api/ai-secrets/reveal", {
+      data: { provider: "xai", profile },
+    });
+    expect(revealed.ok()).toBeTruthy();
+    await expect(revealed.json()).resolves.toMatchObject({ hasKey: true, apiKey });
+
+    const rejected = await request.post("/api/ai-secrets/reveal", {
+      headers: { Origin: "https://example.com" },
+      data: { provider: "xai", profile },
+    });
+    expect(rejected.status()).toBe(403);
+  });
+});
+
 // ==================== Import API ====================
 
 test.describe("Import API", () => {

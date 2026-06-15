@@ -9,6 +9,7 @@ import { enqueueFileWrite, readJson, removeFile, writeJson } from '../lib/json-s
 import { projectFile, resolveInside } from '../lib/project-paths.js';
 
 export const router = express.Router();
+const chapterPathIndexes = new Map();
 
 router.get('/', asyncRoute(async (req, res) => {
     const novelId = requireString(req.query.novelId, 'novelId', { maxLength: 100 });
@@ -79,7 +80,9 @@ router.post('/', asyncRoute(async (req, res) => {
         const existing = await listJsonNames(targetDir);
         const prefix = String(existing.length + 1).padStart(3, '0');
         const filename = `${safeFileBase(`${prefix}-${chapter.title}`, 'chapter')}.json`;
-        await writeJson(resolveInside(targetDir, filename), chapter);
+        const filePath = resolveInside(targetDir, filename);
+        await writeJson(filePath, chapter);
+        setIndexedChapterPath(root, chapter.id, filePath);
         return { status: 201, body: chapter };
     });
     res.status(result.status).json(result.body);
@@ -111,6 +114,7 @@ router.put('/:id', asyncRoute(async (req, res) => {
 
         await writeJson(targetPath, next);
         if (path.resolve(targetPath) !== path.resolve(found.path)) await removeFile(found.path);
+        setIndexedChapterPath(root, next.id, targetPath);
         return next;
     });
     res.json(chapter);
@@ -144,6 +148,7 @@ router.delete('/:id', asyncRoute(async (req, res) => {
         await fs.mkdir(backupDir, { recursive: true });
         await fs.copyFile(found.path, path.join(backupDir, `${req.params.id}_${Date.now()}.json`));
         await removeFile(found.path);
+        deleteIndexedChapterPath(root, req.params.id);
     });
     res.json({ success: true });
 }));
@@ -164,30 +169,46 @@ async function listChapterItems(root, novelId) {
         if (err.code === 'ENOENT') return [];
         throw err;
     }
-    const items = [];
-    for (const entry of entries) {
+    const groups = await Promise.all(entries.map(async entry => {
         const full = resolveInside(root, entry.name);
         if (entry.isDirectory()) {
             const volumeId = `vol_${entry.name}`;
-            items.push({ id: volumeId, novelId, type: 'volume', title: entry.name, volumeId: '', order: 0 });
-            for (const file of (await listJsonNames(full)).sort()) {
-                const chapter = await tryReadChapter(resolveInside(full, file));
-                if (chapter) items.push(lightChapter(chapter, volumeId));
-            }
+            const files = (await listJsonNames(full)).sort();
+            const chapters = await Promise.all(files.map(async file => {
+                const filePath = resolveInside(full, file);
+                const chapter = await tryReadChapter(filePath);
+                if (chapter?.id) setIndexedChapterPath(root, chapter.id, filePath);
+                return chapter ? lightChapter(chapter, volumeId) : null;
+            }));
+            return [
+                { id: volumeId, novelId, type: 'volume', title: entry.name, volumeId: '', order: 0 },
+                ...chapters.filter(Boolean),
+            ];
         } else if (entry.isFile() && entry.name.endsWith('.json')) {
             const data = await tryReadChapter(full);
-            if (!data) continue;
+            if (!data) return [];
             if (entry.name.startsWith('vol_') || data.type === 'volume') {
-                items.push({ id: data.id, novelId, type: 'volume', title: data.title, volumeId: '', order: data.order || 0 });
-            } else {
-                items.push(lightChapter(data, ''));
+                return [{ id: data.id, novelId, type: 'volume', title: data.title, volumeId: '', order: data.order || 0 }];
             }
+            if (data.id) setIndexedChapterPath(root, data.id, full);
+            return [lightChapter(data, '')];
         }
-    }
-    return items;
+        return [];
+    }));
+    return groups.flat();
 }
 
 async function findChapterFile(rootDir, id) {
+    const indexedPath = getIndexedChapterPath(rootDir, id);
+    if (indexedPath) {
+        const data = await tryReadChapter(indexedPath).catch(err => {
+            if (err.code === 'ENOENT') return null;
+            throw err;
+        });
+        if (data?.id === id) return { path: indexedPath, data };
+        deleteIndexedChapterPath(rootDir, id);
+    }
+
     let entries;
     try {
         entries = await fs.readdir(rootDir, { withFileTypes: true });
@@ -206,6 +227,24 @@ async function findChapterFile(rootDir, id) {
         }
     }
     return null;
+}
+
+function getChapterPathIndex(rootDir) {
+    const key = path.resolve(rootDir);
+    if (!chapterPathIndexes.has(key)) chapterPathIndexes.set(key, new Map());
+    return chapterPathIndexes.get(key);
+}
+
+function setIndexedChapterPath(rootDir, id, filePath) {
+    if (id) getChapterPathIndex(rootDir).set(id, filePath);
+}
+
+function getIndexedChapterPath(rootDir, id) {
+    return getChapterPathIndex(rootDir).get(id);
+}
+
+function deleteIndexedChapterPath(rootDir, id) {
+    getChapterPathIndex(rootDir).delete(id);
 }
 
 async function tryReadChapter(filePath) {

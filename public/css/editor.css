@@ -887,6 +887,71 @@ button:focus-visible {
     box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
+.ai-key-row {
+    position: relative;
+}
+
+.ai-key-row .ai-input {
+    padding-right: 38px;
+    margin-bottom: 3px;
+}
+
+.ai-key-toggle {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 30px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid var(--border-color);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.ai-key-toggle:hover,
+.ai-key-toggle:focus-visible {
+    color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+
+.ai-key-eye {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ai-key-eye-open,
+.ai-key-toggle.revealed .ai-key-eye-closed {
+    display: none;
+}
+
+.ai-key-toggle.revealed .ai-key-eye-open {
+    display: block;
+}
+
+.ai-key-status {
+    min-height: 16px;
+    margin-bottom: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.ai-key-status.saved {
+    color: var(--warning, #c58a18);
+}
+
+.ai-key-status.verified {
+    color: var(--success, #2f9e62);
+}
+
 .ai-range {
     width: 100%;
     margin-bottom: 6px;

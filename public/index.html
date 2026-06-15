@@ -340,8 +340,17 @@
                             </optgroup>
                         </select>
 
-                        <label class="ai-field-label" for="ai-api-key">API Key <span class="info-tooltip" data-tooltip="连接 AI 服务的密钥，只保存在本机。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">不同服务商有不同的 API Key。粘贴后会保存在本机，不会上传到第三方。</span></span></label>
-                        <input type="password" id="ai-api-key" placeholder="粘贴后自动保存到本机" class="ai-input">
+                        <div id="ai-api-key-field">
+                            <label class="ai-field-label" for="ai-api-key">API Key <span class="info-tooltip" data-tooltip="连接 AI 服务的密钥，只保存在本机。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">不同服务商有不同的 API Key。粘贴后会保存在本机，不会上传到第三方。</span></span></label>
+                            <div class="ai-key-row">
+                                <input type="password" id="ai-api-key" placeholder="粘贴后自动保存到本机" class="ai-input" autocomplete="off" spellcheck="false">
+                                <button type="button" id="btn-toggle-api-key" class="ai-key-toggle" aria-label="显示 API Key" aria-pressed="false" title="显示 API Key">
+                                    <svg class="ai-key-eye ai-key-eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                                    <svg class="ai-key-eye ai-key-eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 6.1A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.1 2.8M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a10 10 0 0 0 4-.8M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+                                </button>
+                            </div>
+                            <div id="ai-api-key-status" class="ai-key-status">未配置 API Key</div>
+                        </div>
 
                         <label class="ai-field-label" for="ai-endpoint">接口地址 <span class="info-tooltip" data-tooltip="通常不用修改；本地模型或自定义代理时填写。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">使用 Ollama、本地模型或自定义 API 代理时，填写完整接口地址。</span></span></label>
                         <input type="text" id="ai-endpoint" placeholder="通常不用修改" class="ai-input">

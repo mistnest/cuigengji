@@ -70,6 +70,7 @@ test('编辑后切换章节会先保存当前内容 @regression', async ({ page,
     await page.locator('#chapter-editor').fill('切换前必须保存的内容');
     await expect(page.locator('#status-save')).toHaveText('未保存');
     await chapters.nth(1).click();
+    await expect(page.locator('#chapter-editor')).toHaveValue('第二章内容');
 
     const response = await request.get(`/api/chapters?novelId=${encodeURIComponent(name)}`);
     const list = await response.json();
@@ -288,6 +289,34 @@ test('高频 AI 配置留在右侧，全局设置使用独立弹窗 @regression'
     await expect(page.locator('#settings-overlay')).not.toHaveClass(/active/);
 });
 
+test('切换模型服务商会更新接口地址，并可查看已保存 API Key @regression', async ({ page }) => {
+    await page.route('**/api/ai-secrets/status?provider=xai*', async route => {
+        await route.fulfill({ json: { hasKey: true } });
+    });
+    await page.route('**/api/ai-secrets/reveal', async route => {
+        await route.fulfill({ json: { hasKey: true, apiKey: 'xai-test-secret' } });
+    });
+
+    await page.goto('/');
+    await createWorkspace(page);
+    await openSettingsPage(page, 'ai-service');
+
+    await page.locator('#ai-provider').selectOption('deepseek');
+    await expect(page.locator('#ai-endpoint')).toHaveValue('https://api.deepseek.com/v1');
+
+    await page.locator('#ai-provider').selectOption('openrouter');
+    await expect(page.locator('#ai-endpoint')).toHaveValue('https://openrouter.ai/api/v1');
+
+    await page.locator('#ai-provider').selectOption('xai');
+    await expect(page.locator('#ai-api-key-status')).toContainText('已保存');
+    await expect(page.locator('#ai-api-key')).toHaveAttribute('type', 'password');
+    await page.locator('#btn-toggle-api-key').click();
+    await expect(page.locator('#ai-api-key')).toHaveAttribute('type', 'text');
+    await expect(page.locator('#ai-api-key')).toHaveValue('xai-test-secret');
+    await page.locator('#btn-toggle-api-key').click();
+    await expect(page.locator('#ai-api-key')).toHaveAttribute('type', 'password');
+});
+
 test('世界书和角色搜索默认收起，并可清空关闭 @regression', async ({ page }) => {
     await page.goto('/');
     await createWorkspace(page);
@@ -366,6 +395,135 @@ test('快速切换工作区时旧响应不会覆盖新项目 @regression', async
         await request.delete(`/api/novels/${encodeURIComponent(first.id)}`);
         await request.delete(`/api/novels/${encodeURIComponent(second.id)}`);
     }
+});
+
+test('大纲新增和完成状态会持久化，接口失败时回滚界面 @regression', async ({ page, request }) => {
+    await page.goto('/');
+    const name = await createWorkspace(page);
+    await page.locator('.sidebar-tab[data-panel="outline"]').click();
+
+    page.once('dialog', dialog => dialog.accept('第一幕冲突'));
+    await page.locator('#btn-add-outline-node').click();
+    await expect(page.locator('.outline-node')).toContainText('第一幕冲突');
+
+    await page.locator('.outline-node').click();
+    await expect(page.locator('.outline-check')).toHaveText('✅');
+    const stored = await request.get(`/api/outline?novelId=${encodeURIComponent(name)}`).then(response => response.json());
+    expect(stored.nodes[0]).toMatchObject({ title: '第一幕冲突', completed: true });
+
+    await page.route('**/api/outline/*', route => route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: '模拟保存失败' }),
+    }));
+    await page.locator('.outline-node').click();
+    await expect(page.locator('.outline-check')).toHaveText('✅');
+    await expect(page.locator('#status-message')).toContainText('更新大纲失败');
+});
+
+test('已保存 API Key 时提取设定按钮会正常发起请求 @regression', async ({ page }) => {
+    await page.route('**/api/ai/extract', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ characters: [], worldEntries: [], summary: '没有发现新设定' }),
+    }));
+    await page.goto('/');
+    await createWorkspace(page);
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-editor').fill('林冬走进雾港，发现码头已经封锁。');
+    await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
+    await page.evaluate(() => {
+        const app = window as typeof window & {
+            editorState: { hasSavedApiKey: boolean; aiConfig: { apiKey: string; provider: string } };
+        };
+        app.editorState.hasSavedApiKey = true;
+        app.editorState.aiConfig.apiKey = '';
+        app.editorState.aiConfig.provider = 'anthropic';
+    });
+
+    const requestPromise = page.waitForRequest('**/api/ai/extract');
+    await page.locator('#btn-extract-setting').click();
+    await requestPromise;
+    await expect(page.getByRole('heading', { name: '提取结果' })).toBeVisible();
+});
+
+test('高频 AI 按钮会执行对应操作并正确恢复状态 @regression', async ({ page }) => {
+    await page.route('**/api/chat/write', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ reply: '门外传来三声急促的敲击。', context: {}, memory: {} }),
+    }));
+    await page.route('**/api/ai/plot-suggestions', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            candidates: [{ direction: '追查敲门者', conflict: '身份暴露', estimatedWords: 800 }],
+        }),
+    }));
+    await page.route('**/api/ai/inspire', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ content: '让敲门声与旧案产生联系。' }),
+    }));
+    await page.route('**/api/chat/infill', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ reply: '她停下脚步。' }),
+    }));
+
+    await page.goto('/');
+    await createWorkspace(page);
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-editor').fill('夜色沉入雾港。');
+    await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
+    await page.evaluate(() => {
+        const app = window as typeof window & {
+            editorState: { hasSavedApiKey: boolean; aiConfig: { apiKey: string; provider: string } };
+        };
+        app.editorState.hasSavedApiKey = true;
+        app.editorState.aiConfig.apiKey = '';
+        app.editorState.aiConfig.provider = 'anthropic';
+    });
+
+    await page.locator('#btn-continue').click();
+    await expect(page.locator('#chapter-editor')).toHaveValue(/门外传来三声急促的敲击/);
+    await expect(page.locator('#btn-continue')).toBeEnabled();
+    await expect(page.locator('#btn-continue')).toHaveText('续写正文');
+
+    await page.locator('#btn-plot-suggestions').click();
+    await expect(page.locator('#plot-modal-overlay')).toBeVisible();
+    await expect(page.locator('.plot-card')).toContainText('追查敲门者');
+    await page.locator('#plot-modal-overlay .plot-modal-close').click();
+
+    await page.locator('#btn-inspire').click();
+    await expect(page.locator('#inspire-modal-overlay')).toBeVisible();
+    await expect(page.locator('.inspiration-content')).toContainText('旧案');
+    await page.locator('#inspire-modal-overlay .plot-modal-close').click();
+    await expect(page.locator('#btn-inspire')).toBeEnabled();
+
+    const editor = page.locator('#chapter-editor');
+    await editor.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(0, 0));
+    page.once('dialog', dialog => dialog.accept('补充人物反应'));
+    await page.locator('#btn-infill').click();
+    await expect(editor).toHaveValue(/^她停下脚步。/);
+    await expect(page.locator('#btn-infill')).toBeEnabled();
+});
+
+test('编辑器格式与导出按钮会作用于当前章节 @regression', async ({ page }) => {
+    await page.goto('/');
+    await createWorkspace(page);
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-title-input').fill('雾港来信');
+    const editor = page.locator('#chapter-editor');
+    await editor.fill('潮水退去');
+    await editor.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(0, 2));
+    await page.locator('#btn-editor-bold').click();
+    await expect(editor).toHaveValue('**潮水**退去');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#btn-export').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('雾港来信.txt');
 });
 
 declare global {
