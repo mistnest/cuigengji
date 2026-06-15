@@ -187,7 +187,9 @@ const ChatPanel = (function () {
             const endpoint = currentMode === 'write' ? '/api/chat/write' :
                             currentMode === 'plan' ? '/api/chat/plan' : '/api/chat';
             activeRequestController = new AbortController();
-            const reply = await callAPI(endpoint, text, context, activeRequestController.signal);
+            const rawReply = await callAPI(endpoint, text, context, activeRequestController.signal);
+            const reply = typeof window.applyRegexBindings === 'function'
+                ? window.applyRegexBindings(rawReply) : rawReply;
 
             removeMessage(loadingId);
             if (reply) {

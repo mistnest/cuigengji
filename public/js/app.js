@@ -33,6 +33,7 @@
         selectedPromptTemplates: {},
         specialPrompts: {},
         formatStrings: {},
+        regexBindings: [],
         writingReference: {
             worldbookMode: 'all',
             selectedWorldbookGroups: [],
@@ -467,6 +468,9 @@
         }
         if (workspace.formatStrings && typeof workspace.formatStrings === 'object') {
             state.formatStrings = workspace.formatStrings;
+        }
+        if (Array.isArray(workspace.regexBindings)) {
+            state.regexBindings = workspace.regexBindings;
         }
         if (workspace.writingReference && typeof workspace.writingReference === 'object') {
             state.writingReference = {
@@ -1481,6 +1485,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             if (preset.templates) state.promptTemplates = preset.templates;
             if (preset.promptOrder) state.promptOrder = preset.promptOrder;
             if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
+            if (preset.regexBindings) state.regexBindings = preset.regexBindings;
 
             state.presetName = name;
             localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
@@ -2814,8 +2819,16 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
 
             // === 4. Prompt templates (the key part!) ===
             if (Array.isArray(data.prompts)) {
+                const isConfigTemplate = (p) => {
+                    const n = (p.name || '').toLowerCase();
+                    const c = (p.content || '').toLowerCase();
+                    return n.includes('spreset') || n.includes('regex') || n.includes('macro')
+                        || c.includes('"chatsquash"') || c.includes('"regexbinding"')
+                        || c.includes('"toolbindings"') || c.includes('"macronest"')
+                        || c.includes('window.spresettempdata') || c.includes('window.sillytavern');
+                };
                 state.promptTemplates = data.prompts
-                    .filter(p => (p.content?.trim() || p.marker))
+                    .filter(p => (p.content?.trim() || p.marker) && !isConfigTemplate(p))
                     .map(p => ({
                         identifier: p.identifier || '',
                         name: p.name || p.identifier || '',
@@ -2844,6 +2857,13 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
 
             // === 8. Other ===
             if (data.assistant_prefill) state.aiConfig.prefill = data.assistant_prefill;
+
+            // === 9. RegexBinding — extract regex post-processing rules ===
+            if (data.RegexBinding?.regexes) {
+                state.regexBindings = data.RegexBinding.regexes
+                    .filter(r => !r.disabled && !r.promptOnly)
+                    .map(r => ({ find: r.findRegex, replace: r.replaceString, name: r.scriptName || '' }));
+            }
 
             applyConfigToUI();
             saveConfig();
@@ -3607,6 +3627,21 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         $('#onboard-step-3')?.classList.toggle('done', state.isConnected);
     }
 
+    function applyRegexBindings(text) {
+        if (!text || !state.regexBindings?.length) return text;
+        let result = text;
+        for (const rule of state.regexBindings) {
+            try {
+                // Parse /pattern/flags format from ST
+                const m = rule.find.match(/^\/(.+)\/([gimsuy]*)$/);
+                if (!m) continue;
+                const re = new RegExp(m[1], m[2] || 'g');
+                result = result.replace(re, rule.replace);
+            } catch { /* skip invalid regex */ }
+        }
+        return result;
+    }
+
     // ==================== Utils ====================
     function debounce(fn, delay) {
         let t;
@@ -3724,6 +3759,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             templates: state.promptTemplates || [],
             promptOrder: state.promptOrder || [],
             enabledTemplates: state.enabledTemplates || {},
+            regexBindings: state.regexBindings || [],
         };
 
         state.presets[name] = preset;
@@ -3776,6 +3812,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             enabledTemplates: state.enabledTemplates || {},
             specialPrompts: state.specialPrompts || {},
             formatStrings: state.formatStrings || {},
+            regexBindings: state.regexBindings || [],
             writingReference: state.writingReference || {},
             aiConfig: { ...state.aiConfig, apiKey: '', maxContext: 0 },
             activeSessionId: state.activeSessionId,
@@ -4017,6 +4054,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
 
     // Expose autoSave for manual triggers
     window.autoSaveEditor = autoSave;
+    window.applyRegexBindings = applyRegexBindings;
     window.saveWorkspaceState = saveWorkspaceState;
     window.saveStateToLocal = saveStateToLocal;
 
