@@ -42,7 +42,7 @@ function generationOptions(config = {}, options = {}) {
     const rawMax = options.maxTokens || config.maxTokens || 4096;
     // DeepSeek models need room for reasoning tokens; minimum 1024 to avoid
     // "output budget for reasoning" error
-    const minTokens = config.provider === 'deepseek' ? 1024 : 0;
+    const minTokens = config.provider === 'deepseek' ? 4096 : 0;
     return {
         maxTokens: Math.max(rawMax, minTokens),
         temperature: config.temperature ?? 0.7,

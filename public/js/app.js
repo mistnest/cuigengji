@@ -1391,8 +1391,13 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         $('#ai-model').value = c.model;
         updateModelContextInfo(c.model);
         $('#ai-temperature').value = c.temperature;
-        // Show percentage slider; compute from stored pct or fall back to absolute/default
-        const pct = c.maxTokensPct || 5;
+        // Show percentage slider; compute from stored pct, or derive from absolute tokens
+        let pct = c.maxTokensPct || 0;
+        if (!pct && c.maxTokens > 0) {
+            const ctx = getModelContextLimit();
+            pct = Math.round(c.maxTokens / ctx * 100) || 5;
+        }
+        if (!pct) pct = 5;
         $('#ai-max-tokens').value = pct;
         $('#ai-top-p').value = c.topP;
         const memoryBudget = Number(c.memoryBudget || 15);
@@ -1461,7 +1466,13 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             if (preset.model) state.aiConfig.model = preset.model;
             if (preset.temperature !== undefined) state.aiConfig.temperature = preset.temperature;
             if (preset.maxTokens) state.aiConfig.maxTokens = preset.maxTokens;
-            if (preset.maxTokensPct) state.aiConfig.maxTokensPct = preset.maxTokensPct;
+            if (preset.maxTokensPct) {
+                state.aiConfig.maxTokensPct = preset.maxTokensPct;
+            } else if (preset.maxTokens) {
+                // Backwards compat: old preset has absolute maxTokens, compute pct from context
+                const ctx = getModelContextLimit();
+                state.aiConfig.maxTokensPct = Math.round(preset.maxTokens / ctx * 100) || 5;
+            }
             if (preset.topP !== undefined) state.aiConfig.topP = preset.topP;
             if (preset.topK !== undefined) state.aiConfig.topK = preset.topK;
             if (preset.memoryBudget !== undefined) state.aiConfig.memoryBudget = preset.memoryBudget;
