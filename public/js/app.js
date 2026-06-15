@@ -3919,10 +3919,10 @@
 
     // Debounced auto-save (fires 2s after last edit)
     const autoSave = debounce(() => {
-        // Defer heavy serialization to avoid blocking the main thread
         requestAnimationFrame(async () => {
             saveStateToLocal();
-            if (state.isDirty && !await onSave({ silent: true })) return;
+            // Save chapter content if dirty, then always save workspace
+            if (state.isDirty) await onSave({ silent: true });
             await saveWorkspaceState({ silent: true }).catch(() => {});
             $('#status-save').textContent = '已自动保存';
             setTimeout(() => { if ($('#status-save')) $('#status-save').textContent = '已保存'; }, 2000);
