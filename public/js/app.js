@@ -3691,7 +3691,9 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         (state.regexBindings || []).forEach((r, i) => {
             const btn = document.createElement('button');
             btn.type = 'button';
+            btn.className = 'pe-nav-item';
             btn.textContent = r.name || ('规则' + (i + 1));
+            btn.title = (r.find || '').substring(0, 60);
             btn.addEventListener('click', () => selectRegexForEdit(i));
             if (i === _regexEditorCurrent) btn.classList.add('active');
             list.appendChild(btn);
@@ -3706,7 +3708,8 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         document.getElementById('regex-editor-form').style.display = '';
         document.getElementById('regex-edit-name').value = r.name || '';
         document.getElementById('regex-edit-find').value = r.find || '';
-        document.getElementById('regex-edit-replace').value = r.replace || '';
+        const replaceEl = document.getElementById('regex-edit-replace');
+        if (replaceEl) replaceEl.value = r.replace || '';
         renderRegexNav();
     }
 
@@ -3714,7 +3717,8 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         if (_regexEditorCurrent === null) return;
         const name = document.getElementById('regex-edit-name').value.trim() || '规则';
         const find = document.getElementById('regex-edit-find').value.trim();
-        const replace = document.getElementById('regex-edit-replace').value;
+        const replaceEl = document.getElementById('regex-edit-replace');
+        const replace = replaceEl?.value || '';
         if (!find) { setStatus('请输入匹配正则', 'warn'); return; }
         state.regexBindings[_regexEditorCurrent] = { name, find, replace };
         renderRegexNav();
