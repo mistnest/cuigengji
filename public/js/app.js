@@ -2861,11 +2861,30 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             // === 8. Other ===
             if (data.assistant_prefill) state.aiConfig.prefill = data.assistant_prefill;
 
-            // === 9. RegexBinding — extract regex post-processing rules ===
-            if (data.RegexBinding?.regexes) {
-                state.regexBindings = data.RegexBinding.regexes
+            // === 9. RegexBinding — extract from SPreset模板 content or top-level ===
+            const extractRegexFrom = (src) => {
+                if (!src?.regexes) return [];
+                return src.regexes
                     .filter(r => !r.disabled && !r.promptOnly)
                     .map(r => ({ find: r.findRegex, replace: r.replaceString, name: r.scriptName || '' }));
+            };
+            // Try top-level first
+            let regexRules = extractRegexFrom(data.RegexBinding);
+            // Also scan prompt templates for SPreset配置 with embedded JSON
+            if (!regexRules.length && Array.isArray(data.prompts)) {
+                const spConfig = data.prompts.find(p => {
+                    const n = (p.name || '').toLowerCase();
+                    return n.includes('spreset') && (p.content || '').includes('RegexBinding');
+                });
+                if (spConfig) {
+                    try {
+                        const embedded = JSON.parse(spConfig.content);
+                        regexRules = extractRegexFrom(embedded.RegexBinding);
+                    } catch { /* not valid JSON */ }
+                }
+            }
+            if (regexRules.length) {
+                state.regexBindings = regexRules;
                 updateRegexDisplay();
             }
 
@@ -3733,7 +3752,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         if (!rules.length) { if (countEl) countEl.textContent = '0条'; return; }
         if (countEl) countEl.textContent = rules.length + '条';
         if (listEl) listEl.innerHTML = rules.map(r =>
-            '<div style="padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(r.name || '规则') + ': ' + escHtml(r.find.substring(0, 50)) + '</div>'
+            '<div style="padding:2px 0;display:flex;gap:8px;"><b>' + escHtml(r.name || '规则') + '</b> <span style="opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(r.find.substring(0, 40)) + '</span></div>'
         ).join('');
     }
 
