@@ -471,6 +471,7 @@
         }
         if (Array.isArray(workspace.regexBindings)) {
             state.regexBindings = workspace.regexBindings;
+            updateRegexDisplay();
         }
         if (workspace.writingReference && typeof workspace.writingReference === 'object') {
             state.writingReference = {
@@ -1486,6 +1487,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
             if (preset.promptOrder) state.promptOrder = preset.promptOrder;
             if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
             if (preset.regexBindings) state.regexBindings = preset.regexBindings;
+            updateRegexDisplay();
 
             state.presetName = name;
             localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
@@ -2863,6 +2865,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
                 state.regexBindings = data.RegexBinding.regexes
                     .filter(r => !r.disabled && !r.promptOnly)
                     .map(r => ({ find: r.findRegex, replace: r.replaceString, name: r.scriptName || '' }));
+                updateRegexDisplay();
             }
 
             applyConfigToUI();
@@ -3625,6 +3628,20 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         $('#onboard-step-1')?.classList.toggle('done', Boolean(state.aiConfig.provider));
         $('#onboard-step-2')?.classList.toggle('done', state.hasSavedApiKey || state.aiConfig.provider === 'ollama');
         $('#onboard-step-3')?.classList.toggle('done', state.isConnected);
+    }
+
+    function updateRegexDisplay() {
+        const section = document.getElementById('regex-section');
+        const countEl = document.getElementById('regex-rules-count');
+        const listEl = document.getElementById('regex-rules-list');
+        if (!section) return;
+        const rules = state.regexBindings || [];
+        if (!rules.length) { section.style.display = 'none'; return; }
+        section.style.display = '';
+        if (countEl) countEl.textContent = rules.length + '条';
+        if (listEl) listEl.innerHTML = rules.map(r =>
+            '<div style="padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(r.name || '规则') + ': ' + escHtml(r.find.substring(0, 50)) + '</div>'
+        ).join('');
     }
 
     function applyRegexBindings(text) {
