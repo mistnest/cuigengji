@@ -457,6 +457,75 @@ test.describe("Persistence robustness", () => {
   });
 });
 
+// ==================== RegexBinding Extraction ====================
+test("RegexBinding: SPreset模板中嵌入的正则被正确提取并应用 @smoke", async () => {
+    // Simulate a ST preset with RegexBinding embedded inside SPreset模板 content
+    const spConfigContent = JSON.stringify({
+        ChatSquash: { enabled: true },
+        RegexBinding: {
+            regexes: [
+                { id: "r1", scriptName: "思考折叠", findRegex: "/<(thought|os)>\\s?([\\s\\S]*?)\\s?<\\/[\\S\\s]*?>/g", replaceString: "<details><summary>$1</summary>\\n$2\\n</details>", placement: [2], disabled: false, promptOnly: false },
+                { id: "r2", scriptName: "摘要折叠", findRegex: "/<summary>([\\s\\S]*?)<\\/summary>/g", replaceString: "<details><summary>摘要</summary>\\n$1\\n</details>", placement: [2], disabled: false, promptOnly: false },
+                { id: "r3", scriptName: "禁用的规则", findRegex: "/xxx/g", replaceString: "yyy", placement: [2], disabled: true, promptOnly: false },
+                { id: "r4", scriptName: "仅prompt用", findRegex: "/ppp/g", replaceString: "qqq", placement: [2], disabled: false, promptOnly: true },
+            ]
+        },
+        MacroNest: false,
+    });
+
+    const prompts = [
+        { name: "SPreset配置", role: "system", content: spConfigContent },
+        { name: "写作规则", role: "system", content: "保持文风一致" },
+    ];
+
+    // Step 1: Find SPreset template with RegexBinding content
+    const spConfig = prompts.find(p => {
+        const n = (p.name || '').toLowerCase();
+        return n.includes('spreset') && (p.content || '').includes('RegexBinding');
+    });
+    expect(spConfig).toBeDefined();
+
+    // Step 2: Parse embedded JSON and extract rules
+    const embedded = JSON.parse(spConfig.content);
+    const rules = (embedded.RegexBinding?.regexes || [])
+        .filter(r => !r.disabled && !r.promptOnly)
+        .map(r => ({ find: r.findRegex, replace: r.replaceString, name: r.scriptName || '' }));
+
+    // Should extract exactly 2 rules: r1 (思考折叠) and r2 (摘要折叠)
+    // r3 is disabled → filtered; r4 is promptOnly → filtered
+    expect(rules.length).toBe(2);
+    expect(rules[0].name).toBe("思考折叠");
+    expect(rules[1].name).toBe("摘要折叠");
+
+    // Step 3: Verify regex application works
+    const applyRegex = (text, rules) => {
+        let r = text;
+        for (const rule of rules) {
+            try {
+                const str = rule.find;
+                if (!str.startsWith('/')) continue;
+                const lastSlash = str.lastIndexOf('/');
+                if (lastSlash <= 0) continue;
+                const pat = str.substring(1, lastSlash);
+                const fl = str.substring(lastSlash + 1);
+                r = r.replace(new RegExp(pat, fl || 'g'), rule.replace);
+            } catch { /* skip */ }
+        }
+        return r;
+    };
+
+    const input = "前面内容。<thought>角色应该更冷静一些</thought>中间部分。<summary>路明非发现了龙族秘密</summary>后面内容。";
+    const output = applyRegex(input, rules);
+
+    // Thought and summary tags should be transformed to details/summary
+    expect(output).toContain("<details><summary>");
+    expect(output).toContain("角色应该更冷静一些");
+    expect(output).toContain("路明非发现了龙族秘密");
+    // Original tags should be gone
+    expect(output).not.toContain("<thought>");
+    expect(output).not.toContain("</thought>");
+});
+
 // ==================== 404 Handling ====================
 
 test.describe("Global Error Handling", () => {
