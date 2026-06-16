@@ -3730,8 +3730,7 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         const listEl = document.getElementById('regex-rules-list');
         if (!section) return;
         const rules = state.regexBindings || [];
-        if (!rules.length) { section.style.display = 'none'; return; }
-        section.style.display = '';
+        if (!rules.length) { if (countEl) countEl.textContent = '0条'; return; }
         if (countEl) countEl.textContent = rules.length + '条';
         if (listEl) listEl.innerHTML = rules.map(r =>
             '<div style="padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(r.name || '规则') + ': ' + escHtml(r.find.substring(0, 50)) + '</div>'
