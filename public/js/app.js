@@ -70,6 +70,7 @@
         initWelcomePage();
         initSettingsDialog();
         bindPromptEditor();
+        bindRegexEditor();
         bindGlobalTooltip();
         loadAppSettings();
         applyAppSettings();
@@ -3628,6 +3629,99 @@ ${data.memoryStats ? '<div style="margin-bottom:14px;"><h4 style="margin:0 0 6px
         $('#onboard-step-1')?.classList.toggle('done', Boolean(state.aiConfig.provider));
         $('#onboard-step-2')?.classList.toggle('done', state.hasSavedApiKey || state.aiConfig.provider === 'ollama');
         $('#onboard-step-3')?.classList.toggle('done', state.isConnected);
+    }
+
+    // ==================== Regex Editor ====================
+    let _regexEditorCurrent = null;
+
+    function bindRegexEditor() {
+        const overlay = document.getElementById('regex-editor-overlay');
+        if (!overlay) return;
+        const close = () => { overlay.classList.remove('active'); setTimeout(() => { overlay.style.display = 'none'; }, 200); };
+        document.getElementById('btn-regex-editor-close')?.addEventListener('click', close);
+        document.getElementById('btn-regex-editor-done')?.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        document.getElementById('btn-regex-editor-add')?.addEventListener('click', addRegexRule);
+        document.getElementById('btn-regex-editor-save')?.addEventListener('click', saveRegexRule);
+        document.getElementById('btn-regex-editor-delete')?.addEventListener('click', deleteRegexRule);
+        document.getElementById('btn-edit-regex')?.addEventListener('click', openRegexEditor);
+
+        // Resizer
+        const resizer = document.getElementById('regex-editor-resizer');
+        const nav = document.getElementById('regex-editor-nav');
+        if (resizer && nav) {
+            let sx, sw;
+            resizer.addEventListener('mousedown', e => { e.preventDefault(); sx = e.clientX; sw = nav.offsetWidth; resizer.classList.add('active'); });
+            document.addEventListener('mousemove', e => { if (!resizer.classList.contains('active')) return; nav.style.width = Math.max(140, Math.min(400, sw + e.clientX - sx)) + 'px'; });
+            document.addEventListener('mouseup', () => resizer.classList.remove('active'));
+        }
+    }
+
+    function openRegexEditor() {
+        const overlay = document.getElementById('regex-editor-overlay');
+        if (!overlay) return;
+        overlay.style.display = '';
+        renderRegexNav();
+        requestAnimationFrame(() => overlay.classList.add('active'));
+    }
+
+    function renderRegexNav() {
+        const list = document.getElementById('regex-editor-nav-list');
+        if (!list) return;
+        list.replaceChildren();
+        (state.regexBindings || []).forEach((r, i) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = r.name || ('规则' + (i + 1));
+            btn.addEventListener('click', () => selectRegexForEdit(i));
+            if (i === _regexEditorCurrent) btn.classList.add('active');
+            list.appendChild(btn);
+        });
+    }
+
+    function selectRegexForEdit(idx) {
+        _regexEditorCurrent = idx;
+        const r = state.regexBindings[idx];
+        if (!r) return;
+        document.getElementById('regex-editor-empty').style.display = 'none';
+        document.getElementById('regex-editor-form').style.display = '';
+        document.getElementById('regex-edit-name').value = r.name || '';
+        document.getElementById('regex-edit-find').value = r.find || '';
+        document.getElementById('regex-edit-replace').value = r.replace || '';
+        renderRegexNav();
+    }
+
+    function saveRegexRule() {
+        if (_regexEditorCurrent === null) return;
+        const name = document.getElementById('regex-edit-name').value.trim() || '规则';
+        const find = document.getElementById('regex-edit-find').value.trim();
+        const replace = document.getElementById('regex-edit-replace').value;
+        if (!find) { setStatus('请输入匹配正则', 'warn'); return; }
+        state.regexBindings[_regexEditorCurrent] = { name, find, replace };
+        renderRegexNav();
+        updateRegexDisplay();
+        autoSave();
+        setStatus('正则已保存: ' + name, 'success');
+    }
+
+    function deleteRegexRule() {
+        if (_regexEditorCurrent === null) return;
+        state.regexBindings.splice(_regexEditorCurrent, 1);
+        _regexEditorCurrent = null;
+        document.getElementById('regex-editor-empty').style.display = '';
+        document.getElementById('regex-editor-form').style.display = 'none';
+        renderRegexNav();
+        updateRegexDisplay();
+        autoSave();
+        setStatus('正则已删除', 'success');
+    }
+
+    function addRegexRule() {
+        const idx = state.regexBindings.length;
+        state.regexBindings.push({ name: '新规则', find: '', replace: '' });
+        selectRegexForEdit(idx);
+        document.getElementById('regex-edit-name').focus();
+        autoSave();
     }
 
     function updateRegexDisplay() {
