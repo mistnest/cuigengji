@@ -78,6 +78,18 @@ export function buildWritePromptFromPreset({
     const developerParts = [];
     const presetReferenceParts = [];
     const messages = [];
+
+    // Build macro context for ST template compatibility
+    const macroCtx = {
+        firstCharName: (context.characters || [])[0]?.data?.name || (context.characters || [])[0]?.name || '',
+        charDescriptions: (context.characters || []).map(c => c.data?.description || c.description || '').filter(Boolean),
+        charPersonalities: (context.characters || []).map(c => c.data?.personality || c.personality || '').filter(Boolean),
+        charScenarios: (context.characters || []).map(c => c.data?.scenario || c.scenario || '').filter(Boolean),
+        dialogueExamples: (context.characters || []).flatMap(c => [c.data?.first_mes, c.data?.mes_example].filter(Boolean)),
+        authorPersona: authorContext || '',
+        modelName: context.currentModel || '',
+        _firstCall: true,
+    };
     const importedSlots = [];
 
     if (platformPrompt) systemParts.push(section('Platform rules', platformPrompt));
@@ -94,6 +106,7 @@ export function buildWritePromptFromPreset({
                 systemParts,
                 developerParts,
                 presetReferenceParts,
+                macroCtx,
             });
         }
 
@@ -161,8 +174,8 @@ export function buildFallbackWriteSystemPrompt(ctx = {}) {
     return p.join('\n');
 }
 
-function addTemplateContent({ template, systemParts, developerParts, presetReferenceParts }) {
-    const content = replaceStMacros(template.content);
+function addTemplateContent({ template, systemParts, developerParts, presetReferenceParts, macroCtx }) {
+    const content = replaceStMacros(template.content, macroCtx);
     if (!content.trim()) return;
 
     if (template.role === 'system' || template.isSystemPrompt) {
@@ -269,10 +282,32 @@ function extractPromptOrder(promptOrder) {
     return result;
 }
 
-function replaceStMacros(content) {
-    return String(content || '')
-        .replace(/\{\{char\}\}/g, 'AI author')
-        .replace(/\{\{user\}\}/g, 'author');
+function replaceStMacros(content, ctx = {}) {
+    const firstChar = ctx.firstCharName || 'AI作家';
+    const charDescs = (ctx.charDescriptions || []).join('\n');
+    const charPersonalities = (ctx.charPersonalities || []).join('\n');
+    const charScenarios = (ctx.charScenarios || []).join('\n');
+    const dialogueExamples = (ctx.dialogueExamples || []).join('\n\n');
+    const authorPersona = ctx.authorPersona || '';
+    const modelName = ctx.modelName || '';
+
+    let result = String(content || '')
+        .replace(/\{\{char\}\}/gi, firstChar)
+        .replace(/\{\{user\}\}/gi, '作者')
+        .replace(/\{\{description\}\}/gi, charDescs)
+        .replace(/\{\{personality\}\}/gi, charPersonalities)
+        .replace(/\{\{scenario\}\}/gi, charScenarios)
+        .replace(/\{\{mesExamples\}\}/gi, dialogueExamples)
+        .replace(/\{\{persona\}\}/gi, authorPersona)
+        .replace(/\{\{model\}\}/gi, modelName)
+        .replace(/\{\{original\}\}/gi, ctx._firstCall ? content : '');
+
+    // Mark that {{original}} has been consumed for this template
+    if (ctx._firstCall && content.includes('{{original}}')) {
+        ctx._firstCall = false;
+    }
+
+    return result;
 }
 
 function section(title, content) {

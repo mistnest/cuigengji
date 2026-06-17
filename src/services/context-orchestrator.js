@@ -43,6 +43,7 @@ export async function buildWritingContext({
         ...context,
         worldBookEntries: flattenWorldBookEntries(scopedWorldBook),
         characters: scopedCharacters,
+        currentModel: config.model || '',
         plotMemory: project.plotMemory,
         projectSources: project.sources,
     };
