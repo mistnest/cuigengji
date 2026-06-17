@@ -38,7 +38,7 @@ export function normalizePresetTemplates(templates = [], promptOrder = []) {
                 content: template.content || '',
                 isSystemPrompt: Boolean(template.isSystemPrompt || template.system_prompt),
                 isMarker: Boolean(template.isMarker || template.marker),
-                markerId: template.markerId || (template.isMarker || template.marker ? identifier : ''),
+                markerId: template.markerId || template.marker || (template.isMarker ? identifier : ''),
                 _sourceIndex: index,
             };
         })
@@ -203,30 +203,13 @@ function addTemplateContent({ template, systemParts, developerParts, presetRefer
 }
 
 function pushImport(messages, importKey, payload) {
-    const meta = IMPORT_META[importKey] || {
-        name: `${safeName(importKey)}_import`,
-        label: `${importKey} import`,
-    };
-    const name = payload.name || meta.name;
-    const label = payload.label || meta.label;
     const content = payload.content || '';
     if (!content.trim()) return;
-
-    const toolCallId = `call_${safeName(name).slice(0, 48)}`;
+    const meta = IMPORT_META[importKey] || { name: `${safeName(importKey)}_import`, label: `${importKey} import` };
     messages.push({
-        role: 'assistant',
-        content: '',
-        tool_calls: [{
-            id: toolCallId,
-            type: 'function',
-            function: { name, arguments: JSON.stringify({ label }) },
-        }],
-    });
-    messages.push({
-        role: 'tool',
-        tool_call_id: toolCallId,
-        name,
-        content: section(label, content),
+        role: 'system',
+        content: content,
+        name: meta.name,
     });
 }
 
