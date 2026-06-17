@@ -93,7 +93,8 @@ export function buildWritePromptFromPreset({
 
         if (template.isMarker) {
             const importKey = MARKER_TO_IMPORT[template.markerId || template.identifier];
-            if (importKey && imports[importKey]?.content) {
+            // Only inject each import once, even if multiple markers point to it
+            if (importKey && imports[importKey]?.content && !importedSlots.includes(importKey)) {
                 pushImport(messages, importKey, imports[importKey]);
                 importedSlots.push(importKey);
             }
