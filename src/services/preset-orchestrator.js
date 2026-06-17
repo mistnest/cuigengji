@@ -184,8 +184,9 @@ function addTemplateContent({ template, systemParts, developerParts, presetRefer
     const content = replaceStMacros(template.content, macroCtx);
     if (!content.trim()) return;
 
-    if (template.role === 'system' || template.isSystemPrompt) {
-        systemParts.push(section(template.name, content));
+    // ST compatibility: only system_prompt templates go to system prompt (no headers)
+    if (template.isSystemPrompt) {
+        systemParts.push(content);
         return;
     }
 
@@ -199,6 +200,7 @@ function addTemplateContent({ template, systemParts, developerParts, presetRefer
         return;
     }
 
+    // Regular system/user templates go to preset reference (user-role messages)
     presetReferenceParts.push(section(template.name, content));
 }
 
