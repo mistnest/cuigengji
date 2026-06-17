@@ -205,7 +205,7 @@ const ChatPanel = (function () {
                 const msg = addMessage('assistant', reply, currentMode);
                 // Restore reasoning placeholders as raw HTML <details> after markdown rendering
                 if (reasoningBlocks.length && msg) {
-                    const contentEl = msg.querySelector('.chat-msg-content');
+                    const contentEl = document.getElementById(msg.id)?.querySelector('.chat-msg-content');
                     if (contentEl) {
                         let html = contentEl.innerHTML;
                         reasoningBlocks.forEach((thinking, i) => {
