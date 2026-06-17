@@ -190,16 +190,32 @@ const ChatPanel = (function () {
             const rawReply = await callAPI(endpoint, text, context, activeRequestController.signal);
             let reply = typeof window.applyRegexBindings === 'function'
                 ? window.applyRegexBindings(rawReply) : rawReply;
-            // Extract reasoning blocks and wrap in collapsible <details>
+            // Extract reasoning blocks: replace markers with placeholders,
+            // then restore as raw HTML after markdown rendering to avoid escaping.
+            const reasoningBlocks = [];
             reply = (reply || '').replace(/\[REASONING\]\s*([\s\S]*?)\s*\[\/REASONING\]/g,
                 (_, thinking) => {
-                    const escaped = String(thinking).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    return '<details class="chat-reasoning"><summary>思考过程</summary><div>' + escaped + '</div></details>';
+                    const idx = reasoningBlocks.length;
+                    reasoningBlocks.push(String(thinking));
+                    return '%%REASONING_' + idx + '%%';
                 });
 
             removeMessage(loadingId);
             if (reply) {
                 const msg = addMessage('assistant', reply, currentMode);
+                // Restore reasoning placeholders as raw HTML <details> after markdown rendering
+                if (reasoningBlocks.length && msg) {
+                    const contentEl = msg.querySelector('.chat-msg-content');
+                    if (contentEl) {
+                        let html = contentEl.innerHTML;
+                        reasoningBlocks.forEach((thinking, i) => {
+                            const escaped = thinking.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            html = html.replace('%%REASONING_' + i + '%%',
+                                '<details class="chat-reasoning"><summary>思考过程</summary><div>' + escaped + '</div></details>');
+                        });
+                        contentEl.innerHTML = html;
+                    }
+                }
                 if (currentMode === 'write') addReviewButtons(msg, reply, text);
             } else {
                 addMessage('assistant', '*(未收到回复)*', currentMode);
