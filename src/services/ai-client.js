@@ -42,11 +42,11 @@ function generationOptions(config = {}, options = {}) {
     const rawMax = options.maxTokens || config.maxTokens || 4096;
     // DeepSeek shares the output budget between reasoning and content.
     // To ensure there's room for both, double the raw value with a floor
-    // of 8K, capped to avoid exceeding model context.
+    // of 8K. Cap at DeepSeek's hard max_tokens limit (393216) to avoid
+    // API validation errors.
     let result = rawMax;
     if (config.provider === 'deepseek') {
-        const ctxLimit = config.maxContext || 1000000;
-        result = Math.min(Math.max(rawMax * 2, 8192), ctxLimit);
+        result = Math.min(Math.max(rawMax * 2, 8192), 262144);
     }
     return {
         maxTokens: result,
