@@ -1,17 +1,23 @@
 const VALID_TEMPLATE_ROLES = new Set(['system', 'developer', 'user', 'assistant']);
 
 const MARKER_TO_IMPORT = {
-    worldInfoBefore: 'worldSetting',
-    worldInfoAfter: 'worldSetting',
-    charDescription: 'characterState',
-    charPersonality: 'characterState',
-    scenario: 'plotHistory',
+    worldInfoBefore: 'worldInfoBefore',
+    worldInfoAfter: 'worldInfoAfter',
+    charDescription: 'charDescription',
+    charPersonality: 'charPersonality',
+    scenario: 'scenario',
     personaDescription: 'authorPreference',
-    dialogueExamples: 'characterState',
+    dialogueExamples: 'dialogueExamples',
     chatHistory: 'recentPlot',
 };
 
 const IMPORT_META = {
+    worldInfoBefore: { name: 'world_info_before_import', label: 'World info before char' },
+    worldInfoAfter: { name: 'world_info_after_import', label: 'World info after char' },
+    charDescription: { name: 'char_description_import', label: 'Character descriptions' },
+    charPersonality: { name: 'char_personality_import', label: 'Character personalities' },
+    scenario: { name: 'scenario_import', label: 'Character scenarios' },
+    dialogueExamples: { name: 'dialogue_examples_import', label: 'Dialogue examples' },
     worldSetting: { name: 'world_setting_import', label: 'World setting import' },
     characterState: { name: 'character_state_import', label: 'Character state import' },
     plotHistory: { name: 'plot_history_import', label: 'Plot history import' },
@@ -108,8 +114,15 @@ export function buildWritePromptFromPreset({
         });
     }
 
+    // Fallback: inject full layers only if no granular marker already covered them
     for (const importKey of ['worldSetting', 'characterState', 'plotHistory', 'recentPlot']) {
         if (importedSlots.includes(importKey)) continue;
+        // If granular markers already injected parts of this layer, skip the full version
+        const coveredBy = {
+            worldSetting: ['worldInfoBefore', 'worldInfoAfter'],
+            characterState: ['charDescription', 'charPersonality', 'dialogueExamples'],
+        };
+        if ((coveredBy[importKey] || []).some(k => importedSlots.includes(k))) continue;
         if (!imports[importKey]?.content) continue;
         pushImport(messages, importKey, imports[importKey]);
         importedSlots.push(importKey);

@@ -69,7 +69,61 @@ export async function buildWritingContext({
     const plotHistory = buildPlotHistoryLayer(activeMemories, novelMemoryText, fullContext, layerBudgets.plotHistory);
     const recentPlot = buildRecentPlotLayer(fullContext, layerBudgets.recentPlot);
 
+    // Build ST-compatible granular imports for marker-based injection
+    // Each marker gets only its specific portion of data, matching ST behavior
+    const worldEntries = (scopedWorldBook?.entries ? Object.values(scopedWorldBook.entries) : [])
+        .filter(e => !e.disable);
+
     const imports = {
+        // --- World book by position ---
+        worldInfoBefore: {
+            label: 'World info (before char)',
+            content: worldEntries.filter(e => (e.position ?? 0) === 0)
+                .map(e => (e.comment || e.key?.[0] || '') + ': ' + (e.content || ''))
+                .join('\n'),
+        },
+        worldInfoAfter: {
+            label: 'World info (after char)',
+            content: worldEntries.filter(e => (e.position ?? 0) === 1)
+                .map(e => (e.comment || e.key?.[0] || '') + ': ' + (e.content || ''))
+                .join('\n'),
+        },
+
+        // --- Characters split by field ---
+        charDescription: {
+            label: 'Character descriptions',
+            content: buildCharactersForMemory(scopedCharacters || [])
+                .map(c => '- ' + (c.data?.name || '') + ': ' + (c.data?.description || ''))
+                .filter(l => l.includes(': '))
+                .join('\n'),
+        },
+        charPersonality: {
+            label: 'Character personalities',
+            content: buildCharactersForMemory(scopedCharacters || [])
+                .filter(c => c.data?.personality)
+                .map(c => '- ' + (c.data?.name || '') + ': ' + (c.data?.personality || ''))
+                .join('\n'),
+        },
+        scenario: {
+            label: 'Character scenarios',
+            content: buildCharactersForMemory(scopedCharacters || [])
+                .filter(c => c.data?.scenario)
+                .map(c => '- ' + (c.data?.name || '') + ': ' + (c.data?.scenario || ''))
+                .join('\n'),
+        },
+        dialogueExamples: {
+            label: 'Dialogue examples',
+            content: buildCharactersForMemory(scopedCharacters || [])
+                .filter(c => c.data?.first_mes || c.data?.mes_example)
+                .map(c => {
+                    const parts = [];
+                    if (c.data?.first_mes) parts.push(c.data.first_mes);
+                    if (c.data?.mes_example) parts.push(c.data.mes_example);
+                    return '- ' + (c.data?.name || '') + ': ' + parts.join(' | ');
+                }).join('\n'),
+        },
+
+        // --- Other layers (full content, used only if no marker covers them) ---
         worldSetting: {
             label: 'World setting import',
             content: worldSetting.content,
