@@ -203,8 +203,18 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
     const d = await r.json();
     const message = d.choices?.[0]?.message;
     const content = message?.content || '';
-    if (!content && provider === 'deepseek' && message?.reasoning_content) {
-        throw new Error('DeepSeek used the output budget for reasoning. Increase Max Tokens to at least 1024.');
+    const reasoning = message?.reasoning_content || '';
+    // DeepSeek: include reasoning content so the frontend can display it
+    // Only throw if NEITHER content nor reasoning is present
+    if (!content && !reasoning) {
+        throw new Error(`Empty response from ${provider}`);
+    }
+    if (!content && reasoning) {
+        // All tokens went to reasoning — still return the reasoning as content
+        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n*(思考过程结束，未生成正文。请调高 MaxTokens)*';
+    }
+    if (reasoning && provider === 'deepseek') {
+        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n' + content;
     }
     return content;
 }

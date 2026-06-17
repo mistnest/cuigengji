@@ -188,8 +188,14 @@ const ChatPanel = (function () {
                             currentMode === 'plan' ? '/api/chat/plan' : '/api/chat';
             activeRequestController = new AbortController();
             const rawReply = await callAPI(endpoint, text, context, activeRequestController.signal);
-            const reply = typeof window.applyRegexBindings === 'function'
+            let reply = typeof window.applyRegexBindings === 'function'
                 ? window.applyRegexBindings(rawReply) : rawReply;
+            // Extract reasoning blocks and wrap in collapsible <details>
+            reply = (reply || '').replace(/\[REASONING\]\s*([\s\S]*?)\s*\[\/REASONING\]/g,
+                (_, thinking) => {
+                    const escaped = String(thinking).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    return '<details class="chat-reasoning"><summary>思考过程</summary><div>' + escaped + '</div></details>';
+                });
 
             removeMessage(loadingId);
             if (reply) {
