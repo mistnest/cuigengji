@@ -88,6 +88,12 @@ export function buildWritePromptFromPreset({
         dialogueExamples: (context.characters || []).flatMap(c => [c.data?.first_mes, c.data?.mes_example].filter(Boolean)),
         authorPersona: authorContext || '',
         modelName: context.currentModel || '',
+        charSystemPrompts: (context.characters || []).map(c => c.data?.system_prompt || '').filter(Boolean),
+        charPostHistory: (context.characters || []).map(c => c.data?.post_history_instructions || '').filter(Boolean),
+        charFirstMessages: (context.characters || []).map(c => c.data?.first_mes || '').filter(Boolean),
+        charVersions: (context.characters || []).map(c => c.data?.char_version || c.data?.spec_version || '').filter(Boolean),
+        charCreatorNotes: (context.characters || []).map(c => c.data?.creator_notes || '').filter(Boolean),
+        mesExamplesRaw: (context.characters || []).map(c => c.data?.mes_example || '').filter(Boolean),
         _firstCall: true,
     };
     const importedSlots = [];
@@ -300,7 +306,15 @@ function replaceStMacros(content, ctx = {}) {
         .replace(/\{\{mesExamples\}\}/gi, dialogueExamples)
         .replace(/\{\{persona\}\}/gi, authorPersona)
         .replace(/\{\{model\}\}/gi, modelName)
-        .replace(/\{\{original\}\}/gi, ctx._firstCall ? content : '');
+        .replace(/\{\{original\}\}/gi, ctx._firstCall ? content : '')
+        .replace(/\{\{charPrompt\}\}/gi, (ctx.charSystemPrompts || []).join('\n'))
+        .replace(/\{\{charInstruction\}\}/gi, (ctx.charPostHistory || []).join('\n'))
+        .replace(/\{\{charFirstMessage\}\}/gi, (ctx.charFirstMessages || []).join('\n'))
+        .replace(/\{\{greeting\}\}/gi, (ctx.charFirstMessages || []).join('\n'))
+        .replace(/\{\{charVersion\}\}/gi, (ctx.charVersions || []).join('\n'))
+        .replace(/\{\{charCreatorNotes\}\}/gi, (ctx.charCreatorNotes || []).join('\n'))
+        .replace(/\{\{creatorNotes\}\}/gi, (ctx.charCreatorNotes || []).join('\n'))
+        .replace(/\{\{mesExamplesRaw\}\}/gi, (ctx.mesExamplesRaw || []).join('\n'));
 
     // Mark that {{original}} has been consumed for this template
     if (ctx._firstCall && content.includes('{{original}}')) {
