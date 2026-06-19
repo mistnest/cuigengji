@@ -8,8 +8,9 @@ import express from 'express';
 import { applyAiSecret } from '../services/ai-secrets.js';
 import { streamAIChat, callAIChatRaw } from '../services/ai-client.js';
 import { capturePrompt } from './debug.js';
-import { PLAN_TOOLS, ASSIST_TOOLS, executeTool } from '../services/chat-tools.js';
+import { ASSIST_TOOLS, executeTool } from '../services/chat-tools.js';
 import { generateWriting, generateWritingStream } from '../services/writing-service.js';
+import { getReferenceToolDefinitions, executeReferenceTool } from '../services/ai-tools/reference/index.js';
 
 export const router = express.Router();
 
@@ -105,11 +106,12 @@ router.post('/plan', async (req, res) => {
         capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(msgs) });
 
         const novelId = context?.novelId || '';
+        const refTools = getReferenceToolDefinitions();
         let reply = '';
         for (let round = 0; round < 4; round++) {
             const resp = await callAIChatRaw(aiConfig, sysPrompt, msgs, {
                 signal: requestController.signal,
-                tools: PLAN_TOOLS,
+                tools: refTools,
                 toolChoice: 'auto',
             });
             const toolCalls = resp.message?.tool_calls || [];
@@ -120,7 +122,7 @@ router.post('/plan', async (req, res) => {
             msgs.push({ role: 'assistant', content: '', tool_calls: toolCalls });
             for (const call of toolCalls) {
                 const args = JSON.parse(call.function?.arguments || '{}');
-                const result = await executeTool(call.function?.name, args, novelId);
+                const result = await executeReferenceTool(call.function?.name, args, { message, history, context });
                 msgs.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
             }
         }
@@ -153,10 +155,12 @@ function buildPlanSystemPrompt(ctx) {
     p.push('- 最后必须有明确的对比和推荐');
     p.push('- 用中文回复');
     p.push('');
-    p.push('## 工具调用');
-    p.push('你可以调用 update_outline 工具将讨论确定的方案写回大纲。');
-    p.push('参数: nodes=[{id?, title, description, completed?, parent_id?}]');
-    p.push('id 不填则创建新节点。完成后告知用户已保存。');
+    p.push('## 资料工具');
+    p.push('你可以调用工具查阅项目中的角色卡、世界书条目、章节内容和场景上下文。');
+    p.push('- search_reference: 搜索参考资料（角色/世界书/章节/记忆）');
+    p.push('- get_reference_detail: 按ID读取某条资料的详细内容');
+    p.push('- get_scene_context: 获取当前写作场景的上下文');
+    p.push('当你不确定人物设定、世界观规则或前文情节时，优先查工具，不要猜测。');
     p.push('');
     if (ctx.novelTitle) p.push(`书名: ${ctx.novelTitle}`);
     if (ctx.chapterTitle) p.push(`当前章节: ${ctx.chapterTitle}`);
