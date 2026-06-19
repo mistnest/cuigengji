@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — AI Endpoint (with Memory Pipeline)
+ * 催更姬 — AI Endpoint (with Memory Pipeline)
  *
  * L4+L5: 世界书引擎检索 + Prompt 注入
  *   1. 扫描正文 → 关键词匹配世界书条目

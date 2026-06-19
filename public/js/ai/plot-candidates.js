@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Plot Candidates Panel
+ * 催更姬 — Plot Candidates Panel
  * 情节候选展示面板：模态窗口、卡片选择、直接填入
  */
 const PlotCandidates = (function () {

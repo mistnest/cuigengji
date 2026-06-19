@@ -57,7 +57,7 @@
         "node": ">= 20"
     },
     "build": {
-        "appId": "com.novel-ai-editor.app",
+        "appId": "com.cuigengji.app",
         "productName": "催更姬",
         "directories": {
             "output": "dist"

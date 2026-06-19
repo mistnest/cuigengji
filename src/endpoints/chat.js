@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Chat Endpoint
+ * 催更姬 — Chat Endpoint
  * 支持双模式:
  *   POST /api/chat       — 助手模式 (CC-like)
  *   POST /api/chat/write — 续写模式 (酒馆风格)
@@ -289,7 +289,7 @@ function cleanInfillReply(reply = '') {
 
 function buildAssistSystemPrompt(ctx) {
     const p = [];
-    p.push('你是 Novel AI Editor 的「设定制作」向导，专门帮助作者创建角色卡和世界书。');
+    p.push('你是 催更姬 的「设定制作」向导，专门帮助作者创建角色卡和世界书。');
     p.push('');
     p.push('## 你的工作方式');
     p.push('你采用启发式引导法：不一次性抛出所有问题，而是顺着作者的思路逐步深入。');

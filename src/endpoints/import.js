@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Import API
+ * 催更姬 — Import API
  * SillyTavern 数据导入
  */
 import express from 'express';

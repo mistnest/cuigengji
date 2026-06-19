@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Plot Guide Service
+ * 催更姬 — Plot Guide Service
  * 情节引导：基于上下文生成多条情节候选
  */
 

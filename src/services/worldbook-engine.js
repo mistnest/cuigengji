@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — World Book Engine
+ * 催更姬 — World Book Engine
  * 世界书条目管理和上下文注入引擎
  *
  * 核心逻辑借鉴 SillyTavern public/scripts/world-info.js，

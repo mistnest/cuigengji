@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Novel AI Editor - Server Entry Point
+ * 催更姬 - Server Entry Point
  * 精简版 Express 服务器，专为小说创作优化
  */
 import fs from 'node:fs';
@@ -83,7 +83,7 @@ app.get('/', (_req, res) => {
 // ---- Health Check ----
 app.get('/api/ping', (_req, res) => res.sendStatus(204));
 app.get('/api/version', (_req, res) => res.json({
-    name: 'novel-ai-editor',
+    name: 'cuigengji',
     version: '0.1.0',
 }));
 
@@ -127,7 +127,7 @@ async function startServer(options = {}) {
             const address = server.address();
             const actualPort = typeof address === 'object' && address ? address.port : port;
             const url = `http://${host}:${actualPort}`;
-            console.log(`\n  📖 Novel AI Editor v0.1.0`);
+            console.log(`\n  📖 催更姬 v0.1.0`);
             console.log(`  🚀 Server running at ${url}\n`);
 
             serverEvents.emit(EVENT_NAMES.SERVER_STARTED, {

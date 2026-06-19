@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Unified Chat Panel
+ * 催更姬 — Unified Chat Panel
  * 单一聊天面板，模式选择器在输入区
  */
 const ChatPanel = (function () {

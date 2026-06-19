@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Memory Manager
+ * 催更姬 — Memory Manager
  *
  * 记忆系统的检索 & 注入引擎，服务 context-orchestrator 的 7 层架构：
  *

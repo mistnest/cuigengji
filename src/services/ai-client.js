@@ -643,7 +643,7 @@ export async function fetchModelList(config = {}) {
     }
 
     const headers = { 'Authorization': `Bearer ${apiKey}` };
-    if (provider === 'openrouter') headers['HTTP-Referer'] = 'https://novel-ai-editor.app';
+    if (provider === 'openrouter') headers['HTTP-Referer'] = 'https://cuigengji.app';
 
     const r = await fetchWithTimeout(`${base}/models`, { headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);

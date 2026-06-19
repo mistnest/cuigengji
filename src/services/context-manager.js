@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Context Manager
+ * 催更姬 — Context Manager
  * 上下文窗口管理、Token 计数、内容裁剪
  */
 

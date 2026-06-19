@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Main Application
+ * 催更姬 — Main Application
  * 前端应用入口 — 整合所有模块
  */
 (function () {
@@ -90,7 +90,7 @@
         renderPromptTemplates();
         updatePresetSelect();
         updateStatusBar();
-        console.log('📖 Novel AI Editor v0.1.0 — Ready (状态已恢复)');
+        console.log('📖 催更姬 v0.1.0 — Ready (状态已恢复)');
         setStatus('就绪 — 开始创作吧!', 'info');
     }
 

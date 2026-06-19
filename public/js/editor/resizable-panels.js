@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Resizable Panels
+ * 催更姬 — Resizable Panels
  * 可拖拽调整左右侧边栏宽度
  */
 const ResizablePanels = (function () {

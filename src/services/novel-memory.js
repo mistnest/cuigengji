@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — L2+L3: Novel Project Memory
+ * 催更姬 — L2+L3: Novel Project Memory
  *
  * 每个小说项目专属的记忆系统：
  *

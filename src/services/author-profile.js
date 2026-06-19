@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — L1: Author Profile System
+ * 催更姬 — L1: Author Profile System
  *
  * 参考 Claude Code 的 CLAUDE.md + Auto Memory 架构，映射到写作领域：
  *

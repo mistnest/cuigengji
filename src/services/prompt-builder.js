@@ -1,5 +1,5 @@
 /**
- * Novel AI Editor — Prompt Builder
+ * 催更姬 — Prompt Builder
  * 将小说创作上下文组装为 AI prompt
  */
 /**
