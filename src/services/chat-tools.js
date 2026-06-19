@@ -92,6 +92,16 @@ export async function executeTool(name, args = {}, novelId = '') {
                 };
                 fs.mkdirSync(charsDir, { recursive: true });
                 fs.writeFileSync(path.join(charsDir, `${data.name}.json`), JSON.stringify(card, null, 2), 'utf8');
+
+                // Also add to workspace character list
+                if (novelId) {
+                    const wsFile = path.join(root, 'workspace.json');
+                    let ws = {};
+                    if (fs.existsSync(wsFile)) ws = JSON.parse(fs.readFileSync(wsFile, 'utf8'));
+                    ws.characters = ws.characters || [];
+                    ws.characters.push(card);
+                    fs.writeFileSync(wsFile, JSON.stringify(ws, null, 2), 'utf8');
+                }
                 return { success: true, target: 'character', name: data.name };
             }
 
