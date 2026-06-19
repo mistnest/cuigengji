@@ -26,7 +26,7 @@ test.describe("Health Check API", () => {
     expect(response.ok()).toBeTruthy();
     const body = await response.json();
     expect(body).toMatchObject({
-      name: "novel-ai-editor",
+      name: "cuigengji",
       version: expect.any(String),
     });
   });

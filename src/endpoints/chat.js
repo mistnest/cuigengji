@@ -103,13 +103,29 @@ router.post('/plan', async (req, res) => {
         }
 
         capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(msgs) });
-        setupSse(res);
-        const result = await streamAIChat({ ...aiConfig, stream: true }, sysPrompt, msgs, {
-            signal: requestController.signal,
-            onEvent: event => sendSse(res, event),
-        });
-        sendSse(res, { type: 'done', reply: result.message?.content || '' });
-        res.end();
+
+        const novelId = context?.novelId || '';
+        let reply = '';
+        for (let round = 0; round < 4; round++) {
+            const resp = await callAIChatRaw(aiConfig, sysPrompt, msgs, {
+                signal: requestController.signal,
+                tools: PLAN_TOOLS,
+                toolChoice: 'auto',
+            });
+            const toolCalls = resp.message?.tool_calls || [];
+            if (!toolCalls.length) {
+                reply = resp.message?.content || '';
+                break;
+            }
+            msgs.push({ role: 'assistant', content: '', tool_calls: toolCalls });
+            for (const call of toolCalls) {
+                const args = JSON.parse(call.function?.arguments || '{}');
+                const result = await executeTool(call.function?.name, args, novelId);
+                msgs.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
+            }
+        }
+
+        res.json({ reply: reply || '(未收到回复)' });
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Plan]', err.message);
@@ -136,6 +152,11 @@ function buildPlanSystemPrompt(ctx) {
     p.push('- 如果用户已有倾向，重点分析该方向的可行性');
     p.push('- 最后必须有明确的对比和推荐');
     p.push('- 用中文回复');
+    p.push('');
+    p.push('## 工具调用');
+    p.push('你可以调用 update_outline 工具将讨论确定的方案写回大纲。');
+    p.push('参数: nodes=[{id?, title, description, completed?, parent_id?}]');
+    p.push('id 不填则创建新节点。完成后告知用户已保存。');
     p.push('');
     if (ctx.novelTitle) p.push(`书名: ${ctx.novelTitle}`);
     if (ctx.chapterTitle) p.push(`当前章节: ${ctx.chapterTitle}`);
@@ -366,6 +387,14 @@ function buildAssistSystemPrompt(ctx) {
         p.push('\n## 大纲');
         ctx.outline.slice(0, 8).forEach(n => p.push(`- ${n.completed ? '✅' : '⬜'} ${n.title}`));
     }
+
+    p.push('');
+    p.push('## 工具调用');
+    p.push('你可以调用 import_data 工具将生成的设定直接导入编辑器：');
+    p.push('- 导入角色：target="character", data={name, description, personality, scenario, first_mes}');
+    p.push('- 导入世界书：target="worldbook", data={entries: [{comment, key: [触发词], content}]}');
+    p.push('- 导入预设：target="preset", data={name, provider, model, temperature, ...}');
+    p.push('当用户说"导出""保存""导入"或确认了设定内容后，直接调用工具写入，不要多问。');
 
     return p.join('\n');
 }
