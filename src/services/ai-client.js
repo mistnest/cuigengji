@@ -1,3 +1,5 @@
+import { createApiCallId, logApiCall } from './api-call-logger.js';
+
 const DEFAULT_ENDPOINTS = {
     openai: 'https://api.openai.com/v1',
     deepseek: 'https://api.deepseek.com/v1',
@@ -91,7 +93,61 @@ function normalizeMessages(systemPrompt, userPromptOrMessages) {
 }
 
 function supportsNativeToolMessages(provider) {
-    return ['openai', 'openrouter'].includes(provider);
+    return ['openai', 'openrouter', 'deepseek', 'qwen', 'doubao', 'siliconflow', 'groq', 'mistral', 'xai', 'moonshot', 'zai', 'minimax', 'custom'].includes(provider);
+}
+
+async function fetchLoggedChat(url, options = {}, meta = {}, timeoutMs) {
+    const id = createApiCallId();
+    const startedAt = Date.now();
+    try {
+        const response = await fetchWithTimeout(url, options, timeoutMs);
+        await logApiCall({
+            id,
+            timestamp: new Date(startedAt).toISOString(),
+            provider: meta.provider,
+            model: meta.model,
+            mode: meta.mode,
+            stream: meta.stream,
+            toolChoice: meta.toolChoice,
+            url,
+            method: options.method || 'POST',
+            request: {
+                headers: options.headers || {},
+                body: options.body,
+            },
+            response: {
+                ok: response.ok,
+                status: response.status,
+                statusText: response.statusText,
+                durationMs: Date.now() - startedAt,
+            },
+        });
+        return response;
+    } catch (err) {
+        await logApiCall({
+            id,
+            timestamp: new Date(startedAt).toISOString(),
+            provider: meta.provider,
+            model: meta.model,
+            mode: meta.mode,
+            stream: meta.stream,
+            toolChoice: meta.toolChoice,
+            url,
+            method: options.method || 'POST',
+            request: {
+                headers: options.headers || {},
+                body: options.body,
+            },
+            response: {
+                ok: false,
+                status: null,
+                statusText: '',
+                durationMs: Date.now() - startedAt,
+                error: err.message || String(err),
+            },
+        });
+        throw err;
+    }
 }
 
 function flattenToolMessages(messages = []) {
@@ -126,6 +182,11 @@ export async function callAIText(config, systemPrompt, userPrompt, options = {})
 }
 
 export async function callAIChat(config = {}, systemPrompt, messages, options = {}) {
+    const result = await callAIChatRaw(config, systemPrompt, messages, options);
+    return extractAssistantText(config.provider, result.message);
+}
+
+export async function callAIChatRaw(config = {}, systemPrompt, messages, options = {}) {
     const { provider, apiKey, endpoint } = config;
     const model = config.model || DEFAULT_MODELS[provider];
     const { maxTokens, temperature, topP, topK } = generationOptions(config, options);
@@ -133,13 +194,13 @@ export async function callAIChat(config = {}, systemPrompt, messages, options = 
 
     switch (provider) {
         case 'anthropic':
-            return callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal });
+            return textResult(await callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal }));
         case 'google':
-            return callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
+            return textResult(await callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal }));
         case 'openrouter':
-            return callOpenRouter({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
+            return callOpenRouterRaw({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         case 'ollama':
-            return callOllama({ endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal });
+            return textResult(await callOllama({ endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal }));
         case 'openai':
         case 'deepseek':
         case 'qwen':
@@ -153,57 +214,146 @@ export async function callAIChat(config = {}, systemPrompt, messages, options = 
         case 'zai':
         case 'minimax':
         case 'custom':
-            return callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal });
+            return callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         default:
             throw new Error(`Unsupported: ${provider}`);
     }
 }
 
+export async function streamAIChat(config = {}, systemPrompt, messages, options = {}) {
+    const { provider, apiKey, endpoint } = config;
+    const model = config.model || DEFAULT_MODELS[provider];
+    const { maxTokens, temperature, topP, topK } = generationOptions(config, options);
+    const chatMessages = adaptMessagesForProvider(provider, normalizeMessages(systemPrompt, messages));
+    const onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
+
+    switch (provider) {
+        case 'anthropic':
+            return callAnthropicStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal, onEvent });
+        case 'openrouter':
+            return callOpenRouterStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
+        case 'openai':
+        case 'deepseek':
+        case 'qwen':
+        case 'doubao':
+        case 'spark':
+        case 'siliconflow':
+        case 'groq':
+        case 'mistral':
+        case 'xai':
+        case 'moonshot':
+        case 'zai':
+        case 'minimax':
+        case 'custom':
+            return callOpenAICompatibleStream({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
+        case 'google':
+        case 'ollama':
+            return streamFallback(config, systemPrompt, chatMessages, options, onEvent);
+        default:
+            throw new Error(`Unsupported: ${provider}`);
+    }
+}
+
+function textResult(content) {
+    return { message: { role: 'assistant', content: content || '' }, raw: null };
+}
+
+function extractAssistantText(provider, message = {}) {
+    const content = message?.content || '';
+    const reasoning = message?.reasoning_content || '';
+    if (!content && !reasoning) {
+        throw new Error(`Empty response from ${provider}`);
+    }
+    if (!content && reasoning) {
+        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n*(鎬濊€冭繃绋嬬粨鏉燂紝鏈敓鎴愭鏂囥€傝璋冮珮 MaxTokens)*';
+    }
+    if (reasoning && provider === 'deepseek') {
+        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n' + content;
+    }
+    return content;
+}
+
 async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
+    const requestModel = model || DEFAULT_MODELS.google;
     const body = {
         systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
         contents: toGeminiContents(messages),
         generationConfig: { temperature, maxOutputTokens: maxTokens, topP },
     };
-    const r = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODELS.google}:generateContent?key=${apiKey}`, {
+    const r = await fetchLoggedChat(`https://generativelanguage.googleapis.com/v1beta/models/${requestModel}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal,
-    });
+    }, { provider: 'google', model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Gemini ${r.status}`); }
     const d = await r.json();
     return d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
 async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal }) {
-    const body = { model: model || DEFAULT_MODELS.anthropic, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages };
+    const requestModel = model || DEFAULT_MODELS.anthropic;
+    const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages };
     if (topK) body.top_k = topK;
-    const r = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),
         signal,
-    });
+    }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
     const d = await r.json();
     return d.content?.map(c => c.text || '').join('') || '';
 }
 
+async function callAnthropicStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal, onEvent }) {
+    const requestModel = model || DEFAULT_MODELS.anthropic;
+    const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages, stream: true };
+    if (topK) body.top_k = topK;
+    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(body),
+        signal,
+    }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: true });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
+
+    let content = '';
+    let reasoning = '';
+    await parseSseResponse(r, raw => {
+        const event = parseJsonEvent(raw);
+        if (!event) return;
+        if (event.type === 'content_block_delta') {
+            const text = event.delta?.text || '';
+            const thinking = event.delta?.thinking || '';
+            if (thinking) {
+                reasoning += thinking;
+                onEvent({ type: 'reasoning', content: thinking });
+            }
+            if (text) {
+                content += text;
+                onEvent({ type: 'chunk', content: text });
+            }
+        }
+    });
+    return { message: { role: 'assistant', content, reasoning_content: reasoning }, raw: null };
+}
+
 async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
     const base = cleanBase(endpoint, provider);
-    const r = await fetchWithTimeout(`${base}/chat/completions`, {
+    const requestModel = model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
+    const r = await fetchLoggedChat(`${base}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
-            model: model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai,
+            model: requestModel,
             max_tokens: maxTokens,
             temperature,
             top_p: topP,
             messages: [{ role: 'system', content: systemPrompt }, ...messages],
         }),
         signal,
-    });
+    }, { provider, model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
     const d = await r.json();
     const message = d.choices?.[0]?.message;
@@ -225,32 +375,217 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
 }
 
 async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
-    const r = await fetchWithTimeout(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
+    const requestModel = model || DEFAULT_MODELS.openrouter;
+    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
-            model: model || DEFAULT_MODELS.openrouter,
+            model: requestModel,
             max_tokens: maxTokens,
             temperature,
             top_p: topP,
             messages: [{ role: 'system', content: systemPrompt }, ...messages],
         }),
         signal,
-    });
+    }, { provider: 'openrouter', model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
     const d = await r.json();
     return d.choices?.[0]?.message?.content || '';
 }
 
+async function callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
+    const base = cleanBase(endpoint, provider);
+    const requestModel = model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
+    const body = {
+        model: requestModel,
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    };
+    if (Array.isArray(tools) && tools.length) {
+        body.tools = tools;
+        if (toolChoice) body.tool_choice = toolChoice;
+    }
+
+    const r = await fetchLoggedChat(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal,
+    }, { provider, model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
+    const d = await r.json();
+    const message = d.choices?.[0]?.message;
+    if (!message) throw new Error(`Empty response from ${provider}`);
+    return { message, raw: d };
+}
+
+async function callOpenAICompatibleStream({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
+    const base = cleanBase(endpoint, provider);
+    const requestModel = model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
+    const body = {
+        model: requestModel,
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+        stream: true,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    };
+    if (Array.isArray(tools) && tools.length) {
+        body.tools = tools;
+        if (toolChoice) body.tool_choice = toolChoice;
+    }
+
+    const r = await fetchLoggedChat(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal,
+    }, { provider, model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
+    return readOpenAICompatibleStream(r, onEvent);
+}
+
+async function callOpenRouterRaw({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
+    const requestModel = model || DEFAULT_MODELS.openrouter;
+    const body = {
+        model: requestModel,
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    };
+    if (Array.isArray(tools) && tools.length) {
+        body.tools = tools;
+        if (toolChoice) body.tool_choice = toolChoice;
+    }
+
+    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal,
+    }, { provider: 'openrouter', model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
+    const d = await r.json();
+    const message = d.choices?.[0]?.message;
+    if (!message) throw new Error('Empty response from OpenRouter');
+    return { message, raw: d };
+}
+
+async function callOpenRouterStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
+    const requestModel = model || DEFAULT_MODELS.openrouter;
+    const body = {
+        model: requestModel,
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+        stream: true,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    };
+    if (Array.isArray(tools) && tools.length) {
+        body.tools = tools;
+        if (toolChoice) body.tool_choice = toolChoice;
+    }
+
+    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal,
+    }, { provider: 'openrouter', model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
+    return readOpenAICompatibleStream(r, onEvent);
+}
+
+async function readOpenAICompatibleStream(response, onEvent) {
+    let content = '';
+    let reasoning = '';
+    await parseSseResponse(response, raw => {
+        if (raw === '[DONE]') return;
+        const event = parseJsonEvent(raw);
+        const delta = event?.choices?.[0]?.delta || {};
+        const thinking = delta.reasoning_content || delta.reasoning || '';
+        const text = delta.content || '';
+        if (thinking) {
+            reasoning += thinking;
+            onEvent({ type: 'reasoning', content: thinking });
+        }
+        if (text) {
+            content += text;
+            onEvent({ type: 'chunk', content: text });
+        }
+    });
+    return { message: { role: 'assistant', content, reasoning_content: reasoning }, raw: null };
+}
+
+async function streamFallback(config, systemPrompt, messages, options, onEvent) {
+    const result = await callAIChatRaw(config, systemPrompt, messages, options);
+    const reasoning = result.message?.reasoning_content || '';
+    const content = result.message?.content || '';
+    if (reasoning) onEvent({ type: 'reasoning', content: reasoning });
+    if (content) onEvent({ type: 'chunk', content });
+    return result;
+}
+
+async function parseSseResponse(response, onData) {
+    let buffer = '';
+    await readResponseBody(response, text => {
+        buffer += text;
+        let index;
+        while ((index = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, index);
+            buffer = buffer.slice(index + 2);
+            processSseBlock(block, onData);
+        }
+    });
+    if (buffer.trim()) processSseBlock(buffer, onData);
+}
+
+async function readResponseBody(response, onText) {
+    const reader = response.body?.getReader?.();
+    if (!reader) {
+        onText(await response.text());
+        return;
+    }
+    const decoder = new TextDecoder();
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        onText(decoder.decode(value, { stream: true }));
+    }
+    const tail = decoder.decode();
+    if (tail) onText(tail);
+}
+
+function processSseBlock(block, onData) {
+    const data = String(block)
+        .split(/\r?\n/)
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n');
+    if (data) onData(data);
+}
+
+function parseJsonEvent(raw) {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
 async function callOllama({ endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal }) {
     const base = (endpoint || 'http://localhost:11434').replace(/\/+$/, '');
+    const requestModel = model || DEFAULT_MODELS.ollama;
     const prompt = `### System:\n${systemPrompt}\n\n### Conversation:\n${toText(messages)}\n\n### Assistant:\n`;
-    const r = await fetchWithTimeout(`${base}/api/generate`, {
+    const r = await fetchLoggedChat(`${base}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: model || DEFAULT_MODELS.ollama, prompt, stream: false, options: { temperature, num_predict: maxTokens, top_p: topP, top_k: topK } }),
+        body: JSON.stringify({ model: requestModel, prompt, stream: false, options: { temperature, num_predict: maxTokens, top_p: topP, top_k: topK } }),
         signal,
-    });
+    }, { provider: 'ollama', model: requestModel, mode: 'generate', stream: false });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Ollama ${r.status}`); }
     const d = await r.json();
     return d.response || '';

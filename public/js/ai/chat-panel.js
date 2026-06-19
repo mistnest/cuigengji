@@ -14,6 +14,22 @@ const ChatPanel = (function () {
     let onDeleteSessionCb = null;
     let onNewSessionCb = null;
     let activeRequestController = null;
+
+    // Streaming state
+    let streamingActive = false;
+    let streamAbortController = null;
+    let streamMsgId = null;
+    let streamAccumulatedText = '';
+    let streamRenderedText = '';
+    let streamPendingText = '';
+    let streamReasoningBlocks = [];
+    let streamMetaData = null;
+    let streamThinkTimer = null;
+    let streamTypewriterTimer = null;
+    let streamPendingFinalize = null;
+    let streamUserScrollLocked = false;
+    let streamUserPrompt = '';
+
     const MESSAGE_PAGE_SIZE = 15;
     let renderedStart = 0;
 
@@ -177,7 +193,77 @@ const ChatPanel = (function () {
             window.autoNameSession(text);
         }
 
-        // Loading — CC-style thinking indicator
+        await sendMessageStream(text);
+    }
+
+    // ==================== Streaming Send ====================
+
+    async function sendMessageStream(text) {
+        const loadingId = addLoading();
+        isLoading = true;
+        updateButtons();
+
+        // Thinking timer for tool-calling wait
+        let thinkSeconds = 0;
+        streamThinkTimer = setInterval(() => {
+            thinkSeconds++;
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) {
+                const thinkText = loadingEl.querySelector('.chat-thinking');
+                if (thinkText && thinkSeconds <= 30) {
+                    thinkText.innerHTML = 'Thinking<span class="chat-thinking-dots"><span></span><span></span><span></span></span> (' + thinkSeconds + 's)';
+                } else if (thinkText && thinkSeconds > 30) {
+                    thinkText.textContent = '正在检索设定...';
+                }
+            }
+        }, 1000);
+
+        const endpoint = currentMode === 'write' ? '/api/chat/write' :
+                        currentMode === 'plan' ? '/api/chat/plan' : '/api/chat';
+        const context = collectContext();
+        streamAbortController = new AbortController();
+        streamAccumulatedText = '';
+        streamRenderedText = '';
+        streamPendingText = '';
+        streamReasoningBlocks = [];
+        streamMetaData = null;
+        streamPendingFinalize = null;
+        streamUserScrollLocked = false;
+        streamingActive = false;
+        streamMsgId = null;
+        streamUserPrompt = text;
+
+        try {
+            await startStream(endpoint, text, context, streamAbortController.signal);
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                // User clicked stop — keep partial content
+                if (streamMsgId && streamAccumulatedText) {
+                    finalizePartialMessage(streamMsgId, streamAccumulatedText, streamReasoningBlocks);
+                } else {
+                    removeMessage(loadingId);
+                }
+            } else {
+                // Real error
+                removeMessage(loadingId);
+                if (streamMsgId) removeMessage(streamMsgId);
+                addMessage('assistant', `❌ ${err.message}`, currentMode, { transient: true });
+            }
+        } finally {
+            clearInterval(streamThinkTimer);
+            streamThinkTimer = null;
+            streamingActive = false;
+            streamMsgId = null;
+            streamAbortController = null;
+            if (!streamPendingFinalize) stopStreamTypewriter();
+            isLoading = false;
+            updateButtons();
+        }
+    }
+
+    // ==================== Removed Non-Streaming Path ====================
+
+    async function removedNonStreamingFallback(text) {
         const loadingId = addLoading();
         isLoading = true;
         updateButtons();
@@ -187,42 +273,21 @@ const ChatPanel = (function () {
             const endpoint = currentMode === 'write' ? '/api/chat/write' :
                             currentMode === 'plan' ? '/api/chat/plan' : '/api/chat';
             activeRequestController = new AbortController();
-            const rawReply = await callAPI(endpoint, text, context, activeRequestController.signal);
+            const rawReply = await removedNonStreamingApiCall(endpoint, text, context, activeRequestController.signal);
             let reply = typeof window.applyRegexBindings === 'function'
                 ? window.applyRegexBindings(rawReply) : rawReply;
-            // Extract reasoning blocks: replace markers with placeholders,
-            // then restore as raw HTML after markdown rendering to avoid escaping.
-            const reasoningBlocks = [];
-            reply = (reply || '').replace(/\[REASONING\]\s*([\s\S]*?)\s*\[\/REASONING\]/g,
-                (_, thinking) => {
-                    const idx = reasoningBlocks.length;
-                    reasoningBlocks.push(String(thinking));
-                    return '%%REASONING_' + idx + '%%';
-                });
 
             removeMessage(loadingId);
             if (reply) {
                 const msg = addMessage('assistant', reply, currentMode);
-                // Restore reasoning placeholders as raw HTML <details> after markdown rendering
-                if (reasoningBlocks.length && msg) {
-                    const contentEl = document.getElementById(msg.id)?.querySelector('.chat-msg-content');
-                    if (contentEl) {
-                        let html = contentEl.innerHTML;
-                        reasoningBlocks.forEach((thinking, i) => {
-                            const escaped = thinking.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            html = html.replace('%%REASONING_' + i + '%%',
-                                '<details class="chat-reasoning"><summary>思考过程</summary><div>' + escaped + '</div></details>');
-                        });
-                        contentEl.innerHTML = html;
-                    }
-                }
                 if (currentMode === 'write') addReviewButtons(msg, reply, text);
+                window.onAISuccess?.();
             } else {
                 addMessage('assistant', '*(未收到回复)*', currentMode);
             }
         } catch (err) {
             removeMessage(loadingId);
-            if (err.name !== 'AbortError') addMessage('assistant', `❌ ${err.message}`, currentMode);
+            if (err.name !== 'AbortError') addMessage('assistant', `❌ ${err.message}`, currentMode, { transient: true });
         } finally {
             activeRequestController = null;
             isLoading = false;
@@ -232,19 +297,347 @@ const ChatPanel = (function () {
     }
 
     function stopGeneration() {
-        activeRequestController?.abort();
-        activeRequestController = null;
-        isLoading = false;
+        if (streamAbortController) {
+            streamAbortController.abort();
+        }
         updateButtons();
     }
 
-    async function callAPI(endpoint, userMessage, context, signal) {
+    // ==================== Stream Core: SSE Fetch & Parse ====================
+
+    async function startStream(endpoint, userMessage, context, signal) {
+        const config = { ...getConfig(), stream: true };
+        const presetName = window.editorState?.presetName || '__default__';
+        const history = buildModelHistory();
+
+        const body = {
+            message: userMessage,
+            history,
+            context,
+            config,
+            presetName,
+            promptTemplates: getEnabledTemplates(),
+            promptOrder: window.editorState?.promptOrder || [],
+        };
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+            body: JSON.stringify(body),
+            signal,
+        });
+
+        if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error || 'HTTP ' + response.status);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+            // Chat generation is streaming-only.
+            throw new Error('后端未返回流式响应');
+        }
+
+        // SSE streaming
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        return new Promise((resolve, reject) => {
+            let stopped = false;
+
+            async function read() {
+                try {
+                    while (!stopped) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const jsonStr = line.slice(6);
+                                try {
+                                    const event = JSON.parse(jsonStr);
+                                    const shouldStop = processStreamEvent(event);
+                                    if (shouldStop) { stopped = true; resolve(); return; }
+                                } catch { /* skip malformed JSON line */ }
+                            }
+                        }
+                    }
+                    resolve();
+                } catch (err) {
+                    reject(err);
+                }
+            }
+            read();
+        });
+    }
+
+    function processStreamEvent(event) {
+        switch (event.type) {
+            case 'chunk':
+                if (!streamMsgId) {
+                    // First chunk — replace loading with stream message
+                    clearInterval(streamThinkTimer);
+                    const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                    if (loadingEl) loadingEl.remove();
+                    const result = createStreamMessage('assistant', currentMode);
+                    streamMsgId = result.id;
+                    streamingActive = true;
+                }
+                streamAccumulatedText += event.content || '';
+                enqueueStreamChunk(streamMsgId, event.content || '');
+                break;
+
+            case 'reasoning':
+                if (!streamMsgId) {
+                    clearInterval(streamThinkTimer);
+                    const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                    if (loadingEl) loadingEl.remove();
+                    const result = createStreamMessage('assistant', currentMode);
+                    streamMsgId = result.id;
+                    streamingActive = true;
+                }
+                streamReasoningBlocks.push(event.content || '');
+                appendStreamReasoning(streamMsgId, event.content || '');
+                break;
+
+            case 'meta':
+                streamMetaData = event;
+                if (event.contextDebug) window.lastContextDebug = event.contextDebug;
+                break;
+
+            case 'done':
+                streamingActive = false;  // Allow session save to proceed
+                if (streamMsgId) {
+                    const fullReply = event.reply || streamAccumulatedText;
+                    finalizeStreamMessageAfterTypewriter(streamMsgId, fullReply, streamReasoningBlocks, currentMode, streamUserPrompt);
+                }
+                window.saveActiveChatSession?.();
+                window.onAISuccess?.();
+                return true;  // Signal stream complete
+
+            case 'error':
+                throw new Error(event.message || 'Stream error');
+
+            default:
+                break;
+        }
+        return false;
+    }
+
+    // ==================== Stream DOM Helpers ====================
+
+    function createStreamMessage(role, mode) {
+        const msgList = document.getElementById('chat-messages');
+        if (!msgList) return null;
+        const welcome = msgList.querySelector('.chat-welcome');
+        if (welcome) welcome.remove();
+
+        const id = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const el = document.createElement('div');
+        el.className = 'chat-message chat-msg-' + role + ' chat-message-streaming';
+        el.id = id;
+        const name = role === 'user' ? 'You' : 'AI';
+        const modeLabel = mode === 'assist' ? '<span class="chat-msg-mode-badge">设定</span>' : '';
+
+        el.innerHTML = '<div class="chat-msg-avatar"></div><div class="chat-msg-body">' +
+            '<div class="chat-msg-header"><span class="chat-msg-role">' + name + '</span>' + modeLabel + '<span class="chat-msg-time">' + now() + '</span></div>' +
+            '<div class="chat-msg-content"></div>' +
+            '<div class="chat-msg-actions"></div>' +
+            '</div>';
+        msgList.appendChild(el);
+        scrollBottom(msgList, { force: true });
+
+        const msg = { id: id, role: role, content: '', rawContent: '', mode: mode };
+        messages.push(msg);
+        renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
+        while (msgList.querySelectorAll('.chat-message').length > MESSAGE_PAGE_SIZE) {
+            msgList.querySelector('.chat-message')?.remove();
+        }
+        return msg;
+    }
+
+    function enqueueStreamChunk(msgId, text) {
+        if (!text) return;
+        streamPendingText += text;
+        if (streamTypewriterTimer) return;
+        streamTypewriterTimer = setInterval(() => drainStreamChunkQueue(msgId), 24);
+    }
+
+    function drainStreamChunkQueue(msgId) {
+        if (!streamPendingText) {
+            stopStreamTypewriter();
+            return;
+        }
+        const chars = Array.from(streamPendingText);
+        const take = chars.length > 160 ? 4 : chars.length > 40 ? 2 : 1;
+        streamRenderedText += chars.slice(0, take).join('');
+        streamPendingText = chars.slice(take).join('');
+        renderStreamChunk(msgId);
+        if (!streamPendingText && streamPendingFinalize) {
+            const finalize = streamPendingFinalize;
+            streamPendingFinalize = null;
+            stopStreamTypewriter();
+            finalize();
+        }
+    }
+
+    function flushStreamChunkQueue(msgId) {
+        if (streamPendingText) {
+            streamRenderedText += streamPendingText;
+            streamPendingText = '';
+            renderStreamChunk(msgId);
+        }
+        stopStreamTypewriter();
+    }
+
+    function stopStreamTypewriter() {
+        if (!streamTypewriterTimer) return;
+        clearInterval(streamTypewriterTimer);
+        streamTypewriterTimer = null;
+    }
+
+    function finalizeStreamMessageAfterTypewriter(msgId, fullText, reasoningBlocks, mode, userPrompt) {
+        const finalize = () => finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt);
+        if (streamPendingText || streamTypewriterTimer) {
+            streamPendingFinalize = finalize;
+            return;
+        }
+        finalize();
+    }
+
+    function renderStreamChunk(msgId) {
+        const el = document.getElementById(msgId);
+        if (!el) return;
+        const contentEl = el.querySelector('.chat-msg-content');
+        if (!contentEl) return;
+        const msgList = el.closest('.chat-messages');
+        const keepAtBottom = !streamUserScrollLocked && shouldAutoScroll(msgList);
+        // Strip XML wrapper tags for streaming display (raw text kept in streamAccumulatedText)
+        const displayText = stripXmlForStreaming(streamRenderedText);
+        contentEl.innerHTML = escHtml(displayText).replace(/\n/g, '<br>');
+        scrollBottom(msgList, { force: keepAtBottom });
+        // Update message object — keep raw accumulated text for final structured render
+        const msg = messages.find(m => m.id === msgId);
+        if (msg) { msg.content = streamAccumulatedText; msg.rawContent = streamAccumulatedText; }
+    }
+
+    // Remove XML wrapper tags for clean streaming display, keep inner text
+    function stripXmlForStreaming(text) {
+        let result = String(text || '');
+        // Replace full tag pairs: show inner content only
+        result = result.replace(/<refine\s*>[\s\S]*?<\/refine\s*>/gi, '\n[润色建议 — 完成后显示]\n');
+        result = result.replace(/<details\s*>([\s\S]*?)<\/details\s*>/gi, (_, inner) => {
+            const summary = (inner.match(/<summary\s*>([\s\S]*?)<\/summary\s*>/i) || [])[1] || '';
+            return summary ? '\n[详情: ' + summary.trim() + ']\n' : '\n[详情]\n';
+        });
+        // Strip <content> and </content> wrappers but keep inner text
+        result = result.replace(/<\/?content\s*>/gi, '');
+        // Strip stray closing tags
+        result = result.replace(/<\/?(?:refine|details|summary)\s*>/gi, '');
+        return result;
+    }
+
+    function appendStreamReasoning(msgId, text) {
+        const el = document.getElementById(msgId);
+        if (!el) return;
+        const body = el.querySelector('.chat-msg-body');
+        if (!body) return;
+        const msgList = el.closest('.chat-messages');
+        const keepAtBottom = !streamUserScrollLocked && shouldAutoScroll(msgList);
+        let details = body.querySelector('.chat-reasoning-streaming');
+        if (!details) {
+            details = document.createElement('details');
+            details.className = 'chat-reasoning chat-reasoning-streaming';
+            details.open = true;
+            details.innerHTML = '<summary>思考过程（生成中）</summary><div class="chat-reasoning-content"></div>';
+            const content = body.querySelector('.chat-msg-content');
+            if (content) body.insertBefore(details, content);
+            else body.appendChild(details);
+        }
+        const div = details.querySelector('.chat-reasoning-content');
+        if (div) div.textContent += text;
+        scrollBottom(msgList, { force: keepAtBottom });
+    }
+
+    function finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt) {
+        const el = document.getElementById(msgId);
+        if (!el) return;
+
+        // Apply regex bindings on complete reply
+        let boundReply = typeof window.applyRegexBindings === 'function'
+            ? window.applyRegexBindings(fullText) : fullText;
+
+        // renderStructuredReply handles [REASONING] blocks, structured tags, and markdown
+        const contentEl = el.querySelector('.chat-msg-content');
+        if (contentEl) {
+            contentEl.innerHTML = renderStructuredReply(boundReply);
+        }
+
+        // Remove streaming cursor and reasoning streaming state
+        el.classList.remove('chat-message-streaming');
+        const streamingDetails = el.querySelector('.chat-reasoning-streaming');
+        if (streamingDetails) {
+            const summary = streamingDetails.querySelector('summary');
+            if (summary) summary.textContent = '思考过程';
+            streamingDetails.classList.remove('chat-reasoning-streaming');
+        }
+
+        // Update message object
+        const msg = messages.find(m => m.id === msgId);
+        if (msg) { msg.content = boundReply; msg.rawContent = boundReply; }
+
+        // Add review buttons (write mode)
+        if (mode === 'write' && msg) {
+            addReviewButtons(msg, boundReply, userPrompt);
+        }
+    }
+
+    function finalizePartialMessage(msgId, text, reasoningBlocks) {
+        streamingActive = false;  // Allow session save to proceed
+        const el = document.getElementById(msgId);
+        if (!el) return;
+
+        const contentEl = el.querySelector('.chat-msg-content');
+        if (contentEl) {
+            flushStreamChunkQueue(msgId);
+            let html = escHtml(streamRenderedText || text).replace(/\n/g, '<br>');
+            html += '<br><br><em class="chat-stream-interrupted">（已中断，内容不完整）</em>';
+            contentEl.innerHTML = html;
+        }
+
+        el.classList.remove('chat-message-streaming');
+        const streamingDetails = el.querySelector('.chat-reasoning-streaming');
+        if (streamingDetails) streamingDetails.classList.remove('chat-reasoning-streaming');
+
+        const msg = messages.find(m => m.id === msgId);
+        if (msg) { msg.content = text; msg.rawContent = text; }
+
+        window.saveActiveChatSession?.();
+    }
+
+    function handleLegacyReply(rawReply, userPrompt) {
+        // Kept only for rendering older saved JSON replies.
+        let reply = typeof window.applyRegexBindings === 'function'
+            ? window.applyRegexBindings(rawReply) : rawReply;
+
+        if (reply) {
+            const msg = addMessage('assistant', reply, currentMode);
+            if (currentMode === 'write') addReviewButtons(msg, reply, userPrompt);
+            window.onAISuccess?.();
+        } else {
+            addMessage('assistant', '*(未收到回复)*', currentMode);
+        }
+    }
+
+    async function removedNonStreamingApiCall(endpoint, userMessage, context, signal) {
         const config = { ...getConfig() };
         const presetName = window.editorState?.presetName || '__default__';
 
         // Use AI panel settings as-is
-        const history = messages.slice(0, -1).slice(-20)
-            .map(m => ({ role: m.role, content: m.rawContent || m.content }));
+        const history = buildModelHistory();
         const data = await ApiClient.post(endpoint, {
                 message: userMessage,
                 history,
@@ -259,7 +652,68 @@ const ChatPanel = (function () {
     }
 
     // ==================== Messages ====================
-    function addMessage(role, content, mode) {
+    function buildModelHistory() {
+        return compactMessagesForModel(messages
+            .slice(0, -1)
+            .filter(shouldSendMessageToModel)
+            .map(m => ({ role: m.role, content: String(m.rawContent || m.content || '').trim() })))
+            .slice(-20);
+    }
+
+    function shouldSendMessageToModel(message) {
+        if (!message || message.transient) return false;
+        if (!['user', 'assistant'].includes(message.role)) return false;
+        const content = String(message.rawContent || message.content || '').trim();
+        if (!content) return false;
+        if (message.role === 'assistant' && isAssistantErrorMessage(content)) return false;
+        return true;
+    }
+
+    function isAssistantErrorMessage(content) {
+        return content.startsWith('❌')
+            || content.includes('API key required')
+            || content.includes('请先配置 API Key')
+            || content.includes('Stream error')
+            || content.includes('HTTP 4')
+            || content.includes('HTTP 5');
+    }
+
+    function compactMessagesForModel(source) {
+        const cleaned = [];
+        for (const msg of source || []) {
+            if (!msg || !['user', 'assistant'].includes(msg.role)) continue;
+            const content = String(msg.content || '').trim();
+            if (!content) continue;
+            if (msg.role === 'assistant' && isAssistantErrorMessage(content)) continue;
+
+            const last = cleaned[cleaned.length - 1];
+            if (last?.role === msg.role && last.content === content) continue;
+            cleaned.push({ role: msg.role, content });
+        }
+        return cleaned;
+    }
+
+    function sanitizeLoadedMessages(saved) {
+        const cleaned = [];
+        for (const msg of saved || []) {
+            if (!msg || !['user', 'assistant'].includes(msg.role)) continue;
+            const content = String(msg.rawContent || msg.content || '').trim();
+            if (!content) continue;
+            if (msg.role === 'assistant' && isAssistantErrorMessage(content)) continue;
+            const normalized = {
+                ...msg,
+                content,
+                rawContent: content,
+                transient: false,
+            };
+            const last = cleaned[cleaned.length - 1];
+            if (last?.role === normalized.role && String(last.rawContent || last.content || '').trim() === content) continue;
+            cleaned.push(normalized);
+        }
+        return cleaned;
+    }
+
+    function addMessage(role, content, mode, options = {}) {
         const msgList = document.getElementById('chat-messages');
         if (!msgList) return null;
         const welcome = msgList.querySelector('.chat-welcome');
@@ -274,19 +728,19 @@ const ChatPanel = (function () {
 
         el.innerHTML = `<div class="chat-msg-avatar"></div><div class="chat-msg-body">
             <div class="chat-msg-header"><span class="chat-msg-role">${name}</span>${modeLabel}<span class="chat-msg-time">${now()}</span></div>
-            <div class="chat-msg-content">${renderMD(content)}</div>
+            <div class="chat-msg-content">${renderStructuredReply(content)}</div>
             <div class="chat-msg-actions"></div>
         </div>`;
         msgList.appendChild(el);
-        scrollBottom(msgList);
+        scrollBottom(msgList, { force: true });
 
         // Fade-in animation for new message
         if (window.DomAnimator) {
             window.DomAnimator.fadeIn(el);
         }
 
-        const msg = { id, role, content, rawContent: content, mode };
-        messages.push(msg);
+        const msg = { id, role, content, rawContent: content, mode, transient: Boolean(options.transient) };
+        if (!options.transient) messages.push(msg);
         renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
         while (msgList.querySelectorAll('.chat-message').length > MESSAGE_PAGE_SIZE) {
             msgList.querySelector('.chat-message')?.remove();
@@ -303,7 +757,7 @@ const ChatPanel = (function () {
         const modeLabel = message.mode === 'assist' ? '<span class="chat-msg-mode-badge">设定</span>' : '';
         el.innerHTML = `<div class="chat-msg-avatar"></div><div class="chat-msg-body">
             <div class="chat-msg-header"><span class="chat-msg-role">${name}</span>${modeLabel}</div>
-            <div class="chat-msg-content">${renderMD(message.rawContent || message.content)}</div>
+            <div class="chat-msg-content">${renderStructuredReply(message.rawContent || message.content)}</div>
             <div class="chat-msg-actions"></div>
         </div>`;
         return el;
@@ -315,11 +769,14 @@ const ChatPanel = (function () {
         msgList.replaceChildren();
         renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
         messages.slice(renderedStart).forEach(message => msgList.appendChild(renderStoredMessage(message)));
-        scrollBottom(msgList);
+        scrollBottom(msgList, { force: true });
     }
 
     function onMessageScroll(event) {
         const msgList = event.currentTarget;
+        if (streamingActive) {
+            streamUserScrollLocked = !shouldAutoScroll(msgList);
+        }
         if (msgList.scrollTop > 1 || renderedStart <= 0) return;
 
         const oldHeight = msgList.scrollHeight;
@@ -341,7 +798,7 @@ const ChatPanel = (function () {
             <div class="chat-msg-header"><span class="chat-msg-role">AI</span></div>
             <div class="chat-msg-content"><div class="chat-thinking">Thinking<span class="chat-thinking-dots"><span></span><span></span><span></span></span></div></div>
         </div>`;
-        msgList.appendChild(el); scrollBottom(msgList);
+        msgList.appendChild(el); scrollBottom(msgList, { force: true });
         return id;
     }
 
@@ -404,7 +861,9 @@ const ChatPanel = (function () {
 
     function insertToEditor(text) {
         const editor = document.getElementById('chapter-editor'); if (!editor) return;
-        let clean = text.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '');
+        // Extract only <content> section if structured, otherwise use full text
+        let clean = extractContentOnly(text);
+        clean = clean.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '');
         const start = editor.selectionStart, end = editor.selectionEnd;
         const before = editor.value.substring(0, start), after = editor.value.substring(end);
         const spacer = before && !before.endsWith('\n') ? '\n\n' : '';
@@ -412,6 +871,11 @@ const ChatPanel = (function () {
         const newPos = start + spacer.length + clean.length + 1;
         editor.selectionStart = editor.selectionEnd = newPos;
         editor.dispatchEvent(new Event('input', { bubbles: true })); editor.focus();
+    }
+
+    function extractContentOnly(rawText) {
+        const match = String(rawText || '').match(/<content\s*>([\s\S]*?)<\/content\s*>/i);
+        return match ? match[1].trim() : rawText;
     }
 
     // ==================== Context ====================
@@ -479,9 +943,176 @@ const ChatPanel = (function () {
             .replace(/^- (.+)$/gm,'<li>$1</li>').replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>');
     }
 
+    // ==================== Structured Reply Rendering ====================
+
+    function renderStructuredReply(rawText) {
+        if (!rawText) return '';
+        let text = String(rawText);
+
+        // Extract [REASONING] blocks — keep separate from content details
+        let reasoningHtml = '';
+        text = text.replace(/\[REASONING\]\s*([\s\S]*?)\s*\[\/REASONING\]/g, (_, thinking) => {
+            reasoningHtml += '<details><summary>思考过程</summary><div>' + escHtml(String(thinking)) + '</div></details>';
+            return '';
+        });
+
+        reasoningHtml = reasoningHtml
+            .replace(/<details>/g, '<details class="chat-reasoning">')
+            .replace(/<summary>[\s\S]*?<\/summary>/g, '<summary>思考过程</summary>');
+
+        // Strip orphaned %%REASONING_N%% markers from older sessions
+        text = text.replace(/%%REASONING_\d+%%/g, '');
+
+        // Extract <content>...</content>
+        const contentMatch = extractTag(text, 'content');
+        // Extract <refine>[...]</refine>
+        const refineMatch = extractTag(text, 'refine');
+        const sceneMatch = extractTag(text, 'scene');
+
+        // Extract AI content <details>, excluding chat-reasoning ones (already handled)
+        const contentDetails = [];
+        const summaryDetails = [];
+        text = text.replace(/<details(?:\s[^>]*)?>([\s\S]*?)<\/details\s*>/gi, (full) => {
+            if (/class="chat-reasoning"/i.test(full)) {
+                reasoningHtml += full;
+            } else if (isSummaryDetails(full)) {
+                summaryDetails.push(full);
+            } else {
+                contentDetails.push(full);
+            }
+            return '';
+        });
+
+        if (!contentMatch && !contentDetails.length && !summaryDetails.length && !refineMatch && !sceneMatch && !reasoningHtml) {
+            return renderMD(String(rawText));
+        }
+
+        let remainder = text;
+        if (contentMatch) remainder = remainder.replace(contentMatch.full, '');
+        if (refineMatch) remainder = remainder.replace(refineMatch.full, '');
+        if (sceneMatch) remainder = remainder.replace(sceneMatch.full, '');
+
+        const parts = [];
+        if (reasoningHtml.trim()) {
+            parts.push('<div class="structured-section-toggle open" onclick="var d=this.nextElementSibling;d.classList.toggle(\'hidden\');this.classList.toggle(\'open\')">思考过程</div>' +
+                '<div class="structured-details">' + reasoningHtml + '</div>');
+            reasoningHtml = '';
+        }
+
+        // 1. Content — just the prose, no wrapper
+        if (contentMatch && contentMatch.inner.trim()) {
+            parts.push(renderMD(contentMatch.inner.trim()));
+        }
+
+        // 2. Reasoning — lightweight collapsible section
+        if (reasoningHtml.trim()) {
+            parts.push('<div class="structured-section-toggle open" onclick="var d=this.nextElementSibling;d.classList.toggle(\'hidden\');this.classList.toggle(\'open\')">思考过程</div>' +
+                '<div class="structured-details">' + reasoningHtml + '</div>');
+        }
+
+        // 3. Content details — same lightweight treatment
+        if (sceneMatch && sceneMatch.inner.trim()) {
+            parts.push('<div class="structured-scene">场景：' + escHtml(sceneMatch.inner.trim()) + '</div>');
+        }
+
+        if (summaryDetails.length) {
+            parts.push('<div class="structured-section-toggle open" onclick="var d=this.nextElementSibling;d.classList.toggle(\'hidden\');this.classList.toggle(\'open\')">摘要</div>' +
+                '<div class="structured-details structured-summary-details">' + summaryDetails.map(openDetailsTag).join('\n') + '</div>');
+        }
+
+        if (contentDetails.length) {
+            parts.push('<div class="structured-section-toggle" onclick="var d=this.nextElementSibling;d.classList.toggle(\'hidden\');this.classList.toggle(\'open\')">详情</div>' +
+                '<div class="structured-details hidden">' + contentDetails.join('\n') + '</div>');
+        }
+
+        // 4. Refine cards
+        if (refineMatch && refineMatch.inner.trim()) {
+            parts.push(renderRefineCards(refineMatch.inner.trim()));
+        }
+
+        // 5. Leftover
+        const leftover = remainder.trim();
+        if (leftover) {
+            parts.push(renderMD(leftover));
+        }
+
+        return parts.join('\n') || renderMD(String(rawText));
+    }
+
+    function isSummaryDetails(detailsHtml) {
+        const title = (String(detailsHtml || '').match(/<summary(?:\s[^>]*)?>([\s\S]*?)<\/summary\s*>/i) || [])[1] || '';
+        return /摘要|总结|大总结|小总结|summary/i.test(title.replace(/<[^>]*>/g, ''));
+    }
+
+    function openDetailsTag(detailsHtml) {
+        return String(detailsHtml || '').replace(/^<details(?![^>]*\bopen\b)/i, '<details open');
+    }
+
+
+    function extractTag(text, tagName) {
+        const pattern = new RegExp('<' + tagName + '\\s*>([\\s\\S]*?)<\\/' + tagName + '\\s*>', 'i');
+        const match = text.match(pattern);
+        if (!match) return null;
+        return { full: match[0], inner: match[1] };
+    }
+
+    function extractAllTags(text, tagName) {
+        const results = [];
+        const pattern = new RegExp('<' + tagName + '\\s*>([\\s\\S]*?)<\\/' + tagName + '\\s*>', 'gi');
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            results.push({ full: match[0], inner: match[1] });
+        }
+        return results;
+    }
+
+    function renderRefineCards(jsonText) {
+        let refines = [];
+        try {
+            refines = JSON.parse(jsonText);
+        } catch {
+            return '<div class="structured-refine"><div class="refine-error">润色数据解析失败</div></div>';
+        }
+        if (!Array.isArray(refines) || !refines.length) return '';
+
+        const cards = refines.map((r, i) => {
+            const analyze = escHtml(r.analyze || '');
+            const original = escHtml(r.original || '');
+            const corrected = escHtml(r.corrected || '');
+            return '<div class="refine-card" onclick="applyRefineCard(this,\'' +
+                original.replace(/'/g, "\\'") + '\',\'' +
+                corrected.replace(/'/g, "\\'") + '\')" title="点击应用此条修改">' +
+                '<div class="refine-card-header">' +
+                '<span class="refine-num">#' + (i + 1) + '</span> ' + analyze +
+                '<span class="refine-confirmed-mark">已应用</span>' +
+                '</div>' +
+                '<div class="refine-compare">' +
+                '<div class="refine-original"><span class="refine-label">原文</span><s>' + original + '</s></div>' +
+                '<div class="refine-corrected"><span class="refine-label">修改</span><span>' + corrected + '</span></div>' +
+                '</div>' +
+                '</div>';
+        }).join('');
+
+        return '<div class="structured-refine refine-collapsed">' +
+            '<div class="structured-section-title" onclick="this.parentElement.classList.toggle(\'refine-collapsed\')">润色建议 <span class="section-count">' + refines.length + ' 条</span></div>' +
+            '<div class="refine-cards">' + cards + '</div>' +
+            '</div>';
+    }
+
+
     function now() { const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
     function escHtml(str) { if (!str) return ''; const el = document.createElement('span'); el.textContent = str; return el.innerHTML; }
-    function scrollBottom(el) { setTimeout(() => { el.scrollTop = el.scrollHeight; }, 50); }
+    function shouldAutoScroll(el) {
+        if (!el) return false;
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+    }
+
+    function scrollBottom(el, options = {}) {
+        if (!el) return;
+        const force = options.force === true;
+        if (!force && !shouldAutoScroll(el)) return;
+        el.scrollTop = el.scrollHeight;
+    }
 
     function updateButtons() {
         const send = document.getElementById('btn-send');
@@ -498,7 +1129,7 @@ const ChatPanel = (function () {
         let totalChars = 0;
         messages.forEach(m => { totalChars += (m.rawContent || m.content || '').length; });
         const estimatedTokens = Math.round(totalChars / 2.5);
-        const config = getConfig();
+        const config = { ...getConfig(), stream: false };
         const model = String(config.model || '').toLowerCase();
         const modelLimit = Number(config.maxContext || 0)
             || (model.includes('deepseek') || model.includes('gemini') || model.includes('qwen') || model.includes('minimax')
@@ -647,12 +1278,13 @@ const ChatPanel = (function () {
         loadMessages: (saved) => {
             if (Array.isArray(saved)) {
                 messages.length = 0;
-                messages.push(...saved);
+                messages.push(...sanitizeLoadedMessages(saved));
                 renderRecentMessages();
             }
         },
         renderSessionList, setActiveSession, registerSessionCallbacks,
         cancelActiveRequest: stopGeneration,
+        isStreamingActive: () => streamingActive,
     };
 })();
 window.ChatPanel = ChatPanel;

@@ -7,6 +7,7 @@ import { getDataRoot } from '../config.js';
 import { ApiError, asyncRoute, requireString } from '../lib/http.js';
 import { enqueueFileWrite, readJson, removeFile, writeJson } from '../lib/json-store.js';
 import { projectFile, resolveInside } from '../lib/project-paths.js';
+import { ensureChapterSummary } from '../services/reference-summaries.js';
 
 export const router = express.Router();
 const chapterPathIndexes = new Map();
@@ -61,7 +62,7 @@ router.post('/', asyncRoute(async (req, res) => {
         }
 
         const content = typeof req.body.content === 'string' ? req.body.content : '';
-        const chapter = {
+        let chapter = {
             id: uuidv4(),
             novelId,
             title: String(req.body.title || '未命名章节'),
@@ -75,6 +76,7 @@ router.post('/', asyncRoute(async (req, res) => {
             order: 0,
             volumeId: normalizeVolumeId(req.body.volumeId),
         };
+        chapter = ensureChapterSummary(chapter).chapter;
         const targetDir = chapterTargetDir(root, chapter.volumeId);
         await fs.mkdir(targetDir, { recursive: true });
         const existing = await listJsonNames(targetDir);
@@ -112,10 +114,11 @@ router.put('/:id', asyncRoute(async (req, res) => {
             targetPath = await getUniquePath(resolveInside(targetDir, path.basename(found.path)), found.path);
         }
 
-        await writeJson(targetPath, next);
+        const summarized = ensureChapterSummary(next).chapter;
+        await writeJson(targetPath, summarized);
         if (path.resolve(targetPath) !== path.resolve(found.path)) await removeFile(found.path);
-        setIndexedChapterPath(root, next.id, targetPath);
-        return next;
+        setIndexedChapterPath(root, summarized.id, targetPath);
+        return summarized;
     });
     res.json(chapter);
 }));
@@ -134,7 +137,7 @@ router.delete('/:id', asyncRoute(async (req, res) => {
                     chapter.volumeId = '';
                     chapter.updated = Date.now();
                     const target = await getUniquePath(resolveInside(root, file), source);
-                    await writeJson(target, chapter);
+                    await writeJson(target, ensureChapterSummary(chapter).chapter);
                     await removeFile(source);
                 }
                 await fs.rm(volumeDir, { recursive: true, force: true });
@@ -176,7 +179,7 @@ async function listChapterItems(root, novelId) {
             const files = (await listJsonNames(full)).sort();
             const chapters = await Promise.all(files.map(async file => {
                 const filePath = resolveInside(full, file);
-                const chapter = await tryReadChapter(filePath);
+                const chapter = await tryReadChapter(filePath, { summarize: false });
                 if (chapter?.id) setIndexedChapterPath(root, chapter.id, filePath);
                 return chapter ? lightChapter(chapter, volumeId) : null;
             }));
@@ -185,7 +188,7 @@ async function listChapterItems(root, novelId) {
                 ...chapters.filter(Boolean),
             ];
         } else if (entry.isFile() && entry.name.endsWith('.json')) {
-            const data = await tryReadChapter(full);
+            const data = await tryReadChapter(full, { summarize: false });
             if (!data) return [];
             if (entry.name.startsWith('vol_') || data.type === 'volume') {
                 return [{ id: data.id, novelId, type: 'volume', title: data.title, volumeId: '', order: data.order || 0 }];
@@ -247,9 +250,11 @@ function deleteIndexedChapterPath(rootDir, id) {
     getChapterPathIndex(rootDir).delete(id);
 }
 
-async function tryReadChapter(filePath) {
+async function tryReadChapter(filePath, { summarize = true } = {}) {
     try {
-        return await readJson(filePath);
+        const chapter = await readJson(filePath);
+        if (!summarize) return chapter;
+        return ensureChapterSummary(chapter).chapter;
     } catch (err) {
         if (err.code === 'CORRUPT_JSON') return null;
         throw err;

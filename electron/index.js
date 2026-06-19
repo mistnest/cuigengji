@@ -9,6 +9,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow;
 let embeddedServer;
+let currentAppUrl = '';
+
+const startupStartedAt = Date.now();
+
+function logStartup(label) {
+    console.log(`[Startup +${Date.now() - startupStartedAt}ms] ${label}`);
+}
 
 async function pathExists(target) {
     try {
@@ -52,6 +59,7 @@ async function prepareDevelopmentDataRoot() {
     const marker = path.join(projectDataRoot, '.migrations', 'electron-user-data-v1.json');
     if (await pathExists(marker) || !await pathExists(electronDataRoot)) return projectDataRoot;
 
+    logStartup('Migrating Electron user data into project data root');
     const migratedAt = Date.now();
     const backupRoot = path.join(projectDataRoot, 'backups', `electron-data-migration-${migratedAt}`);
     await fs.mkdir(projectDataRoot, { recursive: true });
@@ -67,6 +75,7 @@ async function prepareDevelopmentDataRoot() {
 }
 
 async function ensureServer() {
+    logStartup('Starting embedded server');
     const dataRoot = process.env.CUIGENGJI_DATA_ROOT
         ? path.resolve(process.env.CUIGENGJI_DATA_ROOT)
         : app.isPackaged
@@ -78,10 +87,70 @@ async function ensureServer() {
     });
     console.log(`[Data] ${dataRoot}`);
     embeddedServer = started.server;
+    logStartup(`Embedded server ready at ${started.url}`);
     return started.url;
 }
 
-function createWindow(appUrl) {
+function loadingPage() {
+    return 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Cuigengji</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #111827;
+      color: #f9fafb;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+    }
+    .card {
+      width: min(420px, calc(100vw - 48px));
+      padding: 32px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      background: rgba(255,255,255,.06);
+      box-shadow: 0 20px 80px rgba(0,0,0,.35);
+      text-align: center;
+    }
+    .title { font-size: 26px; font-weight: 700; margin-bottom: 12px; }
+    .hint { color: #cbd5e1; line-height: 1.7; }
+    .bar {
+      height: 4px;
+      margin-top: 24px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255,255,255,.12);
+    }
+    .bar::before {
+      content: "";
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #93c5fd, #c4b5fd);
+      animation: move 1.2s ease-in-out infinite;
+    }
+    @keyframes move {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(260%); }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="title">催更姬正在启动</div>
+    <div class="hint">第一次开机启动可能需要预热本地服务，请稍等片刻。</div>
+    <div class="bar"></div>
+  </main>
+</body>
+</html>`);
+}
+
+function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
@@ -147,15 +216,28 @@ function createWindow(appUrl) {
     ];
 
     Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));
-    mainWindow.loadURL(appUrl);
+    mainWindow.loadURL(currentAppUrl || loadingPage());
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 app.whenReady().then(async () => {
-    const appUrl = await ensureServer();
-    createWindow(appUrl);
+    logStartup('Electron ready');
+    createWindow();
+    ensureServer()
+        .then(appUrl => {
+            currentAppUrl = appUrl;
+            if (!mainWindow) return;
+            mainWindow.loadURL(appUrl);
+            logStartup('Main window loaded app URL');
+        })
+        .catch(error => {
+            console.error('[Startup] Failed to start embedded server', error);
+            if (mainWindow) {
+                mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<h1>启动失败</h1><pre>${String(error?.stack || error)}</pre>`));
+            }
+        });
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow(appUrl);
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
 });
 

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ApiError } from '../lib/http.js';
 import { novelDir as resolveNovelDir } from '../lib/project-paths.js';
+import { ensureChapterSummaries, ensureCharacterSummaries, ensureWorldBookSummaries } from './reference-summaries.js';
 
 export async function loadProjectContext(novelId, fallback = {}) {
     const workspace = await readWorkspace(novelId);
@@ -32,7 +33,7 @@ export async function readWorkspace(novelId) {
 
 async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
     if (workspace.worldBook?.entries) {
-        return { data: workspace.worldBook, source: 'workspace' };
+        return { data: ensureWorldBookSummaries(workspace.worldBook).data, source: 'workspace' };
     }
 
     const assetDir = path.join(novelDir(novelId), 'assets', 'worldbooks');
@@ -40,12 +41,11 @@ async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
         const files = (await fs.readdir(assetDir)).filter(file => file.endsWith('.json')).sort();
         for (const file of files) {
             const book = await readJson(path.join(assetDir, file));
-            if (book?.entries) return { data: book, source: `project_asset:${file}` };
+            if (book?.entries) return { data: ensureWorldBookSummaries(book).data, source: `project_asset:${file}` };
         }
     }
 
-    return {
-        data: {
+    const fallbackBook = {
             entries: Object.fromEntries((fallbackEntries || []).map((entry, index) => [index, {
                 uid: index,
                 key: [entry.name].filter(Boolean),
@@ -56,14 +56,17 @@ async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
                 order: 100,
                 position: 0,
             }])),
-        },
+    };
+
+    return {
+        data: ensureWorldBookSummaries(fallbackBook).data,
         source: 'request_summary',
     };
 }
 
 async function loadCharacters(novelId, workspace, fallbackCharacters = []) {
-    if (Array.isArray(workspace.characters)) {
-        return { data: workspace.characters, source: 'workspace' };
+    if (Array.isArray(workspace.characters) && workspace.characters.length) {
+        return { data: ensureCharacterSummaries(workspace.characters).data, source: 'workspace' };
     }
 
     const result = [];
@@ -89,7 +92,7 @@ async function loadCharacters(novelId, workspace, fallbackCharacters = []) {
     }
 
     return {
-        data: result,
+        data: ensureCharacterSummaries(result).data,
         source: result.length && hasAssets ? 'project_assets' : 'request_summary',
     };
 }
@@ -120,12 +123,13 @@ async function loadChapters(novelId) {
     };
 
     await visit(root);
-    return chapters.sort((a, b) => {
+    const sorted = chapters.sort((a, b) => {
         const ao = Number(a.order || 0);
         const bo = Number(b.order || 0);
         if (ao !== bo) return ao - bo;
         return String(a._path).localeCompare(String(b._path), 'zh-CN');
     });
+    return ensureChapterSummaries(sorted).data;
 }
 
 function buildPlotMemory({ chapters = [], outline = [] }) {
@@ -133,7 +137,7 @@ function buildPlotMemory({ chapters = [], outline = [] }) {
         .filter(chapter => chapter.content || chapter.notes || chapter.plotPoints?.length)
         .map(chapter => ({
             title: chapter.title || 'Untitled chapter',
-            summary: buildChapterDigest(chapter),
+            summary: chapter.summary || buildChapterDigest(chapter),
             updated: chapter.updated || chapter.created || 0,
             wordCount: chapter.wordCount || (chapter.content || '').length,
         }))

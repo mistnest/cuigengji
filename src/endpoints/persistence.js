@@ -5,6 +5,7 @@ import sanitize from 'sanitize-filename';
 import { ApiError, asyncRoute, requireObject, requireString } from '../lib/http.js';
 import { readJson, updateJson, writeJson } from '../lib/json-store.js';
 import { projectFile } from '../lib/project-paths.js';
+import { ensureCharacterSummaries, ensureWorldBookSummaries } from '../services/reference-summaries.js';
 
 export const router = express.Router();
 
@@ -14,7 +15,7 @@ router.post('/worldbook', asyncRoute(async (req, res) => {
     requireObject(data, 'data');
     requireObject(data.entries, 'data.entries');
     const filePath = projectAssetFile(novelId, 'worldbooks', name || 'worldbook');
-    await writeJson(filePath, data);
+    await writeJson(filePath, ensureWorldBookSummaries(data).data);
     res.json({ success: true, path: filePath });
 }));
 
@@ -30,7 +31,7 @@ router.post('/character', asyncRoute(async (req, res) => {
     requireObject(data, 'data');
     const name = data.data?.name || data.name || 'character';
     const filePath = projectAssetFile(novelId, 'characters', name);
-    await writeJson(filePath, data);
+    await writeJson(filePath, ensureCharacterSummaries([data]).data[0]);
     res.json({ success: true, path: filePath });
 }));
 
@@ -89,11 +90,13 @@ router.post('/worldbook-entry', asyncRoute(async (req, res) => {
     requireObject(entry, 'entry');
     const filePath = projectAssetFile(novelId, 'worldbooks', bookName || 'worldbook');
     await updateJson(filePath, book => ({
-        ...book,
-        entries: {
-            ...(book.entries || {}),
-            [uid]: entry,
-        },
+        ...ensureWorldBookSummaries({
+            ...book,
+            entries: {
+                ...(book.entries || {}),
+                [uid]: entry,
+            },
+        }).data,
     }));
     res.json({ success: true });
 }));
@@ -111,6 +114,12 @@ router.post('/workspace/:novelId', asyncRoute(async (req, res) => {
         novelId: req.params.novelId,
         savedAt: Date.now(),
     };
+    if (workspace.worldBook?.entries) {
+        workspace.worldBook = ensureWorldBookSummaries(workspace.worldBook).data;
+    }
+    if (Array.isArray(workspace.characters)) {
+        workspace.characters = ensureCharacterSummaries(workspace.characters).data;
+    }
     await writeJson(filePath, workspace);
     res.json({ success: true, savedAt: workspace.savedAt });
 }));

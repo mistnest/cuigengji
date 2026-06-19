@@ -23,6 +23,11 @@
  */
 
 import { estimateTokens } from './context-manager.js';
+import { getCharacterSummary, getWorldBookEntrySummary } from './reference-summaries.js';
+import {
+    buildChapterSummaryExtractionPrompt,
+    formatMemoryPromptSections,
+} from './memory-prompts.js';
 
 // ==================== Memory Types ====================
 
@@ -75,6 +80,7 @@ export class MemoryManager {
         this.memoryBudgetPct = options.memoryBudgetPct || 15; // Percentage of model context
         this.modelContextSize = options.modelContextSize || 128000; // Will be updated from backend
         this.caseSensitive = options.caseSensitive || false;
+        this.compactReference = Boolean(options.compactReference);
     }
 
     // ==================== Layer 4: Smart Retrieval ====================
@@ -166,6 +172,12 @@ export class MemoryManager {
                 otherGroups[m.type].push(m);
             }
         }
+
+        return formatMemoryPromptSections({
+            positionGroups,
+            otherGroups,
+            memoryType: MEMORY_TYPE,
+        });
 
         const sections = [];
 
@@ -315,6 +327,8 @@ export class MemoryManager {
      * @returns {string} prompt for AI
      */
     buildSummaryExtractionPrompt(chapterContent) {
+        return buildChapterSummaryExtractionPrompt(chapterContent);
+
         return `请为以下章节生成简洁摘要（200字内），包含：主要情节进展、关键角色行为、重要伏笔。
 
 ${chapterContent.slice(-3000)}
@@ -326,7 +340,7 @@ ${chapterContent.slice(-3000)}
 
     _retrieveWorldEntries(text) {
         const entries = Object.values(this.worldBook.entries)
-            .filter(e => !e.disable);
+            .filter(e => !isWorldBookEntryDisabled(e));
 
         const active = [];
 
@@ -418,14 +432,17 @@ ${chapterContent.slice(-3000)}
     }
 
     _entryToMemory(entry, baseWeight) {
+        const content = this.compactReference
+            ? (getWorldBookEntrySummary(entry) || entry.content || '')
+            : (entry.content || '');
         return {
             id: `wb_${entry.uid}`,
             type: MEMORY_TYPE.WORLD_ENTRY,
             label: entry.comment || entry.key?.[0] || `条目${entry.uid}`,
-            content: entry.content || '',
+            content,
             weight: baseWeight + (entry.order || 100) / 10,
             triggers: entry.key || [],
-            estimatedTokens: estimateTokens(entry.content || ''),
+            estimatedTokens: estimateTokens(content),
             _position: entry.position ?? 0,
             source: { type: 'world_book', uid: entry.uid, position: entry.position ?? 0 },
         };
@@ -435,17 +452,20 @@ ${chapterContent.slice(-3000)}
         const active = [];
 
         for (const ch of this.characters) {
+            if (isCharacterDisabled(ch)) continue;
             const name = ch.data?.name || ch.name || '';
             if (!name) continue;
 
             // Check if character name appears in text
             if (text && text.includes(name)) {
-                const desc = ch.data?.description || ch.description || '';
+                const description = this.compactReference
+                    ? getCharacterSummary(ch)
+                    : (ch.data?.description || ch.description || '');
                 const personality = ch.data?.personality || ch.personality || '';
                 const scenario = ch.data?.scenario || ch.scenario || '';
 
                 const parts = [];
-                if (desc) parts.push(`描述：${desc}`);
+                if (description) parts.push(`${this.compactReference ? 'summary' : 'description'}: ${description}`);
                 if (personality) parts.push(`性格：${personality}`);
                 if (scenario) parts.push(`背景：${scenario}`);
 
@@ -453,7 +473,7 @@ ${chapterContent.slice(-3000)}
                 const charBook = ch.data?.character_book;
                 if (charBook?.entries) {
                     const bookEntries = Object.values(charBook.entries)
-                        .filter(e => !e.disable);
+                        .filter(e => !isWorldBookEntryDisabled(e));
                     if (bookEntries.length > 0) {
                         parts.push(`相关设定：${bookEntries.map(e => e.content).join('；')}`);
                     }
@@ -603,7 +623,25 @@ export function createMemoryManager(editorState = {}, options = {}) {
         chapterSummaries: editorState.chapterSummaries || [],
         memoryBudgetPct: options.memoryBudgetPct || editorState.memoryBudgetPct || 15,
         modelContextSize: options.modelContextSize || 128000,
+        compactReference: options.compactReference || editorState.compactReference || false,
     });
+}
+
+function isCharacterDisabled(character = {}) {
+    const data = character.data || character;
+    return character.disable === true
+        || character.disabled === true
+        || character.enabled === false
+        || data.disable === true
+        || data.disabled === true
+        || data.enabled === false
+        || data.extensions?.novel_ai_editor?.disabled === true;
+}
+
+function isWorldBookEntryDisabled(entry = {}) {
+    return entry.disable === true
+        || entry.disabled === true
+        || entry.enabled === false;
 }
 
 function getActiveWritingRules(editorState) {

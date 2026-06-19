@@ -107,7 +107,7 @@
                         <button id="btn-add-volume" title="添加卷">新卷</button>
                     </div>
                     <div id="chapter-tree" class="tree-view">
-                        <div class="tree-placeholder">尚未创建章节<br>点击“新章节”开始写作</div>
+                        <div class="tree-placeholder">尚未创建章节<br>点击"新章节"开始写作</div>
                     </div>
                 </div>
 
@@ -116,7 +116,7 @@
                         <button id="btn-add-outline-node" title="添加大纲节点">新节点</button>
                     </div>
                     <div id="outline-tree" class="tree-view">
-                        <div class="tree-placeholder">尚未创建大纲<br>点击“新节点”规划情节</div>
+                        <div class="tree-placeholder">尚未创建大纲<br>点击"新节点"规划情节</div>
                     </div>
                 </div>
             </aside>
@@ -129,6 +129,7 @@
                         </select>
                         <button id="btn-editor-bold" title="粗体 (Ctrl+B)"><b>B</b></button>
                         <button id="btn-editor-italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+                        <button id="btn-editor-format" title="一键排版正文">排版</button>
                         <span class="toolbar-separator"></span>
                         <input type="text" id="chapter-title-input" placeholder="章节标题..." class="chapter-title-input">
                     </div>
@@ -242,7 +243,7 @@
                         <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="worldbook-list" class="item-list">
-                        <div class="list-placeholder">尚未导入世界书<br>点击“导入”添加 ST 世界书文件</div>
+                        <div class="list-placeholder">尚未导入世界书<br>点击"导入"添加 ST 世界书文件</div>
                     </div>
                 </div>
 
@@ -270,7 +271,7 @@
                         <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="character-list" class="item-list">
-                        <div class="list-placeholder">尚未导入角色<br>点击“导入”添加 ST 角色卡</div>
+                        <div class="list-placeholder">尚未导入角色<br>点击"导入"添加 ST 角色卡</div>
                     </div>
                 </div>
 
@@ -287,7 +288,7 @@
                         <div class="ai-onboarding-title">快速上手</div>
                         <div class="ai-onboarding-step" id="onboard-step-1"><span class="ai-onboarding-num">1</span><span>选择模型服务商</span><span class="ai-onboarding-check">✓</span></div>
                         <div class="ai-onboarding-step" id="onboard-step-2"><span class="ai-onboarding-num">2</span><span>输入 API Key</span><span class="ai-onboarding-check">✓</span></div>
-                        <div class="ai-onboarding-step" id="onboard-step-3"><span class="ai-onboarding-num">3</span><span>点击“续写正文”开始</span><span class="ai-onboarding-check">✓</span></div>
+                        <div class="ai-onboarding-step" id="onboard-step-3"><span class="ai-onboarding-num">3</span><span>用聊天框开始写作</span><span class="ai-onboarding-check">✓</span></div>
                     </div>
 
                     <div class="ai-section">
@@ -379,6 +380,28 @@
                             <label class="budget-option" data-level="35"><input type="radio" name="memory-budget" value="35"><span>尽量多</span></label>
                         </div>
                         <div class="memory-budget-info">约 <span id="memory-tokens-estimate">19,000</span> tokens / 模型上限 <span id="context-total">128K</span></div>
+                        <div class="reference-mode-control" id="reference-injection-mode">
+                            <div class="reference-mode-title">
+                                <span>引用注入模式</span>
+                                <small id="reference-mode-summary">酒馆兼容：完整注入</small>
+                            </div>
+                            <div class="reference-mode-options">
+                                <label class="reference-mode-option active">
+                                    <input type="radio" name="reference-injection-mode" value="sillytavern" checked>
+                                    <span>
+                                        <strong>酒馆兼容</strong>
+                                        <em>按 SillyTavern 方式完整注入世界书和角色卡，适合对齐外部预设。</em>
+                                    </span>
+                                </label>
+                                <label class="reference-mode-option">
+                                    <input type="radio" name="reference-injection-mode" value="tool">
+                                    <span>
+                                        <strong>工具增强</strong>
+                                        <em>只注入简略摘要，模型需要细节时调用 reference tools 查询。</em>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
 
                     <details class="ai-section ai-advanced" id="ai-generation-settings" open>

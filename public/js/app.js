@@ -18,6 +18,10 @@
         topP: 0.9,
         memoryBudget: 15,
         maxContext: 0,
+        referenceMode: 'sillytavern',
+        compactReference: false,
+        referenceTools: false,
+        enableReferenceTools: false,
     };
 
     const state = {
@@ -57,13 +61,16 @@
         isConnected: false,
         isGenerating: false,
         hasSavedApiKey: false,
+        aiUsed: false,  // Track whether user has successfully used AI
         workspaceLoaded: false,
     };
 
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
+    const LAST_SUCCESSFUL_AI_CONFIG_KEY = 'novel-ai-last-successful-config';
     let workspaceLoadController = null;
     let workspaceLoadVersion = 0;
+    let autoConnectInFlight = false;
 
     // ==================== Initialization ====================
     function init() {
@@ -73,9 +80,10 @@
         bindRegexEditor();
         bindGlobalTooltip();
         loadAppSettings();
+        loadLastSuccessfulAiConfig();
         applyAppSettings();
         applyConfigToUI();
-        loadAiSecretStatus(true);
+        void restoreAiConnection({ preferDeepseek: true, silent: true });
         bindEvents();
         renderWorldBookList();
         renderCharacterList();
@@ -387,7 +395,7 @@
             renderCharacterList();
             renderPromptTemplates();
 
-            void loadAiSecretStatus();
+            void restoreAiConnection({ silent: true });
             void loadSessions(workspaceData.activeSessionId, { novelId: id, signal: loadSignal })
                 .catch(sessionError => {
                     if (loadVersion !== workspaceLoadVersion || state.currentNovel.id !== id) return;
@@ -440,8 +448,10 @@
         state.isDirty = false;
         state.workspaceLoaded = false;
         state.aiConfig = { ...defaultAiConfig };
+        loadLastSuccessfulAiConfig();
         state.isConnected = false;
         state.hasSavedApiKey = false;
+        state.aiUsed = false;
         updatePresetNameDisplay('');
         updatePresetSelect();
         applyConfigToUI();
@@ -583,6 +593,62 @@
         editor.focus();
     }
 
+    function formatChapterText() {
+        const editor = $('#chapter-editor');
+        if (!editor || editor.disabled) return;
+        const original = editor.value || '';
+        if (!original.trim()) {
+            setStatus('正文为空，暂无可排版内容', 'warn');
+            editor.focus();
+            return;
+        }
+
+        const formatted = formatNovelText(original);
+        if (formatted === original) {
+            setStatus('正文格式已经很整齐了', 'info');
+            editor.focus();
+            return;
+        }
+
+        editor.value = formatted;
+        editor.selectionStart = editor.selectionEnd = formatted.length;
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.focus();
+        setStatus('已完成正文排版', 'success');
+    }
+
+    function formatNovelText(text = '') {
+        const normalized = String(text)
+            .replace(/\r\n?/g, '\n')
+            .replace(/\u00a0/g, ' ')
+            .replace(/[ \t]+$/gm, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+
+        let inCodeBlock = false;
+        const lines = normalized.split('\n').map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return '';
+            if (/^```/.test(trimmed)) {
+                inCodeBlock = !inCodeBlock;
+                return trimmed;
+            }
+            if (inCodeBlock || shouldKeepLineUnindented(trimmed)) return trimmed;
+            return '\u3000\u3000' + trimmed.replace(/^[\s\u3000]+/, '');
+        });
+
+        return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+    }
+
+    function shouldKeepLineUnindented(line = '') {
+        return /^#{1,6}\s/.test(line)
+            || /^[-*+]\s/.test(line)
+            || /^\d+[.)、]\s?/.test(line)
+            || /^>/.test(line)
+            || /^<\/?[a-zA-Z][^>]*>$/.test(line)
+            || /^<[^>]+>/.test(line);
+    }
+
     function initSettingsDialog() {
         const serviceSlot = $('#settings-ai-service-slot');
         const generationSlot = $('#settings-generation-slot');
@@ -642,6 +708,105 @@
 
     function saveAppSettings() {
         localStorage.setItem('novel-editor-app-settings', JSON.stringify(state.appSettings));
+    }
+
+    function loadLastSuccessfulAiConfig() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(LAST_SUCCESSFUL_AI_CONFIG_KEY) || '{}');
+            if (!saved || typeof saved !== 'object' || !saved.provider) return;
+            Object.assign(state.aiConfig, {
+                provider: saved.provider || state.aiConfig.provider,
+                endpoint: saved.endpoint || '',
+                model: saved.model || state.aiConfig.model,
+                temperature: saved.temperature ?? state.aiConfig.temperature,
+                maxTokens: saved.maxTokens || state.aiConfig.maxTokens,
+                maxTokensPct: saved.maxTokensPct || state.aiConfig.maxTokensPct,
+                topP: saved.topP ?? state.aiConfig.topP,
+                topK: saved.topK ?? state.aiConfig.topK,
+                memoryBudget: saved.memoryBudget ?? state.aiConfig.memoryBudget,
+                maxContext: saved.maxContext ?? state.aiConfig.maxContext,
+                apiKey: '',
+            });
+            if (saved.referenceMode !== undefined) state.aiConfig.referenceMode = saved.referenceMode;
+            if (saved.compactReference !== undefined) state.aiConfig.compactReference = saved.compactReference;
+            if (saved.referenceTools !== undefined) state.aiConfig.referenceTools = saved.referenceTools;
+            if (saved.enableReferenceTools !== undefined) state.aiConfig.enableReferenceTools = saved.enableReferenceTools;
+        } catch {}
+    }
+
+    function rememberLastSuccessfulAiConfig() {
+        const c = state.aiConfig || {};
+        if (!c.provider) return;
+        const snapshot = {
+            provider: c.provider,
+            endpoint: c.endpoint || '',
+            model: c.model || '',
+            temperature: c.temperature,
+            maxTokens: c.maxTokens,
+            maxTokensPct: c.maxTokensPct,
+            topP: c.topP,
+            topK: c.topK,
+            memoryBudget: c.memoryBudget,
+            maxContext: c.maxContext,
+            referenceMode: c.referenceMode,
+            compactReference: c.compactReference,
+            referenceTools: c.referenceTools,
+            enableReferenceTools: c.enableReferenceTools,
+            presetName: state.presetName || '__default__',
+            connectedAt: Date.now(),
+        };
+        localStorage.setItem(LAST_SUCCESSFUL_AI_CONFIG_KEY, JSON.stringify(snapshot));
+    }
+
+    async function restoreAiConnection(options = {}) {
+        loadLastSuccessfulAiConfig();
+        applyConfigToUI();
+        await loadAiSecretStatus(options.preferDeepseek === true);
+        await autoConnectLastSuccessfulAi(options);
+    }
+
+    async function autoConnectLastSuccessfulAi(options = {}) {
+        if (autoConnectInFlight) return;
+        const silent = options.silent !== false;
+        const provider = state.aiConfig.provider;
+        if (!provider) return;
+        if (provider !== 'ollama' && !state.hasSavedApiKey) return;
+
+        autoConnectInFlight = true;
+        if (!silent) setStatus('正在自动连接上次成功的模型...', 'loading');
+        try {
+            const response = await fetch('/api/ai/test-connection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    config: { ...state.aiConfig, apiKey: '' },
+                    presetName: state.presetName || '__default__',
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            state.isConnected = !!data.success;
+            if (data.success) {
+                state.hasSavedApiKey = true;
+                localStorage.setItem('novel-ai-provider-chosen', provider);
+                localStorage.setItem('novel-ai-connected-provider', provider);
+                rememberLastSuccessfulAiConfig();
+                if (!silent) setStatus('已自动连接上次成功的模型', 'success');
+            } else {
+                if (localStorage.getItem('novel-ai-connected-provider') === provider) {
+                    localStorage.removeItem('novel-ai-connected-provider');
+                }
+                if (!silent) setStatus(`自动连接失败: ${data.error || '未知错误'}`, 'warn');
+            }
+        } catch (err) {
+            state.isConnected = false;
+            if (localStorage.getItem('novel-ai-connected-provider') === provider) {
+                localStorage.removeItem('novel-ai-connected-provider');
+            }
+            if (!silent) setStatus(`自动连接失败: ${err.message}`, 'warn');
+        } finally {
+            autoConnectInFlight = false;
+            updateStatusBar();
+        }
     }
 
     function applyAppSettings() {
@@ -966,7 +1131,7 @@
                     beforeText: editor.value.slice(0, start),
                     afterText: editor.value.slice(end),
                     instruction: instruction.trim(),
-                    config: state.aiConfig,
+                    config: { ...state.aiConfig, stream: false },
                     context: {
                         novelId: state.currentNovel?.id,
                         novelTitle: state.currentNovel?.title,
@@ -1448,6 +1613,7 @@
             input.checked = Number(input.value) === memoryBudget;
             input.closest('.budget-option')?.classList.toggle('active', input.checked);
         });
+        updateReferenceInjectionModeUI();
         updateRangeLabels();
         updateProviderUI();
         updateMemoryBudgetInfo();
@@ -1478,6 +1644,7 @@
         $('#btn-clear-recent-order')?.addEventListener('click', clearRecentOrder);
         $('#btn-editor-bold')?.addEventListener('click', () => wrapEditorSelection('**', '**'));
         $('#btn-editor-italic')?.addEventListener('click', () => wrapEditorSelection('*', '*'));
+        $('#btn-editor-format')?.addEventListener('click', formatChapterText);
 
         // AI buttons
         $('#btn-extract-setting')?.addEventListener('click', onExtractSetting);
@@ -1521,6 +1688,7 @@
             if (preset.memoryBudget !== undefined) state.aiConfig.memoryBudget = preset.memoryBudget;
             if (preset.maxContext !== undefined) state.aiConfig.maxContext = preset.maxContext;
             if (preset.prefill) state.aiConfig.prefill = preset.prefill;
+            applyPresetReferenceSettings(preset);
             if (preset.templates) state.promptTemplates = preset.templates;
             if (preset.promptOrder) state.promptOrder = preset.promptOrder;
             if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
@@ -1557,6 +1725,12 @@
                 });
                 saveConfig();
                 updateMemoryBudgetInfo();
+            });
+        });
+        document.querySelectorAll('input[name="reference-injection-mode"]').forEach(input => {
+            input.addEventListener('change', () => {
+                if (!input.checked) return;
+                setReferenceInjectionMode(input.value);
             });
         });
 
@@ -1698,6 +1872,46 @@
     }
 
     // ==================== AI Actions ====================
+    async function readSseCompletion(response) {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+            return response.json();
+        }
+        const reader = response.body?.getReader?.();
+        if (!reader) return { reply: '' };
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let reply = '';
+        let meta = {};
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const blocks = buffer.split('\n\n');
+            buffer = blocks.pop() || '';
+            for (const block of blocks) {
+                const data = block
+                    .split(/\r?\n/)
+                    .filter(line => line.startsWith('data:'))
+                    .map(line => line.slice(5).trimStart())
+                    .join('\n');
+                if (!data) continue;
+                const event = JSON.parse(data);
+                if (event.type === 'chunk') reply += event.content || '';
+                if (event.type === 'meta') {
+                    meta = {
+                        context: event.context,
+                        memory: event.memory,
+                        contextDebug: event.contextDebug,
+                    };
+                }
+                if (event.type === 'done') return { ...meta, reply: event.reply || reply };
+                if (event.type === 'error') throw new Error(event.message || 'Stream error');
+            }
+        }
+        return { ...meta, reply };
+    }
+
     async function onContinue() {
         const text = $('#chapter-editor').value;
         if (!text.trim()) { setStatus('请先编写正文再续写', 'warn'); return; }
@@ -1714,11 +1928,11 @@
         try {
             const response = await fetch('/api/chat/write', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
                 body: JSON.stringify({
                     message: '请从当前正文结尾自然续写下一段，只输出小说正文，不要解释。',
                     history: [],
-                    config: state.aiConfig,
+                    config: { ...state.aiConfig, stream: true },
                     context: {
                         currentText: text,
                         worldBookEntries: Object.values(getReferencedWorldBook().entries || {}),
@@ -1741,7 +1955,7 @@
                 throw new Error(err.error || `HTTP ${response.status}`);
             }
 
-            const data = await response.json();
+            const data = await readSseCompletion(response);
             if (!data.reply?.trim()) throw new Error('模型没有返回正文，请提高单次输出长度后重试');
             const editor = $('#chapter-editor');
             // Append generated content
@@ -1749,6 +1963,8 @@
             editor.scrollTop = editor.scrollHeight;
             state.isDirty = true;
             updateWordCount();
+            state.aiUsed = true;
+            updateStatusBar();
             updateContextInfo(data.context, data.memory);
             showToast('续写完成!', 'success');
         } catch (err) {
@@ -1909,7 +2125,7 @@
             // Import selected characters
             selChars.forEach(cb => {
                 const c = chars[parseInt(cb.dataset.idx)];
-                if (c) state.characters.push({ spec: 'chara_card_v3', spec_version: '3.0', data: { name: c.name, description: c.description || '', personality: c.personality || '', scenario: c.scenario || '', first_mes: c.first_mes || '', mes_example: '', creator_notes: '', system_prompt: '', post_history_instructions: '', tags: [], group: c.group || '', character_book: { entries: [] } } });
+                if (c) state.characters.push({ _source: 'AI提取', spec: 'chara_card_v3', spec_version: '3.0', data: { name: c.name, description: c.description || '', personality: c.personality || '', scenario: c.scenario || '', first_mes: c.first_mes || '', mes_example: '', creator_notes: '', system_prompt: '', post_history_instructions: '', tags: [], group: c.group || '', character_book: { entries: [] } } });
             });
             // Import selected world entries
             selEntries.forEach(cb => {
@@ -1917,7 +2133,7 @@
                 if (e) {
                     if (!state.worldBook) state.worldBook = { entries: {} };
                     const uid = Date.now() + Math.random();
-                    state.worldBook.entries[uid] = { uid, key: e.key || [], keysecondary: [], content: e.content || '', comment: e.comment || '', group: e.group || '', constant: false, selective: true, order: 100, position: 0, disable: false, probability: 100, depth: 4 };
+                    state.worldBook.entries[uid] = { _source: 'AI提取', uid, key: e.key || [], keysecondary: [], content: e.content || '', comment: e.comment || '', group: e.group || '', constant: false, selective: true, order: 100, position: 0, disable: false, probability: 100, depth: 4 };
                 }
             });
             renderCharacterList();
@@ -1952,6 +2168,7 @@
             if (data.success) {
                 localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
                 localStorage.setItem('novel-ai-connected-provider', state.aiConfig.provider);
+                rememberLastSuccessfulAiConfig();
             } else if (localStorage.getItem('novel-ai-connected-provider') === state.aiConfig.provider) {
                 localStorage.removeItem('novel-ai-connected-provider');
             }
@@ -2242,12 +2459,34 @@
         state.chapters = ordered;
     }
 
+    async function ensureNovelExists() {
+        const novelId = state.currentNovel?.id || 'default';
+        try {
+            // Check if project exists
+            const listResp = await fetch('/api/novels');
+            const list = await listResp.json();
+            const exists = (list.novels || []).some(n => n.id === novelId);
+            if (!exists) {
+                // Use novelId as title so the resulting directory matches
+                const resp = await fetch('/api/novels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: novelId }),
+                });
+                const created = await resp.json();
+                // Update state with the actual created id
+                if (created.id) state.currentNovel.id = created.id;
+            }
+        } catch { /* ignore — project might already exist */ }
+    }
+
     // ==================== World Book Import ====================
     async function importWorldBook(files) {
         if (!files?.[0]) return;
         const file = files[0];
 
         try {
+            await ensureNovelExists();
             const text = await readFileAsText(file);
             const data = JSON.parse(text);
 
@@ -2264,7 +2503,22 @@
             if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
 
             const result = await resp.json();
-            state.worldBook = { entries: result.entries || {} };
+            // Merge into existing entries instead of replacing
+            const sourceName = file.name.replace(/\.json$/i, '');
+            const incoming = result.entries || {};
+            if (!state.worldBook) state.worldBook = { entries: {}, sources: {} };
+            if (!state.worldBook.entries) state.worldBook.entries = {};
+            if (!state.worldBook.sources) state.worldBook.sources = {};
+            // Tag each entry with its source file
+            for (const [uid, entry] of Object.entries(incoming)) {
+                entry._source = sourceName;
+            }
+            Object.assign(state.worldBook.entries, incoming);
+            state.worldBook.sources[sourceName] = {
+                name: sourceName,
+                entryCount: Object.keys(incoming).length,
+                importedAt: Date.now(),
+            };
             renderWorldBookList();
             autoSave();
             setStatus(`✅ 世界书导入成功: ${result.entryCount} 个条目`, 'success');
@@ -2296,14 +2550,14 @@
             if (matched) activeUids.add(k);
         }
 
-        list.innerHTML = keys.map(k => {
-            const e = entries[k];
+        // Render a single entry
+        function renderEntry(k, e) {
             const name = e.comment || e.key?.[0] || `条目${k}`;
             const mainKw = (e.key || []).join(', ');
             const subKw = (e.keysecondary || []).join(', ');
             const matchedNow = activeUids.has(k);
+            const groupTag = e.group ? `<span class="wb-group-tag">${escHtml(e.group)}</span>` : '';
 
-            // 3 states: constant (always on), selective (keyword match), disabled
             let stateIcon, stateClass, stateLabel;
             if (e.disable) {
                 stateIcon = '⏸'; stateClass = 'disabled'; stateLabel = '已禁用';
@@ -2328,13 +2582,74 @@
 
             return `<div class="list-item wb-entry ${matchedNow ? 'active-in-scene' : ''}" data-uid="${k}">
                 <input type="checkbox" class="batch-check" data-id="${k}" aria-label="选择 ${escHtml(name)}">
-                <div class="item-title">${stateIcon} ${escHtml(name)}</div>
+                <div class="item-title">${stateIcon} ${escHtml(name)}${groupTag}</div>
                 ${kwHtml}
                 <div class="item-status ${stateClass}">${stateLabel}</div>
             </div>`;
-        }).join('');
+        }
 
-        // Click → show detail
+        // Group entries by _source
+        const groups = {};
+        const ungrouped = [];
+        for (const k of keys) {
+            const source = entries[k]._source;
+            if (source) {
+                if (!groups[source]) groups[source] = [];
+                groups[source].push(k);
+            } else {
+                ungrouped.push(k);
+            }
+        }
+
+        let html = '';
+        const sourceNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+
+        for (const source of sourceNames) {
+            const groupKeys = groups[source];
+            const activeInGroup = groupKeys.filter(k => activeUids.has(k)).length;
+            html += `<div class="source-group">`;
+            html += `<div class="source-group-header" data-source="${escHtml(source)}">`;
+            html += `<span class="source-group-arrow">▶</span>`;
+            html += `<span class="source-group-name">📁 ${escHtml(source)}</span>`;
+            html += `<span class="source-group-count">${groupKeys.length} 条${activeInGroup > 0 ? ` · ${activeInGroup} 触发` : ''}</span>`;
+            html += `</div>`;
+            html += `<div class="source-group-body">`;
+            for (const k of groupKeys) {
+                html += renderEntry(k, entries[k]);
+            }
+            html += `</div></div>`;
+        }
+
+        if (ungrouped.length > 0) {
+            html += `<div class="source-group">`;
+            html += `<div class="source-group-header" data-source="__ungrouped__">`;
+            html += `<span class="source-group-arrow">▶</span>`;
+            html += `<span class="source-group-name">📁 未分组</span>`;
+            html += `<span class="source-group-count">${ungrouped.length} 条</span>`;
+            html += `</div>`;
+            html += `<div class="source-group-body">`;
+            for (const k of ungrouped) {
+                html += renderEntry(k, entries[k]);
+            }
+            html += `</div></div>`;
+        }
+
+        list.innerHTML = html;
+
+        // Group header click → toggle collapse
+        list.querySelectorAll('.source-group-header').forEach(header => {
+            header.addEventListener('click', () => {
+                header.classList.toggle('collapsed');
+                const arrow = header.querySelector('.source-group-arrow');
+                const body = header.nextElementSibling;
+                if (body) {
+                    body.classList.toggle('hidden');
+                    if (arrow) arrow.textContent = body.classList.contains('hidden') ? '▶' : '▼';
+                }
+            });
+        });
+
+        // Entry click → show detail
         list.querySelectorAll('.wb-entry').forEach(el => {
             el.addEventListener('click', event => {
                 if (event.target.closest('.batch-check')) return;
@@ -2497,6 +2812,9 @@
     async function importCharacters(files) {
         if (!files?.length) return;
 
+        await ensureNovelExists();
+
+        let successCount = 0;
         for (const file of files) {
             try {
                 if (file.name.endsWith('.png')) {
@@ -2506,7 +2824,10 @@
                     const resp = await fetch('/api/import/character-png', { method: 'POST', body: form });
                     if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
                     const result = await resp.json();
-                    state.characters.push(result.character || result.data);
+                    const character = result.character || result.data;
+                    character._source = file.name.replace(/\.(png|json)$/i, '');
+                    state.characters.push(character);
+                    successCount++;
                 } else if (file.name.endsWith('.json')) {
                     const text = await readFileAsText(file);
                     const data = JSON.parse(text);
@@ -2517,7 +2838,10 @@
                     });
                     if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
                     const result = await resp.json();
-                    state.characters.push(result.character || data);
+                    const character = result.character || data;
+                    character._source = file.name.replace(/\.json$/i, '');
+                    state.characters.push(character);
+                    successCount++;
                 }
             } catch (err) {
                 setStatus(`导入 ${file.name} 失败: ${err.message}`, 'error');
@@ -2526,7 +2850,7 @@
 
         renderCharacterList();
         autoSave();
-        setStatus(`✅ 成功导入角色 (共${state.characters.length}个)`, 'success');
+        setStatus(`✅ 成功导入 ${successCount}/${files.length} 个角色`, 'success');
     }
 
     function renderCharacterList() {
@@ -2545,23 +2869,86 @@
             if (name && currentText.includes(name)) activeNames.add(name);
         }
 
-        list.innerHTML = state.characters.map((ch, i) => {
+        // Render a single character entry
+        function renderChar(ch, i) {
             const name = ch.data?.name || ch.name || `角色${i + 1}`;
             const desc = ch.data?.description || ch.description || '';
-            const isActive = activeNames.has(name);
+            const disabled = isCharacterDisabled(ch);
+            const isActive = !disabled && activeNames.has(name);
             const charBook = ch.data?.character_book || ch.data?.data?.character_book;
             const innerBookCount = charBook?.entries
                 ? Object.keys(charBook.entries).length : 0;
-            return `<div class="list-item character-entry ${isActive ? 'active-in-scene' : ''}" data-index="${i}">
+            return `<div class="list-item character-entry ${isActive ? 'active-in-scene' : ''} ${disabled ? 'disabled' : ''}" data-index="${i}">
                 <input type="checkbox" class="batch-check" data-id="${i}" aria-label="选择 ${escHtml(name)}">
                 <div class="item-title">
                     ${isActive ? '🟢' : '⚪'} ${escHtml(name)}
                     ${innerBookCount > 0 ? `<span class="char-book-badge" title="内嵌 ${innerBookCount} 条世界书">📚${innerBookCount}</span>` : ''}
                 </div>
                 <div class="item-subtitle">${escHtml(desc.substring(0, 60))}${desc.length > 60 ? '...' : ''}</div>
+                ${disabled ? '<div class="item-status disabled">已禁用</div>' : ''}
                 ${isActive ? '<div class="item-status enabled">当前场景中</div>' : ''}
             </div>`;
-        }).join('');
+        }
+
+        // Group by _source
+        const groups = {};
+        const ungrouped = [];
+        for (let i = 0; i < state.characters.length; i++) {
+            const source = state.characters[i]._source;
+            if (source) {
+                if (!groups[source]) groups[source] = [];
+                groups[source].push(i);
+            } else {
+                ungrouped.push(i);
+            }
+        }
+
+        let html = '';
+        const sourceNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+
+        for (const source of sourceNames) {
+            const indices = groups[source];
+            html += `<div class="source-group">`;
+            html += `<div class="source-group-header" data-source="${escHtml(source)}">`;
+            html += `<span class="source-group-arrow">▶</span>`;
+            html += `<span class="source-group-name">📁 ${escHtml(source)}</span>`;
+            html += `<span class="source-group-count">${indices.length} 个角色</span>`;
+            html += `</div>`;
+            html += `<div class="source-group-body">`;
+            for (const i of indices) {
+                html += renderChar(state.characters[i], i);
+            }
+            html += `</div></div>`;
+        }
+
+        if (ungrouped.length > 0) {
+            html += `<div class="source-group">`;
+            html += `<div class="source-group-header" data-source="__ungrouped__">`;
+            html += `<span class="source-group-arrow">▶</span>`;
+            html += `<span class="source-group-name">📁 未分组</span>`;
+            html += `<span class="source-group-count">${ungrouped.length} 个角色</span>`;
+            html += `</div>`;
+            html += `<div class="source-group-body">`;
+            for (const i of ungrouped) {
+                html += renderChar(state.characters[i], i);
+            }
+            html += `</div></div>`;
+        }
+
+        list.innerHTML = html;
+
+        // Group header click → toggle collapse
+        list.querySelectorAll('.source-group-header').forEach(header => {
+            header.addEventListener('click', () => {
+                header.classList.toggle('collapsed');
+                const arrow = header.querySelector('.source-group-arrow');
+                const body = header.nextElementSibling;
+                if (body) {
+                    body.classList.toggle('hidden');
+                    if (arrow) arrow.textContent = body.classList.contains('hidden') ? '▶' : '▼';
+                }
+            });
+        });
 
         // Click → show detail card
         list.querySelectorAll('.character-entry').forEach(el => {
@@ -2590,18 +2977,32 @@
         button.textContent = active ? '完成' : '批量';
 
         let actions = panel.querySelector('.batch-actions');
-        if (!actions) {
+        if (active) {
+            // Remove old bar if exists
+            if (actions) actions.remove();
             actions = document.createElement('div');
             actions.className = 'batch-actions';
-            actions.innerHTML = type === 'worldbook'
-                ? '<button data-action="enable">启用</button><button data-action="disable">停用</button><button data-action="delete">删除</button>'
-                : '<button data-action="delete">删除</button>';
+            actions.innerHTML = '<button data-action="select-all" class="batch-btn-secondary">全选</button>' +
+                '<button data-action="invert" class="batch-btn-secondary">反选</button>' +
+                '<span class="batch-sep">|</span>' +
+                '<button data-action="enable">启用</button>' +
+                '<button data-action="disable">停用</button>' +
+                '<button data-action="delete" class="batch-btn-danger">删除</button>';
             const list = type === 'worldbook' ? $('#worldbook-list') : $('#character-list');
             list?.before(actions);
             actions.addEventListener('click', event => {
                 const action = event.target.closest('button')?.dataset.action;
-                if (action) applyBatchAction(type, action);
+                if (!action) return;
+                if (action === 'select-all') {
+                    panel.querySelectorAll('.batch-check').forEach(cb => { cb.checked = true; });
+                } else if (action === 'invert') {
+                    panel.querySelectorAll('.batch-check').forEach(cb => { cb.checked = !cb.checked; });
+                } else {
+                    applyBatchAction(type, action);
+                }
             });
+        } else {
+            if (actions) actions.remove();
         }
         panel.querySelectorAll('.batch-check').forEach(checkbox => { checkbox.checked = false; });
     }
@@ -2621,9 +3022,17 @@
                 if (action === 'disable') entry.disable = true;
             });
             renderWorldBookList();
-        } else if (action === 'delete') {
-            const indexes = new Set(selected.map(Number));
-            state.characters = state.characters.filter((_character, index) => !indexes.has(index));
+        } else {
+            const indexes = selected.map(Number).filter(index => !Number.isNaN(index));
+            if (action === 'delete') {
+                const indexSet = new Set(indexes);
+                state.characters = state.characters.filter((_character, index) => !indexSet.has(index));
+            } else {
+                indexes.forEach(index => {
+                    const character = state.characters[index];
+                    if (character) setCharacterDisabled(character, action === 'disable');
+                });
+            }
             renderCharacterList();
         }
         autoSave();
@@ -2676,6 +3085,7 @@
         if (characterPicks) {
             characterPicks.replaceChildren();
             const names = state.characters
+                .filter(character => !isCharacterDisabled(character))
                 .map(character => character.data?.name || character.name || '')
                 .filter(Boolean);
             characterPicks.style.display = state.writingReference.characterMode === 'selected' ? '' : 'none';
@@ -2781,13 +3191,20 @@
             if (bookEntries.length > 0) {
                 extractBtn.addEventListener('click', () => {
                     if (!state.worldBook) state.worldBook = { entries: {} };
+                    if (!state.worldBook.sources) state.worldBook.sources = {};
                     const nextUid = Math.max(0, ...Object.keys(state.worldBook.entries).map(Number)) + 1;
+                    const sourceLabel = ch._source || ('内嵌: ' + name);
                     let added = 0;
                     bookEntries.forEach((e, i) => {
-                        const newEntry = { ...e, uid: nextUid + i };
+                        const newEntry = { ...e, _source: sourceLabel, uid: nextUid + i };
                         state.worldBook.entries[nextUid + i] = newEntry;
                         added++;
                     });
+                    state.worldBook.sources[sourceLabel] = {
+                        name: sourceLabel,
+                        entryCount: (state.worldBook.sources[sourceLabel]?.entryCount || 0) + added,
+                        importedAt: Date.now(),
+                    };
                     renderWorldBookList();
                     autoSave();
                     close();
@@ -2876,12 +3293,15 @@
                         content: p.content || '',
                         isSystemPrompt: !!p.system_prompt,
                         isMarker: !!p.marker,
+                        enabled: p.enabled !== false && p.disabled !== true,
+                        disabled: p.disabled === true || p.enabled === false,
                     }));
             }
 
-            // === 5. Prompt ordering ===
+            // === 5. Prompt ordering / enabled state ===
             if (Array.isArray(data.prompt_order)) state.promptOrder = data.prompt_order;
             if (data.prompt_order) state.promptOrder = data.prompt_order;
+            state.enabledTemplates = buildPresetEnabledTemplates(data, state.promptTemplates || []);
 
             // === 6. Special prompts ===
             if (!state.specialPrompts) state.specialPrompts = {};
@@ -2897,6 +3317,7 @@
 
             // === 8. Other ===
             if (data.assistant_prefill) state.aiConfig.prefill = data.assistant_prefill;
+            applyPresetReferenceSettings(data);
 
             // === 9. RegexBinding — extract from SPreset模板 content or top-level ===
             const extractRegexFrom = (src) => {
@@ -2948,6 +3369,10 @@
                 presencePenalty: state.aiConfig.presencePenalty,
                 stream: state.aiConfig.stream,
                 prefill: state.aiConfig.prefill,
+                referenceMode: state.aiConfig.referenceMode,
+                compactReference: state.aiConfig.compactReference,
+                referenceTools: state.aiConfig.referenceTools,
+                enableReferenceTools: state.aiConfig.enableReferenceTools,
                 savedAt: Date.now(),
                 templates: state.promptTemplates || [],
                 promptOrder: state.promptOrder || [],
@@ -2970,6 +3395,37 @@
             setStatus(`预设导入失败: ${err.message}`, 'error');
             $('#file-input-preset').value = '';
         }
+    }
+
+    function buildPresetEnabledTemplates(presetData = {}, templates = []) {
+        const enabled = {};
+        const byIdentifier = new Map((templates || []).map(template => [template.identifier, template]));
+
+        for (const template of templates || []) {
+            enabled[template.identifier] = template.enabled !== false && template.disabled !== true;
+        }
+
+        const visit = (item) => {
+            if (!item) return;
+            if (Array.isArray(item)) {
+                item.forEach(visit);
+                return;
+            }
+            if (Array.isArray(item.order)) {
+                item.order.forEach(visit);
+                return;
+            }
+            const identifier = item.identifier || item.id || item.name;
+            if (!identifier || !byIdentifier.has(String(identifier))) return;
+            if (item.enabled === false || item.disabled === true) {
+                enabled[String(identifier)] = false;
+            } else if (item.enabled === true || item.disabled === false) {
+                enabled[String(identifier)] = true;
+            }
+        };
+
+        visit(presetData.prompt_order);
+        return enabled;
     }
 
     function renderPromptTemplates() {
@@ -3178,11 +3634,34 @@
         if (mode === 'off') return [];
         const selected = new Set(state.writingReference.selectedCharacters || []);
         return state.characters.filter(character => {
+            if (isCharacterDisabled(character)) return false;
             const name = character.data?.name || character.name || '';
             if (!name) return false;
             if (mode === 'selected') return selected.has(name);
             return text.includes(name);
         });
+    }
+
+    function isCharacterDisabled(character = {}) {
+        const data = character.data || character;
+        return character.disable === true
+            || character.disabled === true
+            || character.enabled === false
+            || data.disable === true
+            || data.disabled === true
+            || data.enabled === false
+            || data.extensions?.novel_ai_editor?.disabled === true;
+    }
+
+    function setCharacterDisabled(character = {}, disabled = false) {
+        character.disable = Boolean(disabled);
+        character.disabled = Boolean(disabled);
+        character.enabled = !disabled;
+        if (character.data && typeof character.data === 'object') {
+            character.data.disable = Boolean(disabled);
+            character.data.disabled = Boolean(disabled);
+            character.data.enabled = !disabled;
+        }
     }
 
     // ==================== Config Handlers ====================
@@ -3322,41 +3801,47 @@
     }
 
     async function loadAiSecretStatus(preferDeepseek = false) {
-        try {
-            const profile = state.presetName || '__default__';
-            state.hasSavedApiKey = false;
-            if (preferDeepseek && !localStorage.getItem('novel-ai-provider-chosen')) {
-                const deepseekResponse = await fetch(`/api/ai-secrets/status?provider=deepseek&profile=${encodeURIComponent(profile)}`);
-                const deepseek = await deepseekResponse.json();
-                if (deepseek.hasKey) {
-                    state.aiConfig.provider = 'deepseek';
-                    state.aiConfig.model = 'deepseek-v4-flash';
-                    state.aiConfig.endpoint = '';
-                    state.hasSavedApiKey = true;
-                    state.isConnected = localStorage.getItem('novel-ai-connected-provider') === 'deepseek';
-                    $('#ai-provider').value = 'deepseek';
-                    $('#ai-model').value = 'deepseek-v4-flash';
-                    $('#ai-endpoint').value = 'https://api.deepseek.com/v1';
-                    $('#ai-api-key').placeholder = 'DeepSeek API Key 已安全保存到本机';
-                    localStorage.setItem('novel-ai-provider-chosen', 'deepseek');
-                    saveConfig();
-                    updateProviderUI();
-                    updateStatusBar();
-                    return;
-                }
-            }
+        const profile = state.presetName || '__default__';
 
-            const provider = state.aiConfig.provider;
-            const response = await fetch(`/api/ai-secrets/status?provider=${encodeURIComponent(provider)}&profile=${encodeURIComponent(profile)}`);
-            const data = await response.json();
-            state.hasSavedApiKey = Boolean(data.hasKey);
-            state.isConnected = data.hasKey
-                && localStorage.getItem('novel-ai-connected-provider') === provider;
-            if (data.hasKey) {
-                $('#ai-api-key').placeholder = 'API Key 已安全保存到本机';
+        // Try the current provider first, then fall back to last-connected provider
+        const providersToTry = [];
+        const currentProvider = state.aiConfig.provider;
+        const lastConnected = localStorage.getItem('novel-ai-connected-provider');
+        if (currentProvider) providersToTry.push(currentProvider);
+        if (lastConnected && lastConnected !== currentProvider) providersToTry.push(lastConnected);
+        if (preferDeepseek && !providersToTry.includes('deepseek')) providersToTry.push('deepseek');
+
+        state.hasSavedApiKey = false;
+        state.isConnected = false;
+
+        for (const provider of providersToTry) {
+            try {
+                const response = await fetch(`/api/ai-secrets/status?provider=${encodeURIComponent(provider)}&profile=${encodeURIComponent(profile)}`);
+                const data = await response.json();
+                if (data.hasKey) {
+                    // Found a saved key for this provider
+                    state.hasSavedApiKey = true;
+                    state.isConnected = localStorage.getItem('novel-ai-connected-provider') === provider;
+                    // Restore this provider as the active one if different from current
+                    if (provider !== state.aiConfig.provider) {
+                        state.aiConfig.provider = provider;
+                        const saved = JSON.parse(localStorage.getItem(LAST_SUCCESSFUL_AI_CONFIG_KEY) || '{}');
+                        if (saved.provider === provider && saved.model) {
+                            state.aiConfig.model = saved.model;
+                            state.aiConfig.endpoint = saved.endpoint || '';
+                        }
+                        applyConfigToUI();
+                    }
+                    $('#ai-api-key').placeholder = 'API Key 已安全保存到本机';
+                    localStorage.setItem('novel-ai-provider-chosen', provider);
+                    break;  // Use the first provider that has a key
+                }
+            } catch (err) {
+                console.warn('[loadAiSecretStatus] Failed to check provider', provider, err.message);
             }
-            updateStatusBar();
-        } catch {}
+        }
+
+        updateStatusBar();
     }
 
     function updateRangeLabels() {
@@ -3407,6 +3892,77 @@
         const totalEl = $('#context-total');
         if (estimateEl) estimateEl.textContent = estimate.toLocaleString('zh-CN');
         if (totalEl) totalEl.textContent = formatTokenLimit(total);
+    }
+
+    function getReferenceInjectionMode() {
+        const config = state.aiConfig || {};
+        const mode = String(config.referenceMode || '').toLowerCase();
+        if (mode === 'tool' || mode === 'tools' || mode === 'compact' || mode === 'reference_tools' || mode === 'novel_tools') {
+            return 'tool';
+        }
+        if (config.compactReference === true || config.referenceTools === true || config.enableReferenceTools === true) {
+            return 'tool';
+        }
+        return 'sillytavern';
+    }
+
+    function setReferenceInjectionMode(mode, options = {}) {
+        const selectedMode = mode === 'tool' ? 'tool' : 'sillytavern';
+        if (selectedMode === 'tool') {
+            state.aiConfig.referenceMode = 'tool';
+            state.aiConfig.compactReference = true;
+            state.aiConfig.referenceTools = true;
+            state.aiConfig.enableReferenceTools = true;
+        } else {
+            state.aiConfig.referenceMode = 'sillytavern';
+            state.aiConfig.compactReference = false;
+            state.aiConfig.referenceTools = false;
+            state.aiConfig.enableReferenceTools = false;
+        }
+        updateReferenceInjectionModeUI();
+        if (options.save !== false) {
+            saveConfig();
+            setStatus(
+                selectedMode === 'tool'
+                    ? '已切换为工具增强：世界书/角色卡将优先摘要注入，按需调用工具'
+                    : '已切换为酒馆兼容：世界书/角色卡将按完整内容注入',
+                'success',
+            );
+        }
+    }
+
+    function applyPresetReferenceSettings(preset = {}) {
+        const hasReferenceMode = [
+            'referenceMode',
+            'compactReference',
+            'referenceTools',
+            'enableReferenceTools',
+        ].some(key => preset[key] !== undefined);
+
+        if (!hasReferenceMode) {
+            setReferenceInjectionMode('sillytavern', { save: false });
+            return;
+        }
+
+        if (preset.referenceMode !== undefined) state.aiConfig.referenceMode = preset.referenceMode;
+        if (preset.compactReference !== undefined) state.aiConfig.compactReference = preset.compactReference;
+        if (preset.referenceTools !== undefined) state.aiConfig.referenceTools = preset.referenceTools;
+        if (preset.enableReferenceTools !== undefined) state.aiConfig.enableReferenceTools = preset.enableReferenceTools;
+        updateReferenceInjectionModeUI();
+    }
+
+    function updateReferenceInjectionModeUI() {
+        const mode = getReferenceInjectionMode();
+        document.querySelectorAll('input[name="reference-injection-mode"]').forEach(input => {
+            input.checked = input.value === mode;
+            input.closest('.reference-mode-option')?.classList.toggle('active', input.checked);
+        });
+        const summary = $('#reference-mode-summary');
+        if (summary) {
+            summary.textContent = mode === 'tool'
+                ? '工具增强：摘要 + 按需查询'
+                : '酒馆兼容：完整注入';
+        }
     }
 
     function updateContextInfo(ctx, memory) {
@@ -3511,6 +4067,7 @@
         $('#chapter-select').disabled = !enabled;
         $('#btn-editor-bold').disabled = !enabled;
         $('#btn-editor-italic').disabled = !enabled;
+        $('#btn-editor-format').disabled = !enabled;
     }
 
     function syncWorkspaceInteractivity() {
@@ -3554,8 +4111,11 @@
         if (!menu.classList.contains('hidden')) {
             const btn = $('#btn-import');
             const rect = btn.getBoundingClientRect();
+            // Position below button, prevent right-edge overflow
+            const menuWidth = menu.offsetWidth || 320;
+            const left = Math.min(rect.left, window.innerWidth - menuWidth - 12);
             menu.style.top = `${rect.bottom + 4}px`;
-            menu.style.left = `${rect.left}px`;
+            menu.style.left = `${Math.max(8, left)}px`;
         }
     }
 
@@ -3678,13 +4238,13 @@
             section.classList.toggle('connected', state.isConnected);
             section.open = true;
         }
-        // Onboarding — hide when connected
+        // Onboarding — hide after user has actually used AI
         const onboarding = document.getElementById('ai-onboarding');
-        if (onboarding) onboarding.style.display = state.isConnected ? 'none' : '';
+        if (onboarding) onboarding.style.display = state.aiUsed ? 'none' : '';
         // Onboarding steps
         $('#onboard-step-1')?.classList.toggle('done', Boolean(state.aiConfig.provider));
         $('#onboard-step-2')?.classList.toggle('done', state.hasSavedApiKey || state.aiConfig.provider === 'ollama');
-        $('#onboard-step-3')?.classList.toggle('done', state.isConnected);
+        $('#onboard-step-3')?.classList.toggle('done', state.aiUsed);
     }
 
     // ==================== Regex Editor ====================
@@ -3930,6 +4490,10 @@
             presencePenalty: state.aiConfig.presencePenalty,
             stream: state.aiConfig.stream,
             prefill: state.aiConfig.prefill,
+            referenceMode: state.aiConfig.referenceMode,
+            compactReference: state.aiConfig.compactReference,
+            referenceTools: state.aiConfig.referenceTools,
+            enableReferenceTools: state.aiConfig.enableReferenceTools,
             savedAt: Date.now(),
             templates: state.promptTemplates || [],
             promptOrder: state.promptOrder || [],
@@ -4104,6 +4668,7 @@
 
     async function switchChatSession(id) {
         if (!id || id === state.activeSessionId) return;
+        if (typeof ChatPanel !== 'undefined' && ChatPanel.isStreamingActive?.()) return;
         try {
             await saveActiveSession();
             await openChatSession(id);
@@ -4133,6 +4698,7 @@
 
     async function saveActiveSession() {
         if (!state.workspaceLoaded || !state.activeSessionId || typeof ChatPanel === 'undefined') return;
+        if (ChatPanel.isStreamingActive?.()) return;  // Skip save during active stream
         const novelId = state.currentNovel.id;
         const sessionId = state.activeSessionId;
         const messages = ChatPanel.getMessages();
@@ -4232,6 +4798,13 @@
     window.applyRegexBindings = applyRegexBindings;
     window.saveWorkspaceState = saveWorkspaceState;
     window.saveStateToLocal = saveStateToLocal;
+    window.onAISuccess = () => {
+        state.aiUsed = true;
+        localStorage.setItem('novel-ai-provider-chosen', state.aiConfig.provider);
+        localStorage.setItem('novel-ai-connected-provider', state.aiConfig.provider);
+        rememberLastSuccessfulAiConfig();
+        updateStatusBar();
+    };
 
     // ==================== Start ====================
     if (document.readyState === 'loading') {

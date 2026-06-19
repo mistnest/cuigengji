@@ -56,9 +56,25 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json({ limit: '25mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
+app.use((req, res, next) => {
+    const startedAt = Date.now();
+    res.on('finish', () => {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= 500) {
+            console.warn(`[Slow request] ${req.method} ${req.originalUrl} ${res.statusCode} ${elapsed}ms`);
+        }
+    });
+    next();
+});
 
 // ---- Static Files ----
-app.use(express.static(path.join(PROJECT_ROOT, 'public')));
+app.use(express.static(path.join(PROJECT_ROOT, 'public'), {
+    setHeaders(res, filePath) {
+        if (/\.(?:html|js|css)$/i.test(filePath)) {
+            res.setHeader('Cache-Control', 'no-store');
+        }
+    },
+}));
 
 app.get('/', (_req, res) => {
     res.sendFile('index.html', { root: path.join(PROJECT_ROOT, 'public') });

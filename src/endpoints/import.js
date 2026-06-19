@@ -15,6 +15,7 @@ import { getDataRoot } from '../config.js';
 import { read as readPngCharCard } from '../character-card-parser.js';
 import { writeJson } from '../lib/json-store.js';
 import { projectFile, resolveInside } from '../lib/project-paths.js';
+import { ensureCharacterSummaries, ensureChapterSummary, ensureWorldBookSummaries } from '../services/reference-summaries.js';
 
 export const router = express.Router();
 
@@ -41,6 +42,74 @@ router.use((req, res, next) => {
 });
 
 // POST /api/import/worldbook — 导入世界书 JSON
+function normalizeEnabledDisabled(target = {}) {
+    const disabled = target.disable === true
+        || target.disabled === true
+        || target.enabled === false;
+    return {
+        ...target,
+        disable: disabled,
+        disabled,
+        enabled: !disabled,
+    };
+}
+
+function normalizeWorldBookData(data = {}) {
+    return {
+        ...data,
+        entries: normalizeWorldBookEntries(data.entries || {}),
+    };
+}
+
+function normalizeWorldBookEntries(entries = {}) {
+    if (Array.isArray(entries)) {
+        return Object.fromEntries(entries.map((entry, index) => [
+            entry?.uid ?? index,
+            normalizeWorldBookEntry(entry, index),
+        ]));
+    }
+    return Object.fromEntries(Object.entries(entries || {}).map(([key, entry], index) => [
+        key,
+        normalizeWorldBookEntry(entry, index),
+    ]));
+}
+
+function normalizeWorldBookEntry(entry = {}, index = 0) {
+    const normalized = normalizeEnabledDisabled(entry || {});
+    return {
+        ...normalized,
+        uid: normalized.uid ?? index,
+        key: Array.isArray(normalized.key)
+            ? normalized.key
+            : Array.isArray(normalized.keys)
+                ? normalized.keys
+                : [normalized.key].filter(Boolean),
+        keysecondary: Array.isArray(normalized.keysecondary) ? normalized.keysecondary : [],
+        content: normalized.content || '',
+        comment: normalized.comment || normalized.name || '',
+        selective: normalized.selective !== false,
+    };
+}
+
+function normalizeCharacterData(character = {}) {
+    const normalized = normalizeEnabledDisabled(character || {});
+    const data = normalizeEnabledDisabled(normalized.data || normalized);
+    const charBook = data.character_book || normalized.character_book;
+    if (charBook?.entries) {
+        data.character_book = {
+            ...charBook,
+            entries: normalizeWorldBookEntries(charBook.entries),
+        };
+    }
+    return {
+        ...normalized,
+        data,
+        disable: data.disable || normalized.disable,
+        disabled: data.disabled || normalized.disabled,
+        enabled: !(data.disabled || normalized.disabled),
+    };
+}
+
 router.post('/worldbook', async (req, res) => {
     try {
         const { novelId, name, data } = req.body;
@@ -54,9 +123,7 @@ router.post('/worldbook', async (req, res) => {
         const filePath = projectFile(novelId, 'assets', 'worldbooks', filename);
 
         // Ensure the data has proper structure
-        const worldBook = {
-            entries: data.entries || {},
-        };
+        const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
 
         await writeJson(filePath, worldBook);
 
@@ -100,6 +167,7 @@ router.post('/character-png', upload.single('file'), async (req, res) => {
         const jsonPath = path.join(charsDir, jsonFilename);
 
         // Save JSON
+        charData = ensureCharacterSummaries([normalizeCharacterData(charData)]).data[0];
         await writeJson(jsonPath, charData);
 
         // Also save PNG as avatar/thumbnail
@@ -142,15 +210,16 @@ router.post('/character-json', async (req, res) => {
         const filename = `${charName}.json`;
         const filePath = path.join(charsDir, filename);
 
-        await writeJson(filePath, data);
+        const character = ensureCharacterSummaries([normalizeCharacterData(data)]).data[0];
+        await writeJson(filePath, character);
 
         res.json({
             success: true,
             name: charName,
-            data: data,
-            character: data,
+            data: character,
+            character,
             path: filePath,
-            hasEmbeddedWorldBook: hasEmbeddedWorldBook(data),
+            hasEmbeddedWorldBook: hasEmbeddedWorldBook(character),
         });
     } catch (err) {
         console.error('[Import] Character JSON error:', err);
@@ -220,10 +289,11 @@ router.post('/document', upload.single('file'), async (req, res) => {
                 const content = titleMatch
                     ? part.replace(/^.+(?:\r?\n|$)/, '').trim()
                     : part;
-                const chapter = {
+                let chapter = {
                     id: uuidv4(), novelId, title, content, status: 'draft', wordCount: countWords(content),
                     created: Date.now(), updated: Date.now(), order: chapters.length,
                 };
+                chapter = ensureChapterSummary(chapter).chapter;
                 chapters.push(chapter);
                 const filename = sanitize(`${String(chapters.length).padStart(3, '0')}-${title}`) + '.json';
                 const targetDir = importedChapterDir(chaptersDir, volumeId);
@@ -232,10 +302,11 @@ router.post('/document', upload.single('file'), async (req, res) => {
         } else {
             // Single chapter import
             const title = req.file.originalname.replace(ext, '').substring(0, 50);
-            const chapter = {
+            let chapter = {
                 id: uuidv4(), novelId, title, content: text, status: 'draft', wordCount: countWords(text),
                 created: Date.now(), updated: Date.now(), order: 0,
             };
+            chapter = ensureChapterSummary(chapter).chapter;
             chapters.push(chapter);
             const filename = sanitize(`001-${title}`) + '.json';
             const targetDir = importedChapterDir(chaptersDir, volumeId);
@@ -283,10 +354,11 @@ router.post('/folder', upload.array('files', 200), async (req, res) => {
                 }
 
                 const title = path.basename(parts[parts.length - 1], ext).substring(0, 50);
-                const chapter = {
+                let chapter = {
                     id: uuidv4(), novelId, title, content: text, status: 'draft', wordCount: countWords(text),
                     created: Date.now(), updated: Date.now(), order: results.chapters,
                 };
+                chapter = ensureChapterSummary(chapter).chapter;
                 const filename = sanitize(`${String(results.chapters + 1).padStart(3, '0')}-${title}`) + '.json';
                 await writeJson(resolveInside(targetDir, filename), chapter);
                 results.chapters++;
@@ -379,7 +451,7 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                     if (data.entries) {
                         const worldsDir = projectFile(novelId, 'assets', 'worldbooks');
                         const filename = sanitize(file.originalname);
-                        await writeJson(resolveInside(worldsDir, filename), data);
+                        await writeJson(resolveInside(worldsDir, filename), ensureWorldBookSummaries(normalizeWorldBookData(data)).data);
                         results.worldBooks++;
                         continue;
                     }
@@ -388,10 +460,11 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                 if (ext === '.png') {
                     const pngBuffer = fs.readFileSync(file.path);
                     const rawData = readPngCharCard(new Uint8Array(pngBuffer));
-                    const charData = JSON.parse(rawData);
+                    let charData = JSON.parse(rawData);
                     const charsDir = projectFile(novelId, 'assets', 'characters');
                     fs.mkdirSync(charsDir, { recursive: true });
                     const charName = sanitize(charData.data?.name || file.originalname.replace('.png', ''));
+                    charData = ensureCharacterSummaries([normalizeCharacterData(charData)]).data[0];
                     await writeJson(resolveInside(charsDir, `${charName}.json`), charData);
                     fs.copyFileSync(file.path, resolveInside(charsDir, `${charName}.png`));
                     results.characters++;

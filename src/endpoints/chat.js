@@ -6,9 +6,10 @@
  */
 import express from 'express';
 import { applyAiSecret } from '../services/ai-secrets.js';
-import { callAIChat } from '../services/ai-client.js';
+import { streamAIChat, callAIChatRaw } from '../services/ai-client.js';
 import { capturePrompt } from './debug.js';
-import { generateWriting } from '../services/writing-service.js';
+import { PLAN_TOOLS, ASSIST_TOOLS, executeTool } from '../services/chat-tools.js';
+import { generateWriting, generateWritingStream } from '../services/writing-service.js';
 
 export const router = express.Router();
 
@@ -16,20 +17,67 @@ function hasApiKey(config) {
     return !!config?.apiKey || config?.provider === 'ollama';
 }
 
+function setupSse(res) {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+}
+
+function sendSse(res, event) {
+    if (res.destroyed || res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function streamError(res, err) {
+    if (!res.headersSent) setupSse(res);
+    sendSse(res, { type: 'error', message: err.message || String(err) });
+    res.end();
+}
+
 router.post('/', async (req, res) => {
+    const requestController = createRequestAbortController(req, res);
     try {
         const { message, history, context, config, presetName } = req.body;
-        const aiConfig = applyAiSecret(config, presetName);
+        const aiConfig = { ...applyAiSecret(config, presetName), presetName };
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
         const sysPrompt = buildAssistSystemPrompt(context || {});
         const messages = buildMessageArray(history, message);
-        capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(messages) });
-        const reply = await callAIChat(aiConfig, sysPrompt, messages);
+        const novelId = context?.novelId || '';
 
-        res.json({ reply });
+        capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(messages) });
+
+        // Tool-calling loop: up to 4 rounds
+        let reply = '';
+        for (let round = 0; round < 4; round++) {
+            const resp = await callAIChatRaw(aiConfig, sysPrompt, messages, {
+                signal: requestController.signal,
+                tools: ASSIST_TOOLS,
+                toolChoice: 'auto',
+            });
+
+            const toolCalls = resp.message?.tool_calls || [];
+            if (!toolCalls.length) {
+                reply = resp.message?.content || '';
+                break;
+            }
+
+            // Execute tools and feed results back
+            messages.push({ role: 'assistant', content: '', tool_calls: toolCalls });
+            for (const call of toolCalls) {
+                const args = JSON.parse(call.function?.arguments || '{}');
+                const result = await executeTool(call.function?.name, args, novelId);
+                messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
+            }
+        }
+
+        res.json({ reply: reply || '(未收到回复)' });
     } catch (err) {
+        if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Assist]', err.message);
         res.status(500).json({ error: err.message });
     }
@@ -37,9 +85,10 @@ router.post('/', async (req, res) => {
 
 // POST /api/chat/plan — 情节研讨模式 (CC Plan Mode)
 router.post('/plan', async (req, res) => {
+    const requestController = createRequestAbortController(req, res);
     try {
         const { message, history, context, config, presetName } = req.body;
-        const aiConfig = applyAiSecret(config, presetName);
+        const aiConfig = { ...applyAiSecret(config, presetName), presetName };
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
@@ -54,11 +103,17 @@ router.post('/plan', async (req, res) => {
         }
 
         capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(msgs) });
-        const reply = await callAIChat(aiConfig, sysPrompt, msgs);
-        res.json({ reply });
+        setupSse(res);
+        const result = await streamAIChat({ ...aiConfig, stream: true }, sysPrompt, msgs, {
+            signal: requestController.signal,
+            onEvent: event => sendSse(res, event),
+        });
+        sendSse(res, { type: 'done', reply: result.message?.content || '' });
+        res.end();
     } catch (err) {
+        if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Plan]', err.message);
-        res.status(500).json({ error: err.message });
+        streamError(res, err);
     }
 });
 
@@ -97,27 +152,30 @@ router.post('/write', async (req, res) => {
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
-        const generated = await generateWriting({
+        setupSse(res);
+        const generated = await generateWritingStream({
             message,
             history,
             context: context || {},
-            config: aiConfig,
+            config: { ...aiConfig, stream: true },
             promptTemplates,
             promptOrder,
             signal: requestController.signal,
+            onEvent: event => sendSse(res, event),
             onPromptBuilt: prompt => captureWritingPrompt(aiConfig, prompt),
         });
-
-        res.json({
-            reply: generated.reply,
+        sendSse(res, {
+            type: 'meta',
             context: generated.context,
             memory: generated.memory,
             contextDebug: generated.prompt.debug,
         });
+        sendSse(res, { type: 'done', reply: generated.reply });
+        res.end();
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Write]', err.message);
-        res.status(500).json({ error: err.message });
+        streamError(res, err);
     }
 });
 
