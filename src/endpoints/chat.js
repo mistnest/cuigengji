@@ -76,7 +76,10 @@ router.post('/', async (req, res) => {
             }
         }
 
-        res.json({ reply: reply || '(未收到回复)' });
+        setupSse(res);
+        sendSse(res, { type: 'chunk', content: reply || '(未收到回复)' });
+        sendSse(res, { type: 'done', reply: reply || '(未收到回复)' });
+        res.end();
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Assist]', err.message);
@@ -127,7 +130,10 @@ router.post('/plan', async (req, res) => {
             }
         }
 
-        res.json({ reply: reply || '(未收到回复)' });
+        setupSse(res);
+        sendSse(res, { type: 'chunk', content: reply || '(未收到回复)' });
+        sendSse(res, { type: 'done', reply: reply || '(未收到回复)' });
+        res.end();
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Plan]', err.message);
