@@ -4,10 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai http://localhost:*; img-src 'self' data: blob:; media-src 'self' data:;">
+    <meta name="application-name" content="催更姬">
+    <meta name="cuigengji:repository" content="https://github.com/mistnest/cuigengji">
+    <meta name="cuigengji:signature" content="cgj-mistnest-2026-community-source">
     <title>催更姬</title>
     <link rel="stylesheet" href="css/editor.css">
 </head>
-<body>
+<body data-cuigengji-app="mistnest-cuigengji">
     <div id="toast-container"></div>
     <div id="global-tooltip" class="global-tooltip" style="display:none;"></div>
 
@@ -16,7 +19,7 @@
             <div class="welcome-logo">
                 <img src="avatar.png" alt="催更姬" class="welcome-avatar">
                 <h1>催更姬</h1>
-                <p>AI 小说创作助手</p>
+                <p>小说创作 AI 助手</p>
             </div>
 
             <div class="welcome-section">
@@ -36,6 +39,7 @@
                     <div class="plot-modal-header"><h3>新建工作区</h3></div>
                     <div class="plot-modal-body" style="padding:16px;">
                         <input type="text" id="welcome-modal-input" class="ai-input" placeholder="请输入工作区名称" style="width:100%;">
+                        <div id="welcome-modal-error" class="modal-inline-error"></div>
                     </div>
                     <div class="plot-modal-footer">
                         <button type="button" id="btn-welcome-modal-confirm" class="ai-btn-primary">确认</button>
@@ -81,6 +85,7 @@
             <div class="toolbar-right">
                 <button id="btn-import" title="导入资料或文档">导入</button>
                 <button id="btn-settings" title="设置 (Ctrl+,)">设置</button>
+                <button id="btn-contact-author" title="联系作者">联系作者</button>
             </div>
         </header>
 
@@ -89,9 +94,9 @@
             <div class="dropdown-item" data-action="import-split">导入并自动分章</div>
             <div class="dropdown-item" data-action="import-folder">导入文件夹 (一章一个文件)</div>
             <div class="dropdown-separator"></div>
-            <div class="dropdown-item" data-action="import-worldbook">导入 SillyTavern 世界书 (.json)</div>
-            <div class="dropdown-item" data-action="import-character">导入 SillyTavern 角色卡 (.png/.json)</div>
-            <div class="dropdown-item" data-action="import-preset">导入 SillyTavern 预设 (.json)</div>
+            <div class="dropdown-item" data-action="import-worldbook">导入世界书 (.json)</div>
+            <div class="dropdown-item" data-action="import-character">导入角色卡 (.png/.json)</div>
+            <div class="dropdown-item" data-action="import-preset">导入预设 (.json)</div>
         </div>
 
         <div id="main-container">
@@ -141,6 +146,21 @@
                 <div id="editor-container">
                     <textarea id="chapter-editor" placeholder="开始写作你的故事...&#10;&#10;提示：右侧可以续写正文、补写片段，或让 AI 帮你整理情节。"></textarea>
                 </div>
+                <div id="chapter-summary-area" class="chapter-summary-area" style="display:none;">
+                    <div class="chapter-summary-drag" id="summary-drag" title="拖动调整高度"></div>
+                    <div class="chapter-summary-bar" id="summary-bar">
+                        <div class="chapter-summary-bar-left">
+                            <span class="chapter-summary-bar-label">本章摘要</span>
+                            <span class="chapter-summary-bar-hint" id="summary-hint"></span>
+                        </div>
+                        <div class="chapter-summary-bar-right">
+                            <button id="btn-save-summary">保存修改</button>
+                            <button id="btn-ai-summary">AI 提取</button>
+                            <button id="btn-summary-toggle" title="折叠摘要">−</button>
+                        </div>
+                    </div>
+                    <textarea id="chapter-summary-input" class="chapter-summary-input" rows="4" placeholder="摘要（自动生成或手动填写）…"></textarea>
+                </div>
             </main>
 
             <aside id="right-sidebar" class="sidebar">
@@ -170,8 +190,7 @@
 
                     <div class="chat-messages" id="chat-messages">
                         <div class="chat-welcome">
-                            <p>在正文模式下，AI 会根据设定和上下文协作续写。</p>
-                            <p>生成后可以选择 <strong>接受</strong>、<strong>重试</strong> 或 <strong>修改</strong>。</p>
+                            <p>输入消息告诉催更姬你的需求，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
                         </div>
                     </div>
 
@@ -186,12 +205,6 @@
                                 </svg>
                             </div>
                             <span class="cc-ctx-text" id="ctx-text" style="font-size:10px;color:var(--text-muted);margin-right:4px;">0</span>
-                            <div class="cc-cmds">
-                                <button class="cc-cmd-btn" data-cmd="继续写">续</button>
-                                <button class="cc-cmd-btn" data-cmd="分析这段文字">析</button>
-                                <button class="cc-cmd-btn" data-cmd="优化文笔">改</button>
-                            </div>
-                            <button id="btn-debug-chat" class="cc-icon-btn" title="预览 API 消息">D</button>
                             <span style="flex:1;"></span>
                             <span class="cc-mode-desc" id="mode-desc">正文模式 - AI 协作续写</span>
                             <div class="cc-mode-popover" id="mode-popover">
@@ -225,25 +238,25 @@
                         <button id="btn-import-wb" title="导入世界书">导入</button>
                         <button id="btn-export-wb" title="导出世界书">导出</button>
                         <span class="panel-toolbar-spacer"></span>
-                        <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">🔍</button>
+                        <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">搜索</button>
                         <button class="btn-batch-toggle panel-tool-btn" data-list="worldbook" title="批量管理">批量操作</button>
                     </div>
-                    <div class="reference-control" data-reference-kind="worldbook">
-                        <div class="reference-title">本次写作使用</div>
+                    <details class="reference-control" data-reference-kind="worldbook">
+                        <summary class="reference-title">本次写作使用</summary>
                         <div class="reference-segments">
                             <button data-reference-mode="all">全部</button>
                             <button data-reference-mode="selected">选分组</button>
                             <button data-reference-mode="off">关闭</button>
                         </div>
                         <div class="reference-picks" id="worldbook-reference-picks"></div>
-                    </div>
+                    </details>
                     <div class="panel-search" data-search-panel="worldbook" hidden>
                         <input type="text" id="wb-search" placeholder="搜索世界书条目...">
                         <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
                         <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="worldbook-list" class="item-list">
-                        <div class="list-placeholder">尚未导入世界书<br>点击"导入"添加 ST 世界书文件</div>
+                        <div class="list-placeholder">尚未导入世界书<br>点击 "导入" 导入世界书</div>
                     </div>
                 </div>
 
@@ -253,25 +266,25 @@
                         <button id="btn-import-character" title="导入角色卡">导入</button>
                         <button id="btn-export-char" title="导出角色卡">导出</button>
                         <span class="panel-toolbar-spacer"></span>
-                        <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">🔍</button>
+                        <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">搜索</button>
                         <button class="btn-batch-toggle panel-tool-btn" data-list="character" title="批量管理">批量操作</button>
                     </div>
-                    <div class="reference-control" data-reference-kind="character">
-                        <div class="reference-title">本次写作使用</div>
+                    <details class="reference-control" data-reference-kind="character">
+                        <summary class="reference-title">本次写作使用</summary>
                         <div class="reference-segments">
                             <button data-reference-mode="auto">自动识别</button>
                             <button data-reference-mode="selected">手动选择</button>
                             <button data-reference-mode="off">关闭</button>
                         </div>
                         <div class="reference-picks" id="character-reference-picks"></div>
-                    </div>
+                    </details>
                     <div class="panel-search" data-search-panel="character" hidden>
                         <input type="text" id="character-search" placeholder="搜索角色...">
                         <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
                         <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
                     </div>
                     <div id="character-list" class="item-list">
-                        <div class="list-placeholder">尚未导入角色<br>点击"导入"添加 ST 角色卡</div>
+                        <div class="list-placeholder">尚未导入角色<br>点击 "导入" 导入角色卡</div>
                     </div>
                 </div>
 
@@ -292,13 +305,7 @@
                     </div>
 
                     <div class="ai-section">
-                        <button id="btn-continue" class="ai-btn-primary ai-action-main">续写正文</button>
-                        <div class="ai-action-grid" style="grid-template-columns:1fr 1fr 1fr;">
-                            <button id="btn-plot-suggestions" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">情节</span><small>发展建议</small></button>
-                            <button id="btn-inspire" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">灵感</span><small>创意启发</small></button>
-                            <button id="btn-infill" class="ai-command-btn" style="flex-direction:column;gap:1px;min-height:50px;padding:6px 8px;"><span style="font-size:13px;">补写</span><small>中段填空</small></button>
-                        </div>
-                        <button id="btn-extract-setting" class="ai-btn-secondary" style="margin-top:4px;">🔍 提取设定</button>
+                        <button id="btn-extract-setting" class="ai-btn-secondary">提取设定</button>
                     </div>
 
                     <div class="ai-section ai-quick-config">
@@ -369,35 +376,23 @@
 
                     <div class="ai-section" id="ai-memory-settings">
                         <div class="ai-section-title">
-                            <span>设定记忆预算</span>
-                            <span class="info-tooltip" data-tooltip="控制世界书、角色卡和大纲占用多少上下文。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">预算越高，AI 越容易遵守设定；预算越低，留给正文和对话的空间越多。</span></span>
+                            <span>设定注入方式</span>
+                            <small id="reference-mode-summary">智能摘要：摘要注入 + 工具查询</small>
                         </div>
-                        <div class="memory-budget-options">
-                            <label class="budget-option" data-level="3"><input type="radio" name="memory-budget" value="3"><span>轻量</span></label>
-                            <label class="budget-option" data-level="8"><input type="radio" name="memory-budget" value="8"><span>适中</span></label>
-                            <label class="budget-option active" data-level="15"><input type="radio" name="memory-budget" value="15" checked><span>推荐</span></label>
-                            <label class="budget-option" data-level="25"><input type="radio" name="memory-budget" value="25"><span>充足</span></label>
-                            <label class="budget-option" data-level="35"><input type="radio" name="memory-budget" value="35"><span>尽量多</span></label>
-                        </div>
-                        <div class="memory-budget-info">约 <span id="memory-tokens-estimate">19,000</span> tokens / 模型上限 <span id="context-total">128K</span></div>
                         <div class="reference-mode-control" id="reference-injection-mode">
-                            <div class="reference-mode-title">
-                                <span>引用注入模式</span>
-                                <small id="reference-mode-summary">酒馆兼容：完整注入</small>
-                            </div>
                             <div class="reference-mode-options">
                                 <label class="reference-mode-option active">
-                                    <input type="radio" name="reference-injection-mode" value="sillytavern" checked>
+                                    <input type="radio" name="reference-injection-mode" value="tool" checked>
                                     <span>
-                                        <strong>酒馆兼容</strong>
-                                        <em>按 SillyTavern 方式完整注入世界书和角色卡，适合对齐外部预设。</em>
+                                        <strong>智能摘要</strong>
+                                        <em>注入简略摘要与信息，通过工具按需查询完整内容，上下文更稳定，缓存命中率较高</em>
                                     </span>
                                 </label>
                                 <label class="reference-mode-option">
-                                    <input type="radio" name="reference-injection-mode" value="tool">
+                                    <input type="radio" name="reference-injection-mode" value="sillytavern">
                                     <span>
-                                        <strong>工具增强</strong>
-                                        <em>只注入简略摘要，模型需要细节时调用 reference tools 查询。</em>
+                                        <strong>完整注入</strong>
+                                        <em>按原文完整注入上下文，频繁更换内容，类似 ST 注入方式，缓存命中率较低</em>
                                     </span>
                                 </label>
                             </div>
@@ -483,14 +478,9 @@
                         </div>
                         <input type="text" id="prompt-template-search" class="ai-input prompt-template-search" placeholder="搜索模板名称、内容、角色...">
                         <div id="prompt-templates-list" class="prompt-templates-list">
-                            <div class="list-placeholder" style="font-size:11px;padding:8px;">尚未导入 ST 预设<br><button id="btn-import-preset-inline" style="margin-top:6px;font-size:11px;">导入预设</button></div>
+                            <div class="list-placeholder" style="font-size:11px;padding:8px;">尚未导入预设<br><button id="btn-import-preset-inline" style="margin-top:6px;font-size:11px;">导入预设</button></div>
                         </div>
                     </details>
-
-                    <div class="ai-section">
-                        <div class="ai-section-title"><span>本次引用的设定</span><small>续写后自动显示</small></div>
-                        <div id="active-wb-entries" class="active-entries"><div class="ai-empty-note">当前没有激活的设定条目。</div></div>
-                    </div>
 
                     <div class="ai-section" id="extraction-section" style="display:none;">
                         <div class="ai-section-title"><span>AI 发现的新内容</span><small>可整理进设定</small></div>
@@ -507,6 +497,42 @@
             <span id="status-words">字数: 0</span>
             <span id="status-save">已保存</span>
         </footer>
+    </div>
+
+    <div id="contact-author-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal contact-author-modal" role="dialog" aria-modal="true" aria-labelledby="contact-author-title">
+            <div class="plot-modal-header">
+                <div>
+                    <h3 id="contact-author-title">联系作者</h3>
+                    <p class="settings-subtitle">感谢你使用催更姬，欢迎支持、反馈和给项目点星。</p>
+                </div>
+                <button type="button" id="btn-contact-author-close" class="plot-modal-close" aria-label="关闭联系作者">×</button>
+            </div>
+            <div class="contact-author-body">
+                <a class="contact-author-card" href="https://space.bilibili.com/3707006961584592" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">B站主页</span>
+                    <strong>https://space.bilibili.com/3707006961584592</strong>
+                    <em>来 B 站看看催更姬的更新和碎碎念。</em>
+                </a>
+                <a class="contact-author-card" href="https://ifdian.net/a/cuigengji" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">爱发电</span>
+                    <strong>https://ifdian.net/a/cuigengji</strong>
+                    <em>支持作者继续开发催更姬。</em>
+                </a>
+                <a class="contact-author-card" href="https://github.com/mistnest/cuigengji" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">GitHub</span>
+                    <strong>https://github.com/mistnest/cuigengji</strong>
+                    <em>多点几个 star！！</em>
+                </a>
+                <div class="contact-author-mascot">
+                    <img src="images/haoye.png" alt="好耶">
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note">链接会在浏览器中打开。</span>
+                <button type="button" id="btn-contact-author-done" class="ai-btn-primary">完成</button>
+            </div>
+        </div>
     </div>
 
     <div id="settings-overlay" class="plot-modal-overlay" style="display:none;">
@@ -656,6 +682,7 @@
     <input type="file" id="file-input-document" accept=".txt,.docx,.doc" style="display:none">
     <input type="file" id="file-input-folder" webkitdirectory directory style="display:none">
 
+    <script src="js/app-signature.js"></script>
     <script src="js/core/api-client.js"></script>
     <script src="js/editor/chapter-tree.js"></script>
     <script src="js/editor/resizable-panels.js"></script>

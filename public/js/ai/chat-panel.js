@@ -10,6 +10,7 @@ const ChatPanel = (function () {
     let currentMode = 'write';
     let isLoading = false;
     let activeSessionId = 'default';
+    let _sessionRoundCount = 0;  // Monotonically increasing round counter, survives compression
     let onSwitchSessionCb = null;  // Callback to app.js
     let onDeleteSessionCb = null;
     let onNewSessionCb = null;
@@ -115,7 +116,7 @@ const ChatPanel = (function () {
         // Context circle — hover tooltip + click to compress
         const ctxCircle = document.getElementById('ctx-circle');
         if (ctxCircle) {
-            ctxCircle.addEventListener('click', compressContext);
+            ctxCircle.addEventListener('click', () => packCurrentContext({ reason: 'manual' }));
             ctxCircle.addEventListener('mouseenter', () => {
                 const pct = estimateContextUsage();
                 ctxCircle.title = `上下文用量: ${pct}% (点击压缩)`;
@@ -138,6 +139,11 @@ const ChatPanel = (function () {
 
         // Quick action buttons in assist welcome
         document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('.chat-msg-action');
+            if (actionBtn) {
+                handleMessageAction(actionBtn);
+                return;
+            }
             const btn = e.target.closest('.assist-quick-btn');
             if (btn?.dataset.prompt) {
                 input.value = btn.dataset.prompt;
@@ -185,7 +191,12 @@ const ChatPanel = (function () {
         if (!text || isLoading) return;
 
         if (!directPrompt) input.value = '';
-        addMessage('user', text, currentMode);
+        _sessionRoundCount = Math.max(_sessionRoundCount, deriveRoundCountFromMessages()) + 1;
+        addMessage('user', text, currentMode, {
+            currentTextSnapshot: getCurrentEditorText(),
+            chapterTitle: document.getElementById('chapter-title-input')?.value || '',
+            roundNumber: _sessionRoundCount,
+        });
 
         // Auto-name session on first message (CC-style)
         if (!_sessionAutoNamed && window.autoNameSession) {
@@ -202,6 +213,8 @@ const ChatPanel = (function () {
         const loadingId = addLoading();
         isLoading = true;
         updateButtons();
+        _toolStatusEl = null;  // Reset tool status for new request
+        _toolCallData = [];    // Reset accumulated tool call JSON data
 
         // Thinking timer for tool-calling wait
         let thinkSeconds = 0;
@@ -280,7 +293,7 @@ const ChatPanel = (function () {
             removeMessage(loadingId);
             if (reply) {
                 const msg = addMessage('assistant', reply, currentMode);
-                if (currentMode === 'write') addReviewButtons(msg, reply, text);
+                if (currentMode === 'write' && hasContentTag(reply)) addReviewButtons(msg, reply, text);
                 window.onAISuccess?.();
             } else {
                 addMessage('assistant', '*(未收到回复)*', currentMode);
@@ -381,10 +394,22 @@ const ChatPanel = (function () {
                     // First chunk — replace loading with stream message
                     clearInterval(streamThinkTimer);
                     const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                    const savedToolStatus = loadingEl?.querySelector('.chat-tool-status');
                     if (loadingEl) loadingEl.remove();
                     const result = createStreamMessage('assistant', currentMode);
                     streamMsgId = result.id;
                     streamingActive = true;
+                    // Preserve tool status in the new message
+                    if (savedToolStatus && streamMsgId) {
+                        const msgEl = document.getElementById(streamMsgId);
+                        const body = msgEl?.querySelector('.chat-msg-body');
+                        if (body) {
+                            const statusClone = savedToolStatus.cloneNode(true);
+                            const content = body.querySelector('.chat-msg-content');
+                            if (content) body.insertBefore(statusClone, content);
+                            else body.appendChild(statusClone);
+                        }
+                    }
                 }
                 streamAccumulatedText += event.content || '';
                 enqueueStreamChunk(streamMsgId, event.content || '');
@@ -394,10 +419,21 @@ const ChatPanel = (function () {
                 if (!streamMsgId) {
                     clearInterval(streamThinkTimer);
                     const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                    const savedToolStatus = loadingEl?.querySelector('.chat-tool-status');
                     if (loadingEl) loadingEl.remove();
                     const result = createStreamMessage('assistant', currentMode);
                     streamMsgId = result.id;
                     streamingActive = true;
+                    if (savedToolStatus && streamMsgId) {
+                        const msgEl = document.getElementById(streamMsgId);
+                        const body = msgEl?.querySelector('.chat-msg-body');
+                        if (body) {
+                            const statusClone = savedToolStatus.cloneNode(true);
+                            const content = body.querySelector('.chat-msg-content');
+                            if (content) body.insertBefore(statusClone, content);
+                            else body.appendChild(statusClone);
+                        }
+                    }
                 }
                 streamReasoningBlocks.push(event.content || '');
                 appendStreamReasoning(streamMsgId, event.content || '');
@@ -405,7 +441,44 @@ const ChatPanel = (function () {
 
             case 'meta':
                 streamMetaData = event;
-                if (event.contextDebug) window.lastContextDebug = event.contextDebug;
+                if (event.contextDebug) {
+                    window.lastContextDebug = event.contextDebug;
+                    // 即时更新上下文圈
+                    const pct = estimateContextUsage();
+                    if (pct >= 0) updateContextCircle(pct);
+                }
+                break;
+
+            case 'tool_start':
+                clearInterval(streamThinkTimer);
+                const toolLoadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                if (toolLoadingEl) {
+                    const thinkText = toolLoadingEl.querySelector('.chat-thinking');
+                    if (thinkText) {
+                        thinkText.textContent = `正在调用工具 (第${event.round}轮)...`;
+                    }
+                }
+                break;
+
+            case 'tool_call':
+                appendToolStatus(event.name, event.target, event.data);
+                // Accumulate JSON data for display in final message
+                _toolCallData.push({ name: event.name, target: event.target, data: event.data });
+                break;
+
+            case 'tool_result':
+                updateToolStatus(event.name, event.result);
+                break;
+
+            case 'tool_end':
+                // Tool round complete, continue waiting for AI response
+                const endLoadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                if (endLoadingEl) {
+                    const thinkText = endLoadingEl.querySelector('.chat-thinking');
+                    if (thinkText) {
+                        thinkText.innerHTML = 'Thinking<span class="chat-thinking-dots"><span></span><span></span><span></span></span>';
+                    }
+                }
                 break;
 
             case 'done':
@@ -463,7 +536,7 @@ const ChatPanel = (function () {
         if (!text) return;
         streamPendingText += text;
         if (streamTypewriterTimer) return;
-        streamTypewriterTimer = setInterval(() => drainStreamChunkQueue(msgId), 24);
+        streamTypewriterTimer = setInterval(() => drainStreamChunkQueue(msgId), 10);
     }
 
     function drainStreamChunkQueue(msgId) {
@@ -472,7 +545,7 @@ const ChatPanel = (function () {
             return;
         }
         const chars = Array.from(streamPendingText);
-        const take = chars.length > 160 ? 4 : chars.length > 40 ? 2 : 1;
+        const take = chars.length > 320 ? 24 : chars.length > 160 ? 16 : chars.length > 40 ? 8 : 4;
         streamRenderedText += chars.slice(0, take).join('');
         streamPendingText = chars.slice(take).join('');
         renderStreamChunk(msgId);
@@ -562,6 +635,286 @@ const ChatPanel = (function () {
         scrollBottom(msgList, { force: keepAtBottom });
     }
 
+    // ==================== Tool Status Display ====================
+
+    let _toolStatusEl = null;
+    let _toolCallData = [];  // Accumulated tool call JSON for display
+
+    function appendToolStatus(toolName, target, data) {
+        const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+        if (!loadingEl) return;
+        const body = loadingEl.querySelector('.chat-msg-body');
+        if (!body) return;
+        if (!_toolStatusEl) {
+            _toolStatusEl = document.createElement('div');
+            _toolStatusEl.className = 'chat-tool-status';
+            body.appendChild(_toolStatusEl);
+        }
+        let label = '';
+        if (target === 'character') label = `创建角色: ${data?.name || ''}`;
+        else if (target === 'worldbook') label = `创建世界书: ${data?.entries?.length || 1} 条`;
+        else if (target === 'preset') label = `创建预设: ${data?.name || ''}`;
+        else label = toolName;
+
+        const item = document.createElement('div');
+        item.className = 'chat-tool-item tool-pending';
+        item.dataset.tool = toolName;
+        item.innerHTML = `<span class="tool-icon">⚙️</span> <span class="tool-label">${label}</span> <span class="tool-status-text">...</span>`;
+        _toolStatusEl.appendChild(item);
+    }
+
+    function updateToolStatus(toolName, result) {
+        if (!_toolStatusEl) return;
+        const items = _toolStatusEl.querySelectorAll('.chat-tool-item');
+        const item = items[items.length - 1]; // Update the last pending item
+        if (!item) return;
+        item.classList.remove('tool-pending');
+        if (result?.success) {
+            item.classList.add('tool-success');
+            item.querySelector('.tool-status-text').textContent = '✓ 已保存';
+            applyImportedToolResult(result);
+        } else {
+            item.classList.add('tool-error');
+            item.querySelector('.tool-status-text').textContent = '✗ ' + (result?.error || '失败');
+        }
+    }
+
+    // ==================== JSON Auto-Import ====================
+
+    function detectAndShowImport(msgId, rawText) {
+        const el = document.getElementById(msgId);
+        if (!el) { console.log('[import-bar] msg element not found:', msgId); return; }
+
+        const text = String(rawText || '');
+
+        // Try multiple strategies to extract JSON from AI response:
+        // 1. ```json ... ```  (code block with language tag)
+        // 2. ``` ... ```       (code block without language tag)
+        // 3. Raw JSON objects/arrays in the text body (fallback)
+        const jsonBlocks = [];
+
+        // Strategy 1+2: all fenced code blocks — try parse as JSON
+        const fenceRe = /```(?:json)?\s*\n?([\s\S]*?)```/g;
+        let m;
+        while ((m = fenceRe.exec(text)) !== null) {
+            try {
+                const parsed = JSON.parse(m[1].trim());
+                jsonBlocks.push({ raw: m[1].trim(), data: parsed });
+            } catch { /* not valid JSON, skip */ }
+        }
+
+        // Strategy 3: look for JSON objects/arrays that look like import data,
+        // even if not in a code block. Scan for top-level { } or [ ] spans.
+        if (!jsonBlocks.length) {
+            const bareCandidates = extractBareJsonBlocks(text);
+            for (const cand of bareCandidates) {
+                try {
+                    const parsed = JSON.parse(cand);
+                    jsonBlocks.push({ raw: cand, data: parsed });
+                } catch { /* skip */ }
+            }
+        }
+
+        console.log('[import-bar] text length:', text.length, 'json blocks found:', jsonBlocks.length);
+        if (!jsonBlocks.length) return;
+
+        // Detect each block's type
+        // Order matters: check worldbook first (most distinctive), then preset (technical fields),
+        // then character (creative fields). Otherwise preset {name, systemPrompt} gets mis-identified as character.
+        const imports = [];
+        for (const block of jsonBlocks) {
+            const d = block.data;
+            if (Array.isArray(d) && d.length && d[0].comment && d[0].key && d[0].content) {
+                imports.push({ type: 'worldbook', data: { entries: d }, label: `世界书: ${d.length} 条` });
+            } else if (d && typeof d === 'object' && !Array.isArray(d)) {
+                if (d.comment && d.key && d.content) {
+                    imports.push({ type: 'worldbook', data: { entries: [d] }, label: `世界书: ${d.comment}` });
+                } else if (d.name && (d.systemPrompt || d.provider || d.model || d.prompts)) {
+                    imports.push({ type: 'preset', data: d, label: `预设: ${d.name}` });
+                } else if (d.name && (d.description || d.personality || d.scenario || d.first_mes)) {
+                    imports.push({ type: 'character', data: d, label: `角色: ${d.name}` });
+                }
+            }
+        }
+        console.log('[import-bar] detected imports:', imports.length, imports.map(i => i.label));
+        if (!imports.length) return;
+
+        // Show floating import bar — same layout as action-float-bar, isolated functionality
+        const panel = document.getElementById('panel-chat');
+        if (!panel) { console.log('[import-bar] panel-chat not found'); return; }
+        const existing = panel.querySelector('.action-float-bar');
+        if (existing) existing.remove();
+
+        const bar = document.createElement('div');
+        bar.className = 'action-float-bar';
+
+        // Each import gets its own row: [导入] [拒绝]
+        // Row layout: flex row inside the column, matching review bar's button style
+        const rowsHtml = imports.map((imp, i) => `
+            <div class="import-item-row">
+                <span class="import-item-label">${escHtml(imp.label)}</span>
+                <div class="import-item-btns">
+                    <button class="import-action-btn accept" data-import-idx="${i}" data-action="accept">导入</button>
+                    <button class="import-action-btn reject" data-import-idx="${i}" data-action="reject">拒绝</button>
+                </div>
+            </div>`).join('');
+
+        bar.innerHTML = `
+            <div class="action-float-title">设定制作完成 — 是否导入？</div>
+            <div class="action-float-actions">${rowsHtml}</div>`;
+
+        bar.insertAdjacentHTML('afterbegin', actionFloatCloseButtonHtml());
+        bindActionFloatClose(bar);
+
+        const footer = panel.querySelector('.cc-input-area');
+        if (!footer) { console.log('[import-bar] .cc-input-area not found'); return; }
+        footer.before(bar);
+        console.log('[import-bar] bar inserted before .cc-input-area');
+
+        // Track decisions; auto-remove bar when all decided
+        const decisions = new Array(imports.length).fill(null);
+
+        function checkAllDecided() {
+            if (decisions.every(d => d !== null)) {
+                setTimeout(() => { if (bar.parentNode) bar.remove(); }, 1500);
+            }
+        }
+
+        bar.querySelectorAll('[data-import-idx]').forEach(btn => {
+            const idx = parseInt(btn.dataset.importIdx);
+            const action = btn.dataset.action;
+            const imp = imports[idx];
+            btn.addEventListener('click', async () => {
+                // Disable both buttons in this row
+                const row = btn.closest('.import-item-row');
+                const allBtns = row.querySelectorAll('button');
+                allBtns.forEach(b => b.disabled = true);
+
+                if (action === 'reject') {
+                    btn.className = 'import-action-btn import-done';
+                    btn.textContent = '已拒绝';
+                    decisions[idx] = 'rejected';
+                    checkAllDecided();
+                    return;
+                }
+
+                // Accept: do the import
+                btn.textContent = '导入中...';
+                btn.className = 'import-action-btn';
+                const result = await doImportData(imp.type, imp.data);
+                if (result?.success) {
+                    btn.textContent = '已导入';
+                    btn.className = 'import-action-btn import-done';
+                    decisions[idx] = 'imported';
+                    applyImportedToolResult(result);
+                } else {
+                    btn.textContent = '失败';
+                    btn.className = 'import-action-btn import-error';
+                    decisions[idx] = 'error';
+                }
+                checkAllDecided();
+            });
+        });
+    }
+
+    // Extract JSON candidates from bare text (no code fences).
+    // Looks for top-level { } or [ ] spans that contain import-like fields.
+    function extractBareJsonBlocks(text) {
+        const candidates = [];
+        // Find balanced top-level { ... } blocks
+        let depth = 0, start = -1;
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (ch === '{' || ch === '[') {
+                if (depth === 0) start = i;
+                depth++;
+            } else if (ch === '}' || ch === ']') {
+                depth--;
+                if (depth === 0 && start >= 0) {
+                    const block = text.substring(start, i + 1);
+                    // Quick heuristic: must contain at least one import-like key
+                    if (/"(name|comment|description|personality|systemPrompt|content|key)"/.test(block)) {
+                        candidates.push(block);
+                    }
+                    start = -1;
+                } else if (depth < 0) {
+                    depth = 0; start = -1; // malformed, reset
+                }
+            }
+        }
+        return candidates;
+    }
+
+    function appendToolCallJson(msgEl, toolCalls) {
+        const body = msgEl.querySelector('.chat-msg-body');
+        if (!body) return;
+        // Remove existing tool JSON display if any
+        const existing = body.querySelector('.chat-tool-json');
+        if (existing) existing.remove();
+
+        for (const tc of toolCalls) {
+            const label = tc.target === 'character' ? `角色: ${tc.data?.name || ''}` :
+                         tc.target === 'worldbook' ? `世界书: ${tc.data?.entries?.length || 1} 条` :
+                         `预设: ${tc.data?.name || ''}`;
+            const details = document.createElement('details');
+            details.className = 'chat-tool-json';
+            details.innerHTML = `<summary>📋 已保存的JSON — ${label}</summary><pre><code>${escHtml(JSON.stringify(tc.data, null, 2))}</code></pre>`;
+            const content = body.querySelector('.chat-msg-content');
+            if (content) content.appendChild(details);
+            else body.appendChild(details);
+        }
+    }
+
+    async function doImportData(target, data) {
+        try {
+            const novelId = window.editorState?.currentNovel?.id || 'default';
+            const resp = await fetch('/api/chat/import-data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'import_data', args: { target, data }, novelId }),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                return { success: false, error: err.error || 'HTTP ' + resp.status };
+            }
+            return await resp.json();
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    function applyImportedToolResult(result) {
+        const state = window.editorState;
+        if (!state || !result?.success) return;
+
+        if (result.target === 'character' && result.character) {
+            state.characters = Array.isArray(state.characters) ? state.characters : [];
+            const name = result.character.data?.name || result.character.name || result.name || '';
+            const existingIndex = state.characters.findIndex(character =>
+                (character.data?.name || character.name || '') === name
+            );
+            if (existingIndex >= 0) state.characters.splice(existingIndex, 1, result.character);
+            else state.characters.push(result.character);
+            window.renderCharacterList?.();
+        }
+
+        if (result.target === 'worldbook' && result.entries) {
+            state.worldBook = state.worldBook || { entries: {} };
+            state.worldBook.entries = state.worldBook.entries || {};
+            Object.assign(state.worldBook.entries, result.entries);
+            window.renderWorldBookList?.();
+        }
+
+        if (result.target === 'preset' && result.preset) {
+            state.presets = state.presets || {};
+            state.presets[result.name || result.preset.name] = result.preset;
+            window.updatePresetSelect?.();
+        }
+
+        window.saveActiveChatSession?.();
+        window.autoSaveEditor?.();
+    }
+
     function finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt) {
         const el = document.getElementById(msgId);
         if (!el) return;
@@ -589,9 +942,19 @@ const ChatPanel = (function () {
         const msg = messages.find(m => m.id === msgId);
         if (msg) { msg.content = boundReply; msg.rawContent = boundReply; }
 
-        // Add review buttons (write mode)
-        if (mode === 'write' && msg) {
+        // Add review buttons (write mode) — only if reply has <content> tags
+        if (mode === 'write' && msg && hasContentTag(boundReply)) {
             addReviewButtons(msg, boundReply, userPrompt);
+        }
+
+        // Auto-detect JSON for import (assist mode)
+        if (mode === 'assist') {
+            setTimeout(() => detectAndShowImport(msgId, boundReply), 50);
+        }
+
+        // Show tool call JSON data if any
+        if (_toolCallData.length && el) {
+            appendToolCallJson(el, _toolCallData);
         }
     }
 
@@ -625,7 +988,7 @@ const ChatPanel = (function () {
 
         if (reply) {
             const msg = addMessage('assistant', reply, currentMode);
-            if (currentMode === 'write') addReviewButtons(msg, reply, userPrompt);
+            if (currentMode === 'write' && hasContentTag(reply)) addReviewButtons(msg, reply, userPrompt);
             window.onAISuccess?.();
         } else {
             addMessage('assistant', '*(未收到回复)*', currentMode);
@@ -656,7 +1019,13 @@ const ChatPanel = (function () {
         return compactMessagesForModel(messages
             .slice(0, -1)
             .filter(shouldSendMessageToModel)
-            .map(m => ({ role: m.role, content: String(m.rawContent || m.content || '').trim() })))
+            .map(m => ({
+                role: m.role,
+                content: String(m.rawContent || m.content || '').trim(),
+                currentTextSnapshot: m.currentTextSnapshot || '',
+                chapterTitle: m.chapterTitle || '',
+                roundNumber: m.roundNumber || 0,
+            })))
             .slice(-20);
     }
 
@@ -688,9 +1057,25 @@ const ChatPanel = (function () {
 
             const last = cleaned[cleaned.length - 1];
             if (last?.role === msg.role && last.content === content) continue;
-            cleaned.push({ role: msg.role, content });
+            cleaned.push({
+                role: msg.role,
+                content,
+                currentTextSnapshot: msg.role === 'user' ? (msg.currentTextSnapshot || '') : '',
+                chapterTitle: msg.chapterTitle || '',
+                roundNumber: msg.roundNumber || 0,
+            });
         }
         return cleaned;
+    }
+
+    function deriveRoundCountFromMessages() {
+        let maxRound = 0;
+        for (const m of messages) {
+            if (typeof m.roundNumber === 'number' && m.roundNumber > maxRound) {
+                maxRound = m.roundNumber;
+            }
+        }
+        return maxRound;
     }
 
     function sanitizeLoadedMessages(saved) {
@@ -729,7 +1114,7 @@ const ChatPanel = (function () {
         el.innerHTML = `<div class="chat-msg-avatar"></div><div class="chat-msg-body">
             <div class="chat-msg-header"><span class="chat-msg-role">${name}</span>${modeLabel}<span class="chat-msg-time">${now()}</span></div>
             <div class="chat-msg-content">${renderStructuredReply(content)}</div>
-            <div class="chat-msg-actions"></div>
+            <div class="chat-msg-actions">${messageActionsHtml({ id, role })}</div>
         </div>`;
         msgList.appendChild(el);
         scrollBottom(msgList, { force: true });
@@ -740,16 +1125,26 @@ const ChatPanel = (function () {
         }
 
         const msg = { id, role, content, rawContent: content, mode, transient: Boolean(options.transient) };
+        if (options.currentTextSnapshot) msg.currentTextSnapshot = options.currentTextSnapshot;
+        if (options.chapterTitle) msg.chapterTitle = options.chapterTitle;
+        if (options.roundNumber) msg.roundNumber = options.roundNumber;
         if (!options.transient) messages.push(msg);
         renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
         while (msgList.querySelectorAll('.chat-message').length > MESSAGE_PAGE_SIZE) {
             msgList.querySelector('.chat-message')?.remove();
         }
+
+        // Auto-detect JSON for import (assist mode)
+        if (role === 'assistant' && mode === 'assist') {
+            setTimeout(() => detectAndShowImport(id, content), 50);
+        }
+
         return msg;
     }
 
     function renderStoredMessage(message) {
         const id = message.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+        message.id = id;
         const el = document.createElement('div');
         el.className = `chat-message chat-msg-${message.role}`;
         el.id = id;
@@ -758,9 +1153,103 @@ const ChatPanel = (function () {
         el.innerHTML = `<div class="chat-msg-avatar"></div><div class="chat-msg-body">
             <div class="chat-msg-header"><span class="chat-msg-role">${name}</span>${modeLabel}</div>
             <div class="chat-msg-content">${renderStructuredReply(message.rawContent || message.content)}</div>
-            <div class="chat-msg-actions"></div>
+            <div class="chat-msg-actions">${messageActionsHtml(message)}</div>
         </div>`;
         return el;
+    }
+
+    function messageActionsHtml(message = {}) {
+        if (message.role !== 'user') return '';
+        return [
+            `<button type="button" class="chat-msg-action" data-action="edit" data-message-id="${message.id}">编辑</button>`,
+            `<button type="button" class="chat-msg-action" data-action="copy" data-message-id="${message.id}">复制</button>`,
+            `<button type="button" class="chat-msg-action" data-action="resend" data-message-id="${message.id}">重新发送</button>`,
+        ].join('');
+    }
+
+    function handleMessageAction(button) {
+        const action = button.dataset.action;
+        const id = button.dataset.messageId;
+        const msg = messages.find(item => item.id === id);
+        if (!msg) return;
+        if (action === 'copy') copyMessageText(msg);
+        if (action === 'resend') resendFromMessage(msg);
+        if (action === 'edit') openMessageEditor(msg);
+    }
+
+    function truncateMessagesFrom(message) {
+        const idx = messages.indexOf(message);
+        if (idx < 0) return false;
+        const removed = messages.splice(idx);
+        for (const item of removed) {
+            document.getElementById(item.id)?.remove();
+        }
+        _sessionRoundCount = deriveRoundCountFromMessages();
+        renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
+        return true;
+    }
+
+    function restartFromMessage(message, nextContent) {
+        const content = String(nextContent || '').trim();
+        if (!content || isLoading) return;
+        if (!truncateMessagesFrom(message)) return;
+        sendMessage(content);
+    }
+
+    function resendFromMessage(msg) {
+        restartFromMessage(msg, msg.rawContent || msg.content || '');
+    }
+
+    async function copyMessageText(message) {
+        const text = String(message.rawContent || message.content || '');
+        try {
+            await navigator.clipboard?.writeText(text);
+        } catch {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+        }
+    }
+
+    function openMessageEditor(message) {
+        const el = document.getElementById(message.id);
+        const contentEl = el?.querySelector('.chat-msg-content');
+        const actionsEl = el?.querySelector('.chat-msg-actions');
+        if (!contentEl || !actionsEl) return;
+        const original = String(message.rawContent || message.content || '');
+        contentEl.innerHTML = `<textarea class="chat-msg-edit-input">${escHtml(original)}</textarea>`;
+        actionsEl.innerHTML = `
+            <button type="button" class="chat-msg-action primary" data-action="save-edit" data-message-id="${message.id}">保存</button>
+            <button type="button" class="chat-msg-action" data-action="cancel-edit" data-message-id="${message.id}">取消</button>
+        `;
+        const input = contentEl.querySelector('.chat-msg-edit-input');
+        input?.focus();
+        input?.setSelectionRange(input.value.length, input.value.length);
+        actionsEl.querySelector('[data-action="save-edit"]')?.addEventListener('click', () => {
+            const next = input?.value?.trim() || '';
+            if (!next) return;
+            contentEl.innerHTML = renderStructuredReply(next);
+            actionsEl.innerHTML = `
+                <button type="button" class="chat-msg-action primary" data-action="send-edit" data-message-id="${message.id}">发送</button>
+                <button type="button" class="chat-msg-action" data-action="cancel-send" data-message-id="${message.id}">撤销编辑</button>
+            `;
+            actionsEl.querySelector('[data-action="send-edit"]')?.addEventListener('click', () => {
+                restartFromMessage(message, next);
+            }, { once: true });
+            actionsEl.querySelector('[data-action="cancel-send"]')?.addEventListener('click', () => {
+                contentEl.innerHTML = renderStructuredReply(original);
+                actionsEl.innerHTML = messageActionsHtml(message);
+            }, { once: true });
+        }, { once: true });
+        actionsEl.querySelector('[data-action="cancel-edit"]')?.addEventListener('click', () => {
+            contentEl.innerHTML = renderStructuredReply(original);
+            actionsEl.innerHTML = messageActionsHtml(message);
+        }, { once: true });
     }
 
     function renderRecentMessages() {
@@ -816,47 +1305,97 @@ const ChatPanel = (function () {
         const msgList = document.getElementById('chat-messages');
         if (!msgList) return;
         msgList.innerHTML = `<div class="chat-welcome">
-            <p>在正文模式下，你可以让 AI 帮你续写小说。</p>
-            <p>生成后可以选择 <strong>接受</strong>、<strong>重试</strong> 或 <strong>修改</strong>。</p>
+            <p>输入消息告诉催更姬你的需求，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
         </div>`;
+    }
+
+    // ==================== Floating action bars ====================
+    function actionFloatCloseButtonHtml(label = '关闭') {
+        return `<button type="button" class="action-float-close" data-action-float-close aria-label="${escHtml(label)}" title="${escHtml(label)}">×</button>`;
+    }
+
+    function bindActionFloatClose(bar) {
+        const closeBtn = bar?.querySelector('[data-action-float-close]');
+        if (closeBtn) closeBtn.addEventListener('click', () => bar.remove());
+    }
+
+    function setFloatBarHtml(bar, html) {
+        if (!bar) return;
+        bar.innerHTML = `${actionFloatCloseButtonHtml()}${html || ''}`;
+        bindActionFloatClose(bar);
+    }
+
+    function showFloatBar(html) {
+        const panel = document.getElementById('panel-chat'); if (!panel) return null;
+        const existing = panel.querySelector('.action-float-bar');
+        if (existing) existing.remove();
+        const bar = document.createElement('div');
+        bar.className = 'action-float-bar';
+        setFloatBarHtml(bar, html);
+        const footer = panel.querySelector('.cc-input-area');
+        if (footer) footer.before(bar);
+        return bar;
     }
 
     // ==================== Review Buttons (Write mode) ====================
     function addReviewButtons(msg, text, userPrompt) {
         if (!msg) return;
-        const el = document.getElementById(msg.id);
-        if (!el) return;
-        const actionsEl = el.querySelector('.chat-msg-actions');
-        if (!actionsEl) return;
+        const bar = showFloatBar(`
+            <div class="action-float-title">生成完成</div>
+            <div class="action-float-actions review-actions">
+                <button class="chat-review-btn accept" id="review-accept">接受</button>
+                <button class="chat-review-btn retry" id="review-retry">重试</button>
+                <button class="chat-review-btn revise" id="review-revise">修改</button>
+            </div>`);
+        if (!bar) return;
 
-        const bar = document.createElement('div'); bar.className = 'chat-review-bar';
-
-        const acceptBtn = document.createElement('button'); acceptBtn.className = 'chat-review-btn accept';
-        acceptBtn.textContent = '接受'; acceptBtn.addEventListener('click', () => { insertToEditor(text); bar.innerHTML = '<span class="chat-review-done">已写入编辑器</span>'; });
-
-        const retryBtn = document.createElement('button'); retryBtn.className = 'chat-review-btn retry';
-        retryBtn.textContent = '重试'; retryBtn.addEventListener('click', () => { el.remove(); const i = messages.findIndex(m => m.id === msg.id); if (i >= 0) messages.splice(i, 1); sendMessage(userPrompt); });
-
-        const reviseBtn = document.createElement('button'); reviseBtn.className = 'chat-review-btn revise';
-        reviseBtn.textContent = '修改'; reviseBtn.addEventListener('click', () => showReviseInput(msg.id, text, userPrompt));
-
-        bar.appendChild(acceptBtn); bar.appendChild(retryBtn); bar.appendChild(reviseBtn);
-        actionsEl.appendChild(bar);
+        bar.querySelector('#review-accept').addEventListener('click', () => {
+            insertToEditor(text);
+            bar.innerHTML = '<div class="action-float-result success">已写入编辑器</div>';
+            setFloatBarHtml(bar, bar.innerHTML);
+            setTimeout(() => bar.remove(), 1500);
+        });
+        bar.querySelector('#review-retry').addEventListener('click', () => {
+            const el = document.getElementById(msg.id);
+            if (el) el.remove();
+            const i = messages.findIndex(m => m.id === msg.id);
+            if (i >= 0) messages.splice(i, 1);
+            bar.remove();
+            sendMessage(userPrompt);
+        });
+        bar.querySelector('#review-revise').addEventListener('click', () => {
+            showReviseInput(msg.id, text, userPrompt, bar);
+        });
     }
 
-    function showReviseInput(msgId, originalText, userPrompt) {
-        const el = document.getElementById(msgId); if (!el) return;
-        const actionsEl = el.querySelector('.chat-msg-actions'); if (!actionsEl) return;
-        actionsEl.innerHTML = '';
-        const bar = document.createElement('div'); bar.className = 'chat-revise-bar';
-        const input = document.createElement('input'); input.type = 'text'; input.className = 'chat-revise-input';
-        input.placeholder = '输入修改意见...'; input.addEventListener('keydown', e => { if (e.key === 'Enter') doRevise(); });
-        const goBtn = document.createElement('button'); goBtn.className = 'chat-review-btn revise'; goBtn.textContent = '🚀'; goBtn.addEventListener('click', doRevise);
-        const cancelBtn = document.createElement('button'); cancelBtn.className = 'chat-review-btn retry'; cancelBtn.textContent = '取消';
-        cancelBtn.addEventListener('click', () => { actionsEl.innerHTML = ''; addReviewButtons({ id: msgId }, originalText, userPrompt); });
-        function doRevise() { const inst = input.value.trim(); if (!inst) return; el.remove(); const i = messages.findIndex(m => m.id === msgId); if (i >= 0) messages.splice(i, 1); sendMessage(`${userPrompt}\n\n【修改意见】${inst}`); }
-        bar.appendChild(input); bar.appendChild(goBtn); bar.appendChild(cancelBtn);
-        actionsEl.appendChild(bar); setTimeout(() => input.focus(), 100);
+    function showReviseInput(msgId, originalText, userPrompt, oldBar) {
+        if (oldBar) oldBar.remove();
+        const bar = showFloatBar(`
+            <div class="action-float-title">修改意见</div>
+            <input type="text" class="chat-revise-input" id="revise-input" placeholder="输入修改意见...">
+            <div class="action-float-actions revise-actions">
+                <button class="chat-review-btn revise" id="revise-go">发送</button>
+                <button class="chat-review-btn retry" id="revise-cancel">取消</button>
+            </div>`);
+        if (!bar) return;
+
+        const input = bar.querySelector('#revise-input');
+        const doRevise = () => {
+            const inst = input.value.trim(); if (!inst) return;
+            const el = document.getElementById(msgId);
+            if (el) el.remove();
+            const i = messages.findIndex(m => m.id === msgId);
+            if (i >= 0) messages.splice(i, 1);
+            bar.remove();
+            sendMessage(`${userPrompt}\n\n【修改意见】${inst}`);
+        };
+        bar.querySelector('#revise-go').addEventListener('click', doRevise);
+        bar.querySelector('#revise-cancel').addEventListener('click', () => {
+            bar.remove();
+            addReviewButtons({ id: msgId }, originalText, userPrompt);
+        });
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') doRevise(); });
+        setTimeout(() => input.focus(), 100);
     }
 
     function insertToEditor(text) {
@@ -873,6 +1412,10 @@ const ChatPanel = (function () {
         editor.dispatchEvent(new Event('input', { bubbles: true })); editor.focus();
     }
 
+    function hasContentTag(rawText) {
+        return /<content\s*>/i.test(String(rawText || ''));
+    }
+
     function extractContentOnly(rawText) {
         const match = String(rawText || '').match(/<content\s*>([\s\S]*?)<\/content\s*>/i);
         return match ? match[1].trim() : rawText;
@@ -883,13 +1426,24 @@ const ChatPanel = (function () {
         const editor = document.getElementById('chapter-editor');
         const text = editor?.value || '';
         const state = window.editorState || {};
+        const chapterWindowAnchor = typeof window.getChapterWindowAnchor === 'function'
+            ? window.getChapterWindowAnchor()
+            : (state.activeSessionAnchor || null);
         return {
             currentText: text.slice(-2000), chapterTitle: document.getElementById('chapter-title-input')?.value || '',
+            chapterId: state.currentChapter?.id || '',
+            chapterOrder: state.currentChapter?.order ?? null,
+            chapterWindowAnchor,
             worldBookEntries: getWBSummary(state), characters: getCharSummary(state),
             outline: getOutlineSummary(state), novelTitle: state.currentNovel?.title || '',
             novelId: state.currentNovel?.id || 'default',
             writingReference: state.writingReference || null,
+            roundNumber: _sessionRoundCount,
         };
+    }
+
+    function getCurrentEditorText() {
+        return document.getElementById('chapter-editor')?.value || '';
     }
 
     function getWBSummary(s) {
@@ -898,9 +1452,13 @@ const ChatPanel = (function () {
         const selectedGroups = ref.selectedWorldbookGroups || [];
         if (ref.worldbookMode === 'off') return [];
         return Object.values(e)
-            .filter(x => !x.disable && (ref.worldbookMode !== 'selected' || (x.group && selectedGroups.includes(x.group))))
+            .filter(x => !x.disable && (ref.worldbookMode !== 'selected' || selectedGroups.includes(getWorldBookFolder(x))))
             .slice(0, 10)
             .map(x => ({ name: x.comment || x.key?.[0] || '', content: (x.content||'').substring(0, 200) }));
+    }
+
+    function getWorldBookFolder(entry = {}) {
+        return String(entry.folder || entry._folder || entry._source || entry.group || '').trim();
     }
 
     function getCharSummary(s) {
@@ -948,6 +1506,13 @@ const ChatPanel = (function () {
     function renderStructuredReply(rawText) {
         if (!rawText) return '';
         let text = String(rawText);
+
+        // Extract [SUGGEST_ENABLE:type:name:reason] markers → collect for floating bar
+        const suggestions = [];
+        text = text.replace(/\[SUGGEST_ENABLE:(worldbook|character):([^:\]]+):([^\]]*)\]/g, (_, type, name, reason) => {
+            suggestions.push({ type, name: name.trim(), reason: reason.trim() });
+            return '';
+        });
 
         // Extract [REASONING] blocks — keep separate from content details
         let reasoningHtml = '';
@@ -1036,7 +1601,88 @@ const ChatPanel = (function () {
             parts.push(renderMD(leftover));
         }
 
-        return parts.join('\n') || renderMD(String(rawText));
+        const result = parts.join('\n') || renderMD(String(rawText));
+        if (suggestions.length) showSuggestBar(suggestions);
+        return result;
+    }
+
+    function showSuggestBar(suggestions) {
+        const decisions = [];
+        let currentIdx = 0;
+
+        const bar = showFloatBar('');
+        if (!bar) return;
+
+        function showCurrent() {
+            if (currentIdx >= suggestions.length) { finishAndSend(); return; }
+            const s = suggestions[currentIdx];
+            bar.innerHTML = `
+                <div class="action-float-title">建议启用（${currentIdx + 1}/${suggestions.length}）</div>
+                <div class="suggest-item">
+                    <div class="suggest-item-header"><strong>${escHtml(s.name)}</strong></div>
+                    <div class="suggest-item-reason">${escHtml(s.reason)}</div>
+                    <div class="suggest-item-actions review-actions">
+                        <button class="chat-review-btn accept" data-action="accept">启用</button>
+                        <button class="chat-review-btn retry" data-action="reject">保持</button>
+                        <button class="chat-review-btn revise" data-action="discuss">讨论</button>
+                    </div>
+                </div>`;
+
+            setFloatBarHtml(bar, bar.innerHTML);
+
+            bar.querySelectorAll('[data-action]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.dataset.action;
+                    if (action === 'discuss') {
+                        const input = document.getElementById('chat-input');
+                        if (input) input.value = `关于「${s.name}」：`;
+                        bar.remove();
+                        return;
+                    }
+                    decisions.push({ name: s.name, type: s.type, accepted: action === 'accept' });
+                    currentIdx++;
+                    showCurrent();
+                });
+            });
+        }
+
+        function finishAndSend() {
+            const lines = ['关于你建议的条目：'];
+            for (const d of decisions) { lines.push(`- ${d.name}：${d.accepted ? '启用' : '先保持禁用'}`); }
+            lines.push(''); lines.push('开始生成。');
+            const msg = lines.join('\n');
+
+            bar.innerHTML = `<div class="suggest-enable-result success">${msg.replace(/\n/g, '<br>')}</div>`;
+            setFloatBarHtml(bar, bar.innerHTML);
+            setTimeout(() => bar.remove(), 2000);
+
+            const input = document.getElementById('chat-input');
+            if (input) { input.value = msg; sendMessage(); }
+        }
+
+        showCurrent();
+    }
+
+    function enableEntry(type, name) {
+        const state = window.editorState; if (!state) return;
+        if (type === 'worldbook' && state.worldBook?.entries) {
+            for (const [, e] of Object.entries(state.worldBook.entries)) {
+                if ((e.comment || e.key?.[0] || '') === name) {
+                    e.disable = false; e.disabled = false; e.enabled = true; break;
+                }
+            }
+            window.renderWorldBookList?.();
+        } else if (type === 'character' && state.characters) {
+            for (const ch of state.characters) {
+                if ((ch.data?.name || ch.name || '') === name) {
+                    ch.disable = false; ch.disabled = false; ch.enabled = true;
+                    if (ch.data) { ch.data.disable = false; ch.data.disabled = false; ch.data.enabled = true; }
+                    break;
+                }
+            }
+            window.renderCharacterList?.();
+        }
+        window.autoSaveEditor?.();
     }
 
     function isSummaryDetails(detailsHtml) {
@@ -1126,6 +1772,15 @@ const ChatPanel = (function () {
     const PROTECT_RECENT = 5;  // Keep last N messages during compaction
 
     function estimateContextUsage() {
+        // 优先用后端返回的精确压缩统计
+        const debug = window.lastContextDebug;
+        if (debug?.compression?.usagePct !== undefined) {
+            const realPct = Math.round(debug.compression.usagePct * 100);
+            updateContextCircle(realPct);
+            return realPct;
+        }
+
+        // fallback: 本地估算
         let totalChars = 0;
         messages.forEach(m => { totalChars += (m.rawContent || m.content || '').length; });
         const estimatedTokens = Math.round(totalChars / 2.5);
@@ -1166,7 +1821,7 @@ const ChatPanel = (function () {
         if (ctxCircle) ctxCircle.title = `消息: ${messages.length}条 | 用量: ${pct}% | 点击压缩`;
     }
 
-    async function compressContext() {
+    async function legacyCompressContext() {
         if (messages.length <= PROTECT_RECENT + 2) { alert('消息太少，无需压缩'); return; }
         if (isLoading) return;
 
@@ -1211,15 +1866,159 @@ const ChatPanel = (function () {
                 messages.forEach(m => addMessage(m.role, m.rawContent || m.content, m.mode));
             }
             estimateContextUsage();
+            window.refreshChapterWindowAnchor?.('context-pack');
         } catch (e) { /* silent */ }
         finally { isLoading = false; updateButtons(); }
+    }
+
+    async function packCurrentContext({ reason = 'manual', keepRecent = PROTECT_RECENT, silent = false, allowAnchorOnly = false } = {}) {
+        const protectedCount = normalizeKeepRecent(keepRecent);
+        if (messages.length <= protectedCount + 2) {
+            if (allowAnchorOnly) {
+                const chapterWindowAnchor = window.refreshChapterWindowAnchor?.(`context-pack:${reason}:anchor-only`) || null;
+                window.saveActiveChatSession?.();
+                return { packed: true, anchorOnly: true, reason, chapterWindowAnchor };
+            }
+            if (!silent) alert('消息太少，无需打包');
+            return { packed: false, reason: 'not-enough-messages' };
+        }
+        if (isLoading) return { packed: false, reason: 'busy' };
+
+        const oldMessages = messages.slice(0, -protectedCount);
+        if (!oldMessages.length) return { packed: false, reason: 'no-distant-history' };
+
+        const conversationText = buildConversationPackText(oldMessages);
+        if (!conversationText) return { packed: false, reason: 'no-packable-history' };
+
+        const config = getConfig();
+        const presetName = window.editorState?.presetName || '__default__';
+
+        isLoading = true; updateButtons();
+        try {
+            const packPrompt = [
+                '请把下面的远期对话记录打包成结构化摘要，控制在 600 字以内。',
+                '',
+                '必须保留：',
+                '1. 用户已经确定的剧情方向、写法偏好和禁忌。',
+                '2. 角色设定、世界观设定、伏笔、未完成任务的变更。',
+                '3. 用户对正文做过的关键修改，以及这些修改对后续写作的影响。',
+                '4. 如果某些信息已经过期或被用户否定，要明确标注“已废弃”。',
+                '',
+                '不要复述无意义寒暄，不要保留 API 错误或连接失败内容。',
+                '',
+                `打包原因：${reason}`,
+                '',
+                '远期对话记录：',
+                conversationText,
+            ].join('\n');
+            const resp = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                body: JSON.stringify({
+                    message: packPrompt,
+                    history: [], context: {}, config: { ...config, temperature: 0.3, maxTokens: 600 }, presetName,
+                }),
+            });
+            if (!resp.ok) {
+                const errBody = await resp.json().catch(() => ({}));
+                throw new Error(errBody.error || errBody.message || `HTTP ${resp.status}`);
+            }
+            const summary = await readSseReply(resp) || '(打包失败，未收到摘要)';
+
+            const kept = messages.slice(-protectedCount);
+            messages.length = 0;
+            messages.push({
+                id: `compact_${Date.now()}`, role: 'assistant',
+                content: `📋 *上下文已打包，远期对话摘要：*\n${summary}`,
+                rawContent: summary,
+                mode: 'system',
+                packedContext: true,
+                packReason: reason,
+                packedAt: Date.now(),
+            });
+            messages.push(...kept);
+
+            renderRecentMessages();
+            estimateContextUsage();
+            const chapterWindowAnchor = window.refreshChapterWindowAnchor?.(`context-pack:${reason}`) || null;
+            window.saveActiveChatSession?.();
+            return {
+                packed: true,
+                reason,
+                chapterWindowAnchor,
+                summarizedMessages: oldMessages.length,
+                keptMessages: kept.length,
+            };
+        } catch (e) {
+            if (!silent) alert(`上下文打包失败：${e.message}`);
+            return { packed: false, reason: 'error', error: e.message };
+        } finally {
+            isLoading = false;
+            updateButtons();
+        }
+    }
+
+    function normalizeKeepRecent(value) {
+        const count = Number(value);
+        if (!Number.isFinite(count)) return PROTECT_RECENT;
+        return Math.max(2, Math.min(20, Math.floor(count)));
+    }
+
+    async function readSseReply(response) {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+            const data = await response.json().catch(() => ({}));
+            return data.reply || data.content || '';
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let accumulated = '';
+        let finalReply = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const event = JSON.parse(line.slice(6));
+                    if (event.type === 'chunk') accumulated += event.content || '';
+                    if (event.type === 'done') finalReply = event.reply || accumulated;
+                    if (event.type === 'error') throw new Error(event.message || 'Stream error');
+                } catch (err) {
+                    if (err instanceof SyntaxError) continue;
+                    throw err;
+                }
+            }
+        }
+
+        return finalReply || accumulated;
+    }
+
+    function buildConversationPackText(source) {
+        return (source || [])
+            .filter(shouldSendMessageToModel)
+            .map(m => {
+                const role = m.role === 'user' ? '用户' : 'AI';
+                const mode = m.mode ? ` / ${m.mode}` : '';
+                const chapter = m.chapterTitle ? ` / ${m.chapterTitle}` : '';
+                const round = m.roundNumber ? ` / 第${m.roundNumber}轮` : '';
+                const content = String(m.rawContent || m.content || '').trim().slice(0, 1200);
+                return `[${role}${mode}${chapter}${round}]\n${content}`;
+            })
+            .join('\n\n---\n\n');
     }
 
     // Update context after each message
     const origAddMessage = addMessage;
     addMessage = function(...args) {
         const result = origAddMessage.apply(this, args);
-        setTimeout(() => { const pct = estimateContextUsage(); if (pct >= CONTEXT_HIGH) updateContextCircle(pct); }, 100);
+        setTimeout(() => { const pct = estimateContextUsage(); updateContextCircle(pct); }, 100);
         return result;
     };
 
@@ -1275,14 +2074,18 @@ const ChatPanel = (function () {
     return {
         init, sendMessage, clearChat, getActiveMode: () => currentMode, insertToEditor,
         getMessages: () => messages,
-        loadMessages: (saved) => {
+        loadMessages: (saved, totalRoundCount = 0) => {
             if (Array.isArray(saved)) {
                 messages.length = 0;
                 messages.push(...sanitizeLoadedMessages(saved));
+                // Derive from messages first; fall back to session-stored totalRoundCount
+                _sessionRoundCount = deriveRoundCountFromMessages() || (totalRoundCount || 0);
                 renderRecentMessages();
             }
         },
+        getTotalRoundCount: () => _sessionRoundCount,
         renderSessionList, setActiveSession, registerSessionCallbacks,
+        packCurrentContext,
         cancelActiveRequest: stopGeneration,
         isStreamingActive: () => streamingActive,
     };
