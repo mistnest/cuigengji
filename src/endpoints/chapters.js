@@ -104,6 +104,11 @@ router.put('/:id', asyncRoute(async (req, res) => {
             next.wordCount = countWords(next.content);
         }
         if (req.body.order !== undefined) next.order = Number(req.body.order) || 0;
+        if (req.body.summary !== undefined) {
+            next.summary = String(req.body.summary);
+            next.summaryGenerator = 'manual';
+            next.summaryUpdatedAt = Date.now();
+        }
         next.updated = Date.now();
 
         let targetPath = found.path;

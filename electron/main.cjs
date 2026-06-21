@@ -39,7 +39,7 @@ function createWindow() {
             { role: 'reload' },
         ]},
         { label: '帮助', submenu: [
-            { label: '关于', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '催更姬 v0.1.0', detail: 'AI 小说创作助手' }) },
+            { label: '关于', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '催更姬 v1.0', detail: 'AI 小说创作助手' }) },
         ]},
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));

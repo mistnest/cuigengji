@@ -98,7 +98,7 @@
         renderPromptTemplates();
         updatePresetSelect();
         updateStatusBar();
-        console.log('📖 催更姬 v0.1.0 — Ready (状态已恢复)');
+        console.log('📖 催更姬 v1.0 — Ready (状态已恢复)');
         setStatus('就绪 - 开始创作吧!', 'info');
     }
 
@@ -4718,6 +4718,7 @@
             || data.disable === true
             || data.disabled === true
             || data.enabled === false
+            || data.extensions?.cuigengji?.disabled === true
             || data.extensions?.novel_ai_editor?.disabled === true;
     }
 

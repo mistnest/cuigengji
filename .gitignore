@@ -1,8 +1,42 @@
 node_modules/
 dist/
 data/
+debug/
+.backups/
+.cache/
+.private/
+playwright-report/
+test-results/
+coverage/
 *.log
 .DS_Store
 Thumbs.db
 .env
-.env.local
+.env.*
+!.env.example
+
+# Local/private workspace notes, AI scratchpads, and generated QA deliverables.
+.claude/
+author/
+qa-deliverables/
+CLAUDE.md
+
+# Local launch helpers with machine-specific paths.
+催更姬.bat
+催更姬.vbs
+
+# Removed legacy project document names; keep ignored if recreated locally.
+催更姬-项目技术文档.md
+
+# One-off local debugging/experiment scripts.
+scripts/*.mjs
+scripts/*.local.*
+scripts/cache-hit-*.mjs
+scripts/cgj-*-api-test.mjs
+scripts/existing-project-continuation-test.mjs
+scripts/st-trace.mjs
+scripts/test-*.mjs
+scripts/show-*.mjs
+scripts/*experiment*.mjs
+scripts/*full-log*.mjs
+scripts/*same-project*.mjs

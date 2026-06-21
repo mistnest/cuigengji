@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import {
+  applyAiReferenceSummary,
   ensureChapterSummary,
   ensureCharacterSummary,
   ensureWorldBookEntrySummary,
@@ -9,56 +10,67 @@ import {
 } from '../../src/services/reference-summaries.js';
 
 test.describe('Reference summaries', () => {
-  test('generates and reuses world book entry summaries', () => {
-    const first = ensureWorldBookEntrySummary({
+  test('does not create local fallback summaries by default', () => {
+    const world = ensureWorldBookEntrySummary({
       uid: 1,
       comment: '红岸基地',
       key: ['红岸'],
-      content: '红岸基地是一个用于向宇宙发送信号的重要设施。'.repeat(20),
+      content: '红岸基地是一处重要设施。'.repeat(20),
     });
-    expect(first.changed).toBe(true);
-    expect(first.entry.summary.length).toBeGreaterThan(0);
-    expect(first.entry.summary.length).toBeLessThanOrEqual(263);
-
-    const second = ensureWorldBookEntrySummary(first.entry);
-    expect(second.changed).toBe(false);
-    expect(getWorldBookEntrySummary(second.entry)).toBe(first.entry.summary);
-  });
-
-  test('updates character summary when source fields change', () => {
-    const first = ensureCharacterSummary({
+    const character = ensureCharacterSummary({
       spec: 'chara_card_v3',
       data: {
         name: '叶文洁',
         description: '天体物理学家。',
-        personality: '冷静、克制。',
         scenario: '红岸基地。',
       },
     });
-    const updated = ensureCharacterSummary({
-      ...first.character,
-      data: {
-        ...first.character.data,
-        description: '天体物理学家，曾在红岸基地工作。',
-      },
-    });
-
-    expect(first.changed).toBe(true);
-    expect(updated.changed).toBe(true);
-    expect(getCharacterSummary(updated.character)).toContain('红岸基地');
-  });
-
-  test('generates chapter summary for distant chapter memory', () => {
-    const first = ensureChapterSummary({
+    const chapter = ensureChapterSummary({
       id: 'c1',
       title: '第一章',
-      content: '叶文洁在红岸基地听见风声，回想起漫长的过去。'.repeat(30),
-      notes: '交代红岸基地。',
-      plotPoints: ['叶文洁登场'],
+      content: '叶文洁在红岸基地听见风声。'.repeat(30),
     });
 
-    expect(first.changed).toBe(true);
-    expect(first.chapter.summary).toContain('第一章');
-    expect(getChapterSummary(first.chapter)).toBe(first.chapter.summary);
+    expect(world.changed).toBe(false);
+    expect(character.changed).toBe(false);
+    expect(chapter.changed).toBe(false);
+    expect(getWorldBookEntrySummary(world.entry)).toBe('');
+    expect(getCharacterSummary(character.character)).toBe('');
+    expect(getChapterSummary(chapter.chapter)).toBe('');
+  });
+
+  test('stores and reads AI summaries through the unified summary layer', () => {
+    const world = applyAiReferenceSummary('worldBook', {
+      uid: 1,
+      comment: '红岸基地',
+      key: ['红岸'],
+      content: '红岸基地是一处重要设施。'.repeat(20),
+    }, { brief: '红岸基地用于执行重要观测和通信任务。' });
+
+    const character = applyAiReferenceSummary('character', {
+      name: '叶文洁',
+      description: '天体物理学家。',
+      scenario: '红岸基地。',
+    }, { brief: '叶文洁是曾在红岸基地工作的天体物理学家。' });
+
+    const chapter = applyAiReferenceSummary('chapter', {
+      id: 'c1',
+      title: '第一章',
+      content: '叶文洁在红岸基地听见风声。'.repeat(30),
+    }, {
+      brief: '叶文洁在红岸基地活动，相关经历成为后续剧情记忆点。',
+      keyEvents: ['叶文洁出场'],
+      characters: ['叶文洁'],
+    });
+
+    expect(world.changed).toBe(true);
+    expect(character.changed).toBe(true);
+    expect(chapter.changed).toBe(true);
+    expect(world.item.summaryGenerator).toBe('ai-v1');
+    expect(character.item.extensions.cuigengji.summaryGenerator).toBe('ai-v1');
+    expect(chapter.item.summaryGenerator).toBe('ai-v1');
+    expect(getWorldBookEntrySummary(world.item)).toContain('红岸基地');
+    expect(getCharacterSummary(character.item)).toContain('叶文洁');
+    expect(getChapterSummary(chapter.item)).toContain('红岸基地');
   });
 });

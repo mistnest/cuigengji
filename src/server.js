@@ -15,6 +15,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import { PROJECT_ROOT } from './config.js';
+import { getPublicAppSignature, getSignatureHeaders } from './app-signature.js';
 import { serverEvents, EVENT_NAMES } from './server-events.js';
 import { errorHandler, notFoundHandler } from './lib/http.js';
 
@@ -56,6 +57,12 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json({ limit: '25mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
+app.use((_req, res, next) => {
+    for (const [key, value] of Object.entries(getSignatureHeaders())) {
+        res.setHeader(key, value);
+    }
+    next();
+});
 app.use((req, res, next) => {
     const startedAt = Date.now();
     res.on('finish', () => {
@@ -82,10 +89,7 @@ app.get('/', (_req, res) => {
 
 // ---- Health Check ----
 app.get('/api/ping', (_req, res) => res.sendStatus(204));
-app.get('/api/version', (_req, res) => res.json({
-    name: 'cuigengji',
-    version: '0.1.0',
-}));
+app.get('/api/version', (_req, res) => res.json(getPublicAppSignature()));
 
 // ---- Mount API Endpoints ----
 import { router as chaptersRouter } from './endpoints/chapters.js';
@@ -127,7 +131,7 @@ async function startServer(options = {}) {
             const address = server.address();
             const actualPort = typeof address === 'object' && address ? address.port : port;
             const url = `http://${host}:${actualPort}`;
-            console.log(`\n  📖 催更姬 v0.1.0`);
+            console.log(`\n  📖 催更姬 v1.0`);
             console.log(`  🚀 Server running at ${url}\n`);
 
             serverEvents.emit(EVENT_NAMES.SERVER_STARTED, {

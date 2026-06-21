@@ -1,0 +1,15 @@
+催更姬（Cuigengji）
+Copyright (c) 2026 mistnest and contributors.
+
+Repository: https://github.com/mistnest/cuigengji
+License: Cuigengji Community License 1.0
+Application ID: com.mistnest.cuigengji
+Project signature: cgj-mistnest-2026-community-source
+Schema owner: mistnest-cuigengji
+
+This project is source-available software, not OSI-approved open source software.
+See LICENSE for the exact permissions and restrictions.
+
+The project intentionally keeps a small set of public provenance identifiers in
+version metadata, API responses, client metadata, package metadata, and release
+artifacts. These identifiers are not telemetry and do not collect user data.

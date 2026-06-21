@@ -19,7 +19,7 @@ const EXPLICIT_SELF_CORRECTION_RE = /[^\n。！？]*?(?:不对|禁词|不能用|
 export function applyWritingOutputGuard(reply = '', options = {}) {
     const forbiddenTerms = collectForbiddenTerms(options.promptTemplates);
     const before = String(reply || '');
-    let cleaned = before;
+    let cleaned = stripPseudoToolCalls(before);
     let removedSelfCorrections = 0;
 
     cleaned = cleaned.replace(SELF_CORRECTION_RE, () => {
@@ -66,4 +66,12 @@ export function collectForbiddenTerms(promptTemplates = []) {
         }
     }
     return [...found].sort((a, b) => b.length - a.length);
+}
+
+export function stripPseudoToolCalls(text = '') {
+    return String(text || '')
+        .replace(/<\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*tool_calls\s*>[\s\S]*?<\s*\/\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*tool_calls\s*>/gi, '')
+        .replace(/<\s*tool_calls\s*>[\s\S]*?<\s*\/\s*tool_calls\s*>/gi, '')
+        .replace(/```(?:json|xml)?\s*[\s\S]*?(?:tool_calls|get_reference_detail|search_reference|get_scene_context)[\s\S]*?```/gi, '')
+        .trim();
 }

@@ -25,12 +25,13 @@ router.get('/', asyncRoute(async (req, res) => {
                 id: data.id,
                 name: data.name,
                 createdAt: data.createdAt,
-                updatedAt: data.updatedAt || data.createdAt,
-                mode: data.mode || 'write',
-                messageCount: countMessages(data.messages),
+        updatedAt: data.updatedAt || data.createdAt,
+        mode: data.mode || 'write',
+        chapterWindowAnchor: data.chapterWindowAnchor || null,
+        messageCount: countMessages(data.messages),
             };
         } catch (err) {
-            if (err.code === 'CORRUPT_JSON') return null;
+            if (err.code === 'CORRUPT_JSON' || err.code === 'ENOENT') return null;
             throw err;
         }
     }))).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -47,6 +48,7 @@ router.post('/', asyncRoute(async (req, res) => {
         createdAt: now,
         updatedAt: now,
         mode: 'write',
+        chapterWindowAnchor: req.body.chapterWindowAnchor || null,
         messages: [],
     };
     await writeJson(sessionFile(novelId, id), session);
@@ -72,6 +74,12 @@ router.put('/:id', asyncRoute(async (req, res) => {
         name: req.body.name !== undefined ? req.body.name : existing.name,
         mode: req.body.mode !== undefined ? req.body.mode : existing.mode,
         messages: req.body.messages !== undefined ? req.body.messages : existing.messages,
+        chapterWindowAnchor: req.body.chapterWindowAnchor !== undefined
+            ? req.body.chapterWindowAnchor
+            : existing.chapterWindowAnchor,
+        totalRoundCount: req.body.totalRoundCount !== undefined
+            ? req.body.totalRoundCount
+            : (existing.totalRoundCount || 0),
         updatedAt: Date.now(),
     }), {
         defaultValue: {

@@ -24,10 +24,7 @@
 
 import { estimateTokens } from './context-manager.js';
 import { getCharacterSummary, getWorldBookEntrySummary } from './reference-summaries.js';
-import {
-    buildChapterSummaryExtractionPrompt,
-    formatMemoryPromptSections,
-} from './memory-prompts.js';
+import { formatMemoryPromptSections } from './memory-prompts.js';
 
 // ==================== Memory Types ====================
 
@@ -321,21 +318,6 @@ export class MemoryManager {
         return extracted;
     }
 
-    /**
-     * AI 生成章节摘要（需要外部 AI 调用，这里只返回 prompt）
-     * @param {string} chapterContent
-     * @returns {string} prompt for AI
-     */
-    buildSummaryExtractionPrompt(chapterContent) {
-        return buildChapterSummaryExtractionPrompt(chapterContent);
-
-        return `请为以下章节生成简洁摘要（200字内），包含：主要情节进展、关键角色行为、重要伏笔。
-
-${chapterContent.slice(-3000)}
-
-只输出摘要：`;
-    }
-
     // ==================== Private Retrieval Methods ====================
 
     _retrieveWorldEntries(text) {
@@ -433,7 +415,7 @@ ${chapterContent.slice(-3000)}
 
     _entryToMemory(entry, baseWeight) {
         const content = this.compactReference
-            ? (getWorldBookEntrySummary(entry) || entry.content || '')
+            ? (getWorldBookEntrySummary(entry) || compactPlainText(entry.content || '', 220))
             : (entry.content || '');
         return {
             id: `wb_${entry.uid}`,
@@ -459,7 +441,7 @@ ${chapterContent.slice(-3000)}
             // Check if character name appears in text
             if (text && text.includes(name)) {
                 const description = this.compactReference
-                    ? getCharacterSummary(ch)
+                    ? (getCharacterSummary(ch) || compactPlainText(ch.data?.description || ch.description || '', 260))
                     : (ch.data?.description || ch.description || '');
                 const personality = ch.data?.personality || ch.personality || '';
                 const scenario = ch.data?.scenario || ch.scenario || '';
@@ -635,7 +617,14 @@ function isCharacterDisabled(character = {}) {
         || data.disable === true
         || data.disabled === true
         || data.enabled === false
+        || data.extensions?.cuigengji?.disabled === true
         || data.extensions?.novel_ai_editor?.disabled === true;
+}
+
+function compactPlainText(text = '', maxChars = 240) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, maxChars)}...`;
 }
 
 function isWorldBookEntryDisabled(entry = {}) {

@@ -1,10 +1,10 @@
 /**
  * 催更姬 — L1: Author Profile System
  *
- * 参考 Claude Code 的 CLAUDE.md + Auto Memory 架构，映射到写作领域：
+ * 本地作者档案 + Auto Memory 架构，映射到写作领域：
  *
- *   ~/.novel-ai-editor/author/
- *   ├── AUTHOR.md           ← 作者档案（类似 CLAUDE.md，AI 可建议修改）
+ *   ~/.cuigengji/author/
+ *   ├── AUTHOR.md           ← 作者档案（AI 可建议修改）
  *   └── memory/
  *       ├── MEMORY.md       ← 索引（每行一个文件引用，上限 200 行）
  *       ├── style.md        ← 从多本书中提炼的文风特征

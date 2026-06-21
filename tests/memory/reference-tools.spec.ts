@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test';
 import { executeReferenceTool, getReferenceToolDefinitions } from '../../src/services/ai-tools/reference/index.js';
 
 const runtime = {
-  message: '请续写下一段',
+  message: '继续写下一段',
   context: {
-    novelId: '三体',
+    novelId: 'sample-novel',
     chapterTitle: '第1章',
-    currentText: '红岸基地里，叶文洁望着远方。',
+    currentText: '旧档案室里，主角望着窗外，等待下一条线索出现。',
   },
 };
 
@@ -22,7 +22,7 @@ test.describe('Reference AI tools', () => {
 
   test('search_reference returns compact project references', async () => {
     const result = await executeReferenceTool('search_reference', {
-      query: '红岸 基地',
+      query: '档案室 线索',
       limit: 5,
     }, runtime);
 
@@ -33,7 +33,7 @@ test.describe('Reference AI tools', () => {
 
   test('get_reference_detail reads details by id', async () => {
     const search = await executeReferenceTool('search_reference', {
-      query: '红岸 基地',
+      query: '档案室 线索',
       limit: 5,
     }, runtime);
     const id = search.results[0].id;
@@ -54,7 +54,7 @@ test.describe('Reference AI tools', () => {
     }, runtime);
 
     expect(scene.type).toBe('scene');
-    expect(scene.beforeText).toContain('红岸基地');
+    expect(scene.beforeText).toContain('旧档案室');
     expect(scene.currentRequest).toBe(runtime.message);
   });
 });

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+﻿import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const createdProjects = new Set<string>();
 
@@ -25,6 +25,22 @@ async function openSettingsPage(page: Page, pageName: 'general' | 'editor' | 'ai
     await page.locator('#btn-settings').click();
     await expect(page.locator('#settings-overlay')).toHaveClass(/active/);
     await page.locator(`.settings-nav [data-settings-page="${pageName}"]`).click();
+}
+
+function sse(events: unknown[]) {
+    return events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+}
+
+async function mockChatWriteStream(page: Page, reply: string) {
+    await page.route('**/api/chat/write', route => route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse([
+            { type: 'chunk', content: reply.slice(0, Math.ceil(reply.length / 2)) },
+            { type: 'chunk', content: reply.slice(Math.ceil(reply.length / 2)) },
+            { type: 'done', reply },
+        ]),
+    }));
 }
 
 async function removeProjects(request: APIRequestContext) {
@@ -112,9 +128,9 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await page.locator('.sidebar-tab[data-panel="worldbook"]').click();
     await page.locator('#btn-add-wb-entry').click();
     await page.locator('#wb-edit-comment').fill('雾港规则');
+    await page.locator('.wb-st-config > summary').click();
     await page.locator('#wb-edit-key').fill('雾港');
     await page.locator('#wb-edit-content').fill('雾港每逢月末封港。');
-    await page.locator('#wb-edit-group').fill('城市');
     await page.locator('.wb-save-btn').click();
 
     await page.locator('.sidebar-tab[data-panel="characters"]').click();
@@ -122,6 +138,7 @@ test('世界书、角色和 Prompt 按项目隔离并持久化 @regression', asy
     await expect(page.locator('.character-edit-modal')).toBeVisible();
     await page.locator('#character-edit-name').fill('林冬');
     await page.locator('#character-edit-description').fill('调查员');
+    await page.locator('.character-st-config > summary').click();
     await page.locator('#character-edit-personality').fill('冷静谨慎');
     await page.locator('.character-edit-save').click();
     await expect(page.locator('.character-entry')).toContainText('林冬');
@@ -201,8 +218,10 @@ test('角色卡内嵌世界书提取后会保存到项目 @regression', async ({
 
     await expect(page.locator('.character-entry')).toContainText('沈砚');
     await page.locator('.character-entry').click();
+    await page.locator('.character-st-config > summary').click();
     await expect(page.locator('.char-embedded-book')).toContainText('旧港档案馆');
-    await page.locator('.char-btn-extract-book').click();
+    await page.locator('.character-extract-embedded-btn').click();
+    await page.locator('.character-edit-cancel').click();
     await page.evaluate(() => window.saveWorkspaceState());
 
     await openRecent(page, name);
@@ -211,11 +230,7 @@ test('角色卡内嵌世界书提取后会保存到项目 @regression', async ({
 });
 
 test('会话可新建、保存、搜索并切换 @regression', async ({ page, request }) => {
-    await page.route('**/api/chat/write', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ reply: '可以从港口封锁开始制造冲突。' }),
-    }));
+    await mockChatWriteStream(page, '可以从港口封锁开始制造冲突。');
     await page.goto('/');
     const name = await createWorkspace(page);
 
@@ -262,9 +277,8 @@ test('Prompt 搜索、勾选删除和记忆预算控件有效 @regression', asyn
     await expect(page.locator('.prompt-template-toggle-item')).toHaveCount(1);
     await expect(page.locator('.prompt-template-toggle-item')).toContainText('对白模板');
 
-    await page.locator('.budget-option[data-level="35"]').click();
-    await expect(page.locator('.budget-option[data-level="35"]')).toHaveClass(/active/);
-    await expect(page.locator('#memory-tokens-estimate')).not.toHaveText('19,000');
+    await expect(page.locator('.budget-option')).toHaveCount(0);
+    await expect(page.locator('#memory-tokens-estimate')).toHaveCount(0);
 });
 
 test('高频 AI 配置留在右侧，全局设置使用独立弹窗 @regression', async ({ page }) => {
@@ -516,38 +530,42 @@ test('已保存 API Key 时提取设定按钮会正常发起请求 @regression',
 
     const requestPromise = page.waitForRequest('**/api/ai/extract');
     await page.locator('#btn-extract-setting').click();
+    await page.locator('.extract-current-btn').click();
     await requestPromise;
     await expect(page.getByRole('heading', { name: '提取结果' })).toBeVisible();
 });
 
-test('高频 AI 按钮会执行对应操作并正确恢复状态 @regression', async ({ page }) => {
-    await page.route('**/api/chat/write', route => route.fulfill({
+test('项目逐章扫描会调用项目级提取接口并展示统一确认结果 @regression', async ({ page }) => {
+    await page.route('**/api/ai/extract-project-stream', route => route.fulfill({
         status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ reply: '门外传来三声急促的敲击。', context: {}, memory: {} }),
+        contentType: 'text/event-stream',
+        body: sse([
+            { type: 'start', total: 2, startOrder: 1, endOrder: 2 },
+            { type: 'chapter_start', index: 1, total: 2, title: '第一章', order: 1 },
+            { type: 'chapter_done', index: 1, total: 2, title: '第一章', order: 1, characters: 1, worldEntries: 1 },
+            { type: 'chapter_start', index: 2, total: 2, title: '第二章', order: 2 },
+            { type: 'chapter_done', index: 2, total: 2, title: '第二章', order: 2, characters: 0, worldEntries: 1 },
+            {
+                type: 'done',
+                mode: 'project',
+                range: { startOrder: 1, endOrder: 2, processed: 2 },
+                characters: [{ name: '林冬', description: '调查员', group: '主角' }],
+                worldEntries: [{ comment: '雾港', key: ['雾港'], content: '港口城市，码头被封锁。', group: '地点' }],
+                extractionLog: [
+                    { chapter: '第一章', characters: 1, worldEntries: 1 },
+                    { chapter: '第二章', characters: 0, worldEntries: 1 },
+                ],
+                summary: '逐章扫描 2 章，提取 1 个角色、1 条世界书候选。',
+            },
+        ]),
     }));
-    await page.route('**/api/ai/plot-suggestions', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-            candidates: [{ direction: '追查敲门者', conflict: '身份暴露', estimatedWords: 800 }],
-        }),
-    }));
-    await page.route('**/api/ai/inspire', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ content: '让敲门声与旧案产生联系。' }),
-    }));
-    await page.route('**/api/chat/infill', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ reply: '她停下脚步。' }),
-    }));
-
     await page.goto('/');
     await createWorkspace(page);
     await page.locator('#btn-add-chapter').click();
-    await page.locator('#chapter-editor').fill('夜色沉入雾港。');
+    await page.locator('#chapter-editor').fill('林冬走进雾港，发现码头已经封锁。');
+    await page.locator('#btn-save').click();
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-editor').fill('第二天，林冬回到码头调查。');
     await page.locator('.sidebar-tab[data-panel="ai-tools"]').click();
     await page.evaluate(() => {
         const app = window as typeof window & {
@@ -558,28 +576,99 @@ test('高频 AI 按钮会执行对应操作并正确恢复状态 @regression', a
         app.editorState.aiConfig.provider = 'anthropic';
     });
 
-    await page.locator('#btn-continue').click();
-    await expect(page.locator('#chapter-editor')).toHaveValue(/门外传来三声急促的敲击/);
-    await expect(page.locator('#btn-continue')).toBeEnabled();
-    await expect(page.locator('#btn-continue')).toHaveText('续写正文');
+    const requestPromise = page.waitForRequest('**/api/ai/extract-project-stream');
+    await page.locator('#btn-extract-setting').click();
+    await page.locator('#extract-project-end').fill('2');
+    await page.locator('.extract-project-btn').click();
+    const request = await requestPromise;
+    const body = request.postDataJSON();
+    expect(body.novelId).toBeTruthy();
+    expect(body.startOrder).toBe(1);
+    expect(body.endOrder).toBe(2);
+    await expect(page.getByRole('heading', { name: '提取结果' })).toBeVisible();
+    await expect(page.locator('.extract-check-row')).toContainText(['林冬', '雾港']);
+    await expect(page.getByText('逐章扫描记录')).toBeVisible();
+});
 
-    await page.locator('#btn-plot-suggestions').click();
-    await expect(page.locator('#plot-modal-overlay')).toBeVisible();
-    await expect(page.locator('.plot-card')).toContainText('追查敲门者');
-    await page.locator('#plot-modal-overlay .plot-modal-close').click();
+test('聊天框正文模式会流式返回并保留用户消息操作 @regression', async ({ page }) => {
+    await mockChatWriteStream(page, '门外传来三声急促的敲击。');
+    await page.goto('/');
+    await createWorkspace(page);
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-editor').fill('夜色沉入雾港。');
+    await page.evaluate(() => {
+        const app = window as typeof window & {
+            editorState: { hasSavedApiKey: boolean; aiConfig: { apiKey: string; provider: string } };
+        };
+        app.editorState.hasSavedApiKey = true;
+        app.editorState.aiConfig.apiKey = '';
+        app.editorState.aiConfig.provider = 'anthropic';
+    });
 
-    await page.locator('#btn-inspire').click();
-    await expect(page.locator('#inspire-modal-overlay')).toBeVisible();
-    await expect(page.locator('.inspiration-content')).toContainText('旧案');
-    await page.locator('#inspire-modal-overlay .plot-modal-close').click();
-    await expect(page.locator('#btn-inspire')).toBeEnabled();
+    await page.locator('#chat-input').fill('继续写下一段');
+    await page.locator('#btn-send').click();
+    await expect(page.locator('.chat-msg-assistant')).toContainText('门外传来三声急促的敲击');
+    await expect(page.locator('.chat-msg-user .chat-msg-action[data-action="edit"]')).toBeVisible();
+    await expect(page.locator('.chat-msg-user .chat-msg-action[data-action="copy"]')).toBeVisible();
+    await expect(page.locator('.chat-msg-user .chat-msg-action[data-action="resend"]')).toBeVisible();
+});
 
-    const editor = page.locator('#chapter-editor');
-    await editor.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(0, 0));
-    page.once('dialog', dialog => dialog.accept('补充人物反应'));
-    await page.locator('#btn-infill').click();
-    await expect(editor).toHaveValue(/^她停下脚步。/);
-    await expect(page.locator('#btn-infill')).toBeEnabled();
+test('编辑发送和重新发送会截断后续聊天历史 @regression', async ({ page }) => {
+    const requests: Array<{ message: string; history?: Array<{ role: string; content: string }> }> = [];
+    await page.route('**/api/chat/write', route => {
+        const body = route.request().postDataJSON();
+        requests.push(body);
+        const reply = `回复${requests.length}`;
+        return route.fulfill({
+            status: 200,
+            contentType: 'text/event-stream',
+            body: sse([
+                { type: 'chunk', content: reply },
+                { type: 'done', reply },
+            ]),
+        });
+    });
+
+    await page.goto('/');
+    await createWorkspace(page);
+    await page.locator('#btn-add-chapter').click();
+    await page.locator('#chapter-editor').fill('正文现场。');
+    await page.evaluate(() => {
+        const app = window as typeof window & {
+            editorState: { hasSavedApiKey: boolean; aiConfig: { apiKey: string; provider: string } };
+        };
+        app.editorState.hasSavedApiKey = true;
+        app.editorState.aiConfig.apiKey = '';
+        app.editorState.aiConfig.provider = 'anthropic';
+    });
+
+    await page.locator('#chat-input').fill('第一条');
+    await page.locator('#btn-send').click();
+    await expect(page.locator('.chat-msg-assistant')).toContainText('回复1');
+    await page.locator('#chat-input').fill('第二条');
+    await page.locator('#btn-send').click();
+    await expect(page.locator('.chat-msg-assistant').last()).toContainText('回复2');
+
+    await page.locator('.chat-msg-user .chat-msg-action[data-action="edit"]').first().click();
+    await page.locator('.chat-msg-edit-input').fill('第一条修改');
+    await page.locator('.chat-msg-action[data-action="save-edit"]').click();
+    await page.locator('.chat-msg-action[data-action="send-edit"]').click();
+    await expect(page.locator('.chat-msg-assistant').last()).toContainText('回复3');
+
+    expect(requests[2].message).toBe('第一条修改');
+    expect(JSON.stringify(requests[2].history || [])).not.toContain('第二条');
+    expect(JSON.stringify(requests[2].history || [])).not.toContain('回复2');
+
+    await page.locator('#chat-input').fill('第三条');
+    await page.locator('#btn-send').click();
+    await expect(page.locator('.chat-msg-assistant').last()).toContainText('回复4');
+
+    await page.locator('.chat-msg-user .chat-msg-action[data-action="resend"]').first().click();
+    await expect(page.locator('.chat-msg-assistant').last()).toContainText('回复5');
+
+    expect(requests[4].message).toBe('第一条修改');
+    expect(JSON.stringify(requests[4].history || [])).not.toContain('第三条');
+    expect(JSON.stringify(requests[4].history || [])).not.toContain('回复4');
 });
 
 test('编辑器格式与导出按钮会作用于当前章节 @regression', async ({ page }) => {

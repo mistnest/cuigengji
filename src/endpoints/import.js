@@ -91,6 +91,20 @@ function normalizeWorldBookEntry(entry = {}, index = 0) {
     };
 }
 
+function applyWorldBookFolder(worldBook = {}, folder = '') {
+    const targetFolder = String(folder || '').trim();
+    for (const entry of Object.values(worldBook.entries || {})) {
+        if (entry.group && !entry.sourceGroup) entry.sourceGroup = entry.group;
+        entry.folder = entry.folder || entry._folder || targetFolder;
+        entry._folder = entry.folder;
+    }
+    if (targetFolder) {
+        const folders = Array.isArray(worldBook.folders) ? worldBook.folders : [];
+        worldBook.folders = [...new Set([...folders, targetFolder].filter(Boolean))];
+    }
+    return worldBook;
+}
+
 function normalizeCharacterData(character = {}) {
     const normalized = normalizeEnabledDisabled(character || {});
     const data = normalizeEnabledDisabled(normalized.data || normalized);
@@ -119,11 +133,13 @@ router.post('/worldbook', async (req, res) => {
             return res.status(400).json({ error: 'Invalid world book format: missing "entries"' });
         }
 
-        const filename = sanitize(name || 'imported_world') + '.json';
+        const sourceName = sanitize(name || 'imported_world') || 'imported_world';
+        const filename = sourceName + '.json';
         const filePath = projectFile(novelId, 'assets', 'worldbooks', filename);
 
         // Ensure the data has proper structure
         const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
+        applyWorldBookFolder(worldBook, sourceName);
 
         await writeJson(filePath, worldBook);
 
@@ -279,6 +295,21 @@ router.post('/document', upload.single('file'), async (req, res) => {
         const chaptersDir = projectFile(novelId, 'chapters');
 
         if (autoSplit === 'true') {
+            for (const part of splitTextIntoChapters(text)) {
+                if (!part.content.trim()) continue;
+                const title = part.title || `第 ${chapters.length + 1} 章`;
+                const content = part.content.trim();
+                let chapter = {
+                    id: uuidv4(), novelId, title, content, status: 'draft', wordCount: countWords(content),
+                    created: Date.now(), updated: Date.now(), order: chapters.length,
+                };
+                chapter = ensureChapterSummary(chapter).chapter;
+                chapters.push(chapter);
+                const filename = sanitize(`${String(chapters.length).padStart(3, '0')}-${title}`) + '.json';
+                const targetDir = importedChapterDir(chaptersDir, volumeId);
+                await writeJson(resolveInside(targetDir, filename), chapter);
+            }
+        } else if (false) {
             // Split by chapter markers: "第X章", "Chapter X", "第X卷", etc.
             const parts = text.split(/(?=第[一二三四五六七八九十百千\d]+[章卷节回篇])|(?=Chapter\s+\d+)|(?=CHAPTER\s+\d+)/i);
             for (let i = 0; i < parts.length; i++) {
@@ -384,6 +415,65 @@ function importedChapterDir(chaptersDir, volumeId) {
     return safe ? resolveInside(chaptersDir, safe) : chaptersDir;
 }
 
+export function splitTextIntoChapters(text = '') {
+    const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    const headings = [];
+    let offset = 0;
+    for (const line of lines) {
+        const raw = line;
+        const trimmed = raw.trim();
+        if (isChapterHeading(trimmed)) {
+            headings.push({ title: normalizeChapterTitle(trimmed), start: offset, lineLength: raw.length });
+        }
+        offset += raw.length + 1;
+    }
+
+    if (!headings.length) {
+        return [{ title: '', content: normalized.trim() }];
+    }
+
+    const parts = [];
+    const firstHeading = headings[0];
+    const preface = normalized.slice(0, firstHeading.start).trim();
+    if (preface) parts.push({ title: '导入前言', content: preface });
+
+    for (let index = 0; index < headings.length; index += 1) {
+        const current = headings[index];
+        const next = headings[index + 1];
+        const titleLineEnd = current.start + current.lineLength;
+        const contentStart = normalized[titleLineEnd] === '\n' ? titleLineEnd + 1 : titleLineEnd;
+        const contentEnd = next ? next.start : normalized.length;
+        parts.push({
+            title: current.title,
+            content: normalized.slice(contentStart, contentEnd).trim(),
+        });
+    }
+
+    return parts;
+}
+
+function isChapterHeading(line = '') {
+    const title = normalizeChapterTitle(line);
+    if (!title || title.length > 48) return false;
+    if (/[。！？；?!;]/.test(title)) return false;
+    const marker = '(?:第?[0-9一二三四五六七八九十百千万零〇两]+[章节回卷篇]|Chapter\\s+\\d+|CHAPTER\\s+\\d+)';
+    if (!new RegExp(`^${marker}`, 'i').test(title)) return false;
+    const match = title.match(new RegExp(`^(${marker})(.*)$`, 'i'));
+    const suffix = (match?.[2] || '').trim();
+    if (!suffix) return true;
+    if (/^[的了着过]/.test(suffix) && title.length > 18) return false;
+    if (/^[：:、.．\-—\s　]/.test(match?.[2] || '')) return true;
+    return title.length <= 18;
+}
+
+function normalizeChapterTitle(line = '') {
+    return String(line || '')
+        .replace(/^[\s　#*【《<]+/, '')
+        .replace(/[\s　】》>]*$/, '')
+        .trim();
+}
+
 // Auto-detect encoding and read file as UTF-8 text
 function readTextFile(filePath) {
     const buffer = fs.readFileSync(filePath);
@@ -451,7 +541,10 @@ router.post('/batch', upload.array('files', 50), async (req, res) => {
                     if (data.entries) {
                         const worldsDir = projectFile(novelId, 'assets', 'worldbooks');
                         const filename = sanitize(file.originalname);
-                        await writeJson(resolveInside(worldsDir, filename), ensureWorldBookSummaries(normalizeWorldBookData(data)).data);
+                        const folder = filename.replace(/\.json$/i, '') || 'imported_world';
+                        const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
+                        applyWorldBookFolder(worldBook, folder);
+                        await writeJson(resolveInside(worldsDir, filename), worldBook);
                         results.worldBooks++;
                         continue;
                     }

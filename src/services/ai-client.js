@@ -99,45 +99,39 @@ function supportsNativeToolMessages(provider) {
 async function fetchLoggedChat(url, options = {}, meta = {}, timeoutMs) {
     const id = createApiCallId();
     const startedAt = Date.now();
+    const baseLog = {
+        id,
+        timestamp: new Date(startedAt).toISOString(),
+        provider: meta.provider,
+        model: meta.model,
+        mode: meta.mode,
+        stream: meta.stream,
+        toolChoice: meta.toolChoice,
+        url,
+        method: options.method || 'POST',
+        request: {
+            headers: options.headers || {},
+            body: options.body,
+        },
+    };
     try {
         const response = await fetchWithTimeout(url, options, timeoutMs);
-        await logApiCall({
-            id,
-            timestamp: new Date(startedAt).toISOString(),
-            provider: meta.provider,
-            model: meta.model,
-            mode: meta.mode,
-            stream: meta.stream,
-            toolChoice: meta.toolChoice,
-            url,
-            method: options.method || 'POST',
-            request: {
-                headers: options.headers || {},
-                body: options.body,
-            },
+        attachApiLog(response, {
+            ...baseLog,
+            startedAt,
             response: {
                 ok: response.ok,
                 status: response.status,
                 statusText: response.statusText,
                 durationMs: Date.now() - startedAt,
+                headers: response.headers,
             },
         });
+        await logApiCall(response.__apiLog);
         return response;
     } catch (err) {
         await logApiCall({
-            id,
-            timestamp: new Date(startedAt).toISOString(),
-            provider: meta.provider,
-            model: meta.model,
-            mode: meta.mode,
-            stream: meta.stream,
-            toolChoice: meta.toolChoice,
-            url,
-            method: options.method || 'POST',
-            request: {
-                headers: options.headers || {},
-                body: options.body,
-            },
+            ...baseLog,
             response: {
                 ok: false,
                 status: null,
@@ -147,6 +141,59 @@ async function fetchLoggedChat(url, options = {}, meta = {}, timeoutMs) {
             },
         });
         throw err;
+    }
+}
+
+function attachApiLog(response, entry) {
+    Object.defineProperty(response, '__apiLog', {
+        value: entry,
+        enumerable: false,
+        configurable: true,
+    });
+}
+
+async function finalizeLoggedResponse(response, patch = {}) {
+    if (!response?.__apiLog) return;
+    const entry = {
+        ...response.__apiLog,
+        response: {
+            ...(response.__apiLog.response || {}),
+            ...(patch.response || {}),
+            durationMs: Date.now() - response.__apiLog.startedAt,
+        },
+    };
+    delete entry.startedAt;
+    await logApiCall(entry);
+}
+
+async function readLoggedJsonResponse(response) {
+    const text = await response.text();
+    const parsed = parseJsonText(text);
+    await finalizeLoggedResponse(response, {
+        response: {
+            body: text,
+        },
+    });
+    return parsed;
+}
+
+async function readLoggedError(response) {
+    const text = await response.text().catch(() => '');
+    const parsed = parseJsonText(text) || {};
+    await finalizeLoggedResponse(response, {
+        response: {
+            error: parsed.error?.message || parsed.error || text || response.statusText,
+            body: text,
+        },
+    });
+    return parsed;
+}
+
+function parseJsonText(text = '') {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
     }
 }
 
@@ -194,7 +241,7 @@ export async function callAIChatRaw(config = {}, systemPrompt, messages, options
 
     switch (provider) {
         case 'anthropic':
-            return textResult(await callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal }));
+            return callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         case 'google':
             return textResult(await callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal }));
         case 'openrouter':
@@ -229,7 +276,7 @@ export async function streamAIChat(config = {}, systemPrompt, messages, options 
 
     switch (provider) {
         case 'anthropic':
-            return callAnthropicStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal, onEvent });
+            return callAnthropicStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
         case 'openrouter':
             return callOpenRouterStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
         case 'openai':
@@ -286,57 +333,200 @@ async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, 
         body: JSON.stringify(body),
         signal,
     }, { provider: 'google', model: requestModel, mode: 'chat', stream: false });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Gemini ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Gemini ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     return d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
-async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal }) {
+async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal }) {
     const requestModel = model || DEFAULT_MODELS.anthropic;
     const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages };
     if (topK) body.top_k = topK;
+    const anthropicTools = convertToolsToAnthropic(tools);
+    if (anthropicTools.length) {
+        body.tools = anthropicTools;
+        if (toolChoice) body.tool_choice = convertToolChoiceToAnthropic(toolChoice);
+    }
     const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2024-02-15' },
         body: JSON.stringify(body),
         signal,
     }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: false });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
-    const d = await r.json();
-    return d.content?.map(c => c.text || '').join('') || '';
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
+    return convertAnthropicResponse(d);
 }
 
-async function callAnthropicStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, signal, onEvent }) {
+async function callAnthropicStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal, onEvent }) {
     const requestModel = model || DEFAULT_MODELS.anthropic;
     const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages, stream: true };
     if (topK) body.top_k = topK;
+    const anthropicTools = convertToolsToAnthropic(tools);
+    if (anthropicTools.length) {
+        body.tools = anthropicTools;
+        if (toolChoice) body.tool_choice = convertToolChoiceToAnthropic(toolChoice);
+    }
     const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2024-02-15' },
         body: JSON.stringify(body),
         signal,
     }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: true });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
 
     let content = '';
     let reasoning = '';
-    await parseSseResponse(r, raw => {
+    // Track tool_use blocks by content block index
+    const toolUseBlocks = new Map();
+    const streamEvents = await parseSseResponse(r, raw => {
         const event = parseJsonEvent(raw);
         if (!event) return;
+
+        // --- content_block_start: detect tool_use blocks ---
+        if (event.type === 'content_block_start') {
+            const block = event.content_block || {};
+            if (block.type === 'tool_use') {
+                toolUseBlocks.set(event.index, {
+                    id: block.id || '',
+                    name: block.name || '',
+                    inputJson: '',
+                });
+            }
+            return;
+        }
+
+        // --- content_block_delta ---
         if (event.type === 'content_block_delta') {
-            const text = event.delta?.text || '';
+            const deltaType = event.delta?.type || '';
+
+            // Anthropic thinking delta
             const thinking = event.delta?.thinking || '';
             if (thinking) {
                 reasoning += thinking;
                 onEvent({ type: 'reasoning', content: thinking });
+                return;
             }
+
+            // Tool input JSON delta
+            if (deltaType === 'input_json_delta') {
+                const partialJson = event.delta?.partial_json || '';
+                const block = toolUseBlocks.get(event.index);
+                if (block) {
+                    block.inputJson += partialJson;
+                }
+                return;
+            }
+
+            // Regular text delta
+            const text = event.delta?.text || '';
             if (text) {
                 content += text;
                 onEvent({ type: 'chunk', content: text });
             }
         }
     });
-    return { message: { role: 'assistant', content, reasoning_content: reasoning }, raw: null };
+
+    // Convert Anthropic tool_use blocks → OpenAI-format tool_calls
+    const toolCalls = [...toolUseBlocks.values()]
+        .filter(block => block.id && block.name)
+        .map(block => ({
+            id: block.id,
+            type: 'function',
+            function: {
+                name: block.name,
+                arguments: block.inputJson || '{}',
+            },
+        }));
+
+    const message = {
+        role: 'assistant',
+        content,
+        reasoning_content: reasoning,
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+    };
+    await finalizeLoggedResponse(r, {
+        response: {
+            streamEvents,
+            finalMessage: message,
+        },
+    });
+    return { message, raw: streamEvents };
+}
+
+// ── Anthropic ↔ OpenAI format converters ──────────────────────
+
+/**
+ * Convert OpenAI-format tools to Anthropic native format.
+ * OpenAI:  { type: "function", function: { name, description, parameters } }
+ * Anthropic: { name, description, input_schema: parameters }
+ */
+function convertToolsToAnthropic(tools = []) {
+    if (!Array.isArray(tools) || !tools.length) return [];
+    return tools.map(tool => {
+        const fn = tool.function || tool;
+        const name = fn.name || tool.name || '';
+        if (!name) return null;
+        return {
+            name,
+            description: fn.description || tool.description || '',
+            input_schema: fn.parameters || tool.parameters || tool.input_schema || { type: 'object', properties: {} },
+        };
+    }).filter(Boolean);
+}
+
+/**
+ * Convert OpenAI-format tool_choice to Anthropic format.
+ * "auto" / "any" / "none" / { type: "function", function: { name } }
+ * → { type: "auto" } / { type: "any" } / undefined / { type: "tool", name }
+ */
+function convertToolChoiceToAnthropic(choice) {
+    if (!choice || choice === 'auto') return { type: 'auto' };
+    if (choice === 'any' || choice === 'required') return { type: 'any' };
+    if (choice === 'none') return undefined;
+    if (typeof choice === 'object') {
+        const name = choice.function?.name || choice.name || '';
+        if (name) return { type: 'tool', name };
+    }
+    return { type: 'auto' };
+}
+
+/**
+ * Convert Anthropic response → OpenAI-compatible { message, raw }.
+ * Anthropic content blocks: text → content string, tool_use → tool_calls[]
+ */
+function convertAnthropicResponse(apiData = {}) {
+    const contentBlocks = Array.isArray(apiData.content) ? apiData.content : [];
+    let content = '';
+    const toolCalls = [];
+    for (const block of contentBlocks) {
+        if (block.type === 'text') {
+            content += (block.text || '');
+        } else if (block.type === 'tool_use') {
+            toolCalls.push({
+                id: block.id || '',
+                type: 'function',
+                function: {
+                    name: block.name || '',
+                    arguments: JSON.stringify(block.input || {}),
+                },
+            });
+        } else if (block.type === 'thinking') {
+            // Anthropic extended thinking — surface as reasoning_content
+            const thinkingText = block.thinking || '';
+            if (thinkingText) {
+                // We append to a synthetic field; callAIChatRaw returns
+                // this via .message so extractAssistantText can surface it.
+                content += `[THINKING]\n${thinkingText}\n[/THINKING]\n\n`;
+            }
+        }
+    }
+    const message = {
+        role: 'assistant',
+        content,
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+    };
+    return { message, raw: apiData };
 }
 
 async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
@@ -354,8 +544,8 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
         }),
         signal,
     }, { provider, model: requestModel, mode: 'chat', stream: false });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `${provider} ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     const message = d.choices?.[0]?.message;
     const content = message?.content || '';
     const reasoning = message?.reasoning_content || '';
@@ -388,8 +578,8 @@ async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperatu
         }),
         signal,
     }, { provider: 'openrouter', model: requestModel, mode: 'chat', stream: false });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     return d.choices?.[0]?.message?.content || '';
 }
 
@@ -414,8 +604,8 @@ async function callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, syst
         body: JSON.stringify(body),
         signal,
     }, { provider, model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `${provider} ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     const message = d.choices?.[0]?.message;
     if (!message) throw new Error(`Empty response from ${provider}`);
     return { message, raw: d };
@@ -443,7 +633,7 @@ async function callOpenAICompatibleStream({ provider, apiKey, endpoint, model, s
         body: JSON.stringify(body),
         signal,
     }, { provider, model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `${provider} ${r.status}`); }
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `${provider} ${r.status}`); }
     return readOpenAICompatibleStream(r, onEvent);
 }
 
@@ -467,8 +657,8 @@ async function callOpenRouterRaw({ apiKey, model, systemPrompt, messages, temper
         body: JSON.stringify(body),
         signal,
     }, { provider: 'openrouter', model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     const message = d.choices?.[0]?.message;
     if (!message) throw new Error('Empty response from OpenRouter');
     return { message, raw: d };
@@ -495,19 +685,23 @@ async function callOpenRouterStream({ apiKey, model, systemPrompt, messages, tem
         body: JSON.stringify(body),
         signal,
     }, { provider: 'openrouter', model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
     return readOpenAICompatibleStream(r, onEvent);
 }
 
 async function readOpenAICompatibleStream(response, onEvent) {
     let content = '';
     let reasoning = '';
-    await parseSseResponse(response, raw => {
+    const toolCallsByIndex = new Map();
+    const streamEvents = await parseSseResponse(response, raw => {
         if (raw === '[DONE]') return;
         const event = parseJsonEvent(raw);
         const delta = event?.choices?.[0]?.delta || {};
         const thinking = delta.reasoning_content || delta.reasoning || '';
         const text = delta.content || '';
+        if (Array.isArray(delta.tool_calls)) {
+            mergeToolCallDeltas(toolCallsByIndex, delta.tool_calls);
+        }
         if (thinking) {
             reasoning += thinking;
             onEvent({ type: 'reasoning', content: thinking });
@@ -517,7 +711,39 @@ async function readOpenAICompatibleStream(response, onEvent) {
             onEvent({ type: 'chunk', content: text });
         }
     });
-    return { message: { role: 'assistant', content, reasoning_content: reasoning }, raw: null };
+    const toolCalls = [...toolCallsByIndex.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, call]) => call)
+        .filter(call => call.id || call.function?.name);
+    const message = {
+        role: 'assistant',
+        content,
+        reasoning_content: reasoning,
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+    };
+    await finalizeLoggedResponse(response, {
+        response: {
+            streamEvents,
+            finalMessage: message,
+        },
+    });
+    return { message, raw: streamEvents };
+}
+
+function mergeToolCallDeltas(target, deltas = []) {
+    for (const delta of deltas) {
+        const index = Number(delta.index || 0);
+        const current = target.get(index) || {
+            id: '',
+            type: 'function',
+            function: { name: '', arguments: '' },
+        };
+        if (delta.id) current.id += delta.id;
+        if (delta.type) current.type = delta.type;
+        if (delta.function?.name) current.function.name += delta.function.name;
+        if (delta.function?.arguments) current.function.arguments += delta.function.arguments;
+        target.set(index, current);
+    }
 }
 
 async function streamFallback(config, systemPrompt, messages, options, onEvent) {
@@ -531,16 +757,26 @@ async function streamFallback(config, systemPrompt, messages, options, onEvent) 
 
 async function parseSseResponse(response, onData) {
     let buffer = '';
+    const events = [];
     await readResponseBody(response, text => {
         buffer += text;
         let index;
         while ((index = buffer.indexOf('\n\n')) >= 0) {
             const block = buffer.slice(0, index);
             buffer = buffer.slice(index + 2);
-            processSseBlock(block, onData);
+            processSseBlock(block, raw => {
+                events.push({ raw, parsed: parseJsonEvent(raw) });
+                onData(raw);
+            });
         }
     });
-    if (buffer.trim()) processSseBlock(buffer, onData);
+    if (buffer.trim()) {
+        processSseBlock(buffer, raw => {
+            events.push({ raw, parsed: parseJsonEvent(raw) });
+            onData(raw);
+        });
+    }
+    return events;
 }
 
 async function readResponseBody(response, onText) {
@@ -586,8 +822,8 @@ async function callOllama({ endpoint, model, systemPrompt, messages, temperature
         body: JSON.stringify({ model: requestModel, prompt, stream: false, options: { temperature, num_predict: maxTokens, top_p: topP, top_k: topK } }),
         signal,
     }, { provider: 'ollama', model: requestModel, mode: 'generate', stream: false });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Ollama ${r.status}`); }
-    const d = await r.json();
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error || `Ollama ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
     return d.response || '';
 }
 

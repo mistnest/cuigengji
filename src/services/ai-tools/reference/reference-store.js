@@ -11,11 +11,12 @@ export async function buildReferenceStore(runtime = {}) {
     const context = runtime.context || {};
     const novelId = context.novelId || runtime.novelId || 'default';
     const project = await loadProjectContext(novelId, context);
+    const chapterLimit = resolveChapterLimit(project, context);
     const records = [
         ...worldBookRecords(project),
         ...characterRecords(project),
-        ...chapterRecords(project),
-        ...memoryRecords(project),
+        ...chapterRecords(project, chapterLimit),
+        ...memoryRecords(project, chapterLimit),
         sceneRecord(project, runtime),
     ].filter(Boolean);
 
@@ -23,6 +24,7 @@ export async function buildReferenceStore(runtime = {}) {
         novelId,
         project,
         runtime,
+        chapterLimit,
         records,
         byId: new Map(records.map(record => [record.id, record])),
     };
@@ -77,11 +79,11 @@ export function getStoreSceneContext(store, args = {}) {
     const context = runtime.context || {};
     const beforeChars = Math.max(200, Math.min(Number(args.beforeChars) || 3000, 12000));
     const scope = args.scope || 'current_tail';
-    const currentText = String(context.currentText || '');
+    const currentText = cleanReferenceText(context.currentText || '');
     const beforeText = currentText.slice(-beforeChars);
     const summaries = args.includeRecentSummary === false
         ? []
-        : store.project.plotMemory.chapterSummaries.slice(-5);
+        : filterSummariesByLimit(store.project.plotMemory.chapterSummaries, store.chapterLimit).slice(-5);
     const outline = args.includeOutline === false
         ? []
         : store.project.plotMemory.openOutline.slice(0, 8);
@@ -117,9 +119,13 @@ function worldBookRecords(project) {
                 summary: summary || summarize(content, title),
                 content,
                 keywords: [...(entry.key || []), ...(entry.keysecondary || []), title],
-                source: { kind: 'worldbook', uid: entry.uid ?? key, group: entry.group || '', position: entry.position ?? 0 },
+                source: { kind: 'worldbook', uid: entry.uid ?? key, folder: getWorldBookFolder(entry), group: entry.group || '', position: entry.position ?? 0 },
             };
         });
+}
+
+function getWorldBookFolder(entry = {}) {
+    return String(entry.folder || entry._folder || entry._source || entry.group || '').trim();
 }
 
 function isWorldBookEntryDisabled(entry = {}) {
@@ -164,11 +170,14 @@ function isCharacterDisabled(character = {}) {
         || data.disable === true
         || data.disabled === true
         || data.enabled === false
+        || data.extensions?.cuigengji?.disabled === true
         || data.extensions?.novel_ai_editor?.disabled === true;
 }
 
-function chapterRecords(project) {
-    return (project.chapters || []).map((chapter, index) => {
+function chapterRecords(project, chapterLimit = null) {
+    return (project.chapters || [])
+        .filter(chapter => isChapterVisible(chapter, chapterLimit))
+        .map((chapter, index) => {
         const id = `chapter:${chapter.id || index}`;
         const title = chapter.title || `Chapter ${index + 1}`;
         const content = [
@@ -177,7 +186,7 @@ function chapterRecords(project) {
             chapter.plotPoints?.length ? `Plot points: ${chapter.plotPoints.map(point =>
                 typeof point === 'string' ? point : (point.title || point.description || JSON.stringify(point)),
             ).join(' / ')}` : '',
-            chapter.content || '',
+            cleanReferenceText(chapter.content || ''),
         ].filter(Boolean).join('\n\n');
         const summary = getChapterSummary(chapter);
         return {
@@ -187,13 +196,13 @@ function chapterRecords(project) {
             summary: summary || summarize(content, title),
             content,
             keywords: [title, chapter.volumeTitle || ''],
-            source: { kind: 'chapter', id: chapter.id || '', volumeTitle: chapter.volumeTitle || '' },
+            source: { kind: 'chapter', id: chapter.id || '', volumeTitle: chapter.volumeTitle || '', order: Number(chapter.order || 0) },
         };
     });
 }
 
-function memoryRecords(project) {
-    const summaries = project.plotMemory?.chapterSummaries || [];
+function memoryRecords(project, chapterLimit = null) {
+    const summaries = filterSummariesByLimit(project.plotMemory?.chapterSummaries || [], chapterLimit);
     const events = project.plotMemory?.keyEvents || [];
     return [
         ...summaries.map((item, index) => ({
@@ -203,7 +212,7 @@ function memoryRecords(project) {
             summary: summarize(item.summary || '', item.title),
             content: item.summary || '',
             keywords: [item.title || ''],
-            source: { kind: 'chapter-summary', updated: item.updated || 0 },
+            source: { kind: 'chapter-summary', updated: item.updated || 0, order: Number(item.order || 0) },
         })),
         ...events.map((item, index) => ({
             id: `memory:key-event:${index}`,
@@ -217,9 +226,33 @@ function memoryRecords(project) {
     ];
 }
 
+function resolveChapterLimit(project, context = {}) {
+    if (context.includeFutureChapters === true) return null;
+    if (Number.isFinite(Number(context.currentChapterOrder))) return Number(context.currentChapterOrder);
+    const currentTitle = normalizeTitle(context.chapterTitle || '');
+    if (!currentTitle) return null;
+    const chapter = (project.chapters || []).find(item => normalizeTitle(item.title || '') === currentTitle);
+    if (!chapter) return null;
+    return Number(chapter.order || 0);
+}
+
+function isChapterVisible(chapter = {}, chapterLimit = null) {
+    if (chapterLimit === null || chapterLimit === undefined) return true;
+    return Number(chapter.order || 0) <= Number(chapterLimit);
+}
+
+function filterSummariesByLimit(summaries = [], chapterLimit = null) {
+    if (chapterLimit === null || chapterLimit === undefined) return summaries || [];
+    return (summaries || []).filter(summary => Number(summary.order || 0) <= Number(chapterLimit));
+}
+
+function normalizeTitle(value = '') {
+    return String(value || '').replace(/\s+/g, '').trim();
+}
+
 function sceneRecord(project, runtime) {
     const context = runtime.context || {};
-    const currentText = String(context.currentText || '');
+    const currentText = cleanReferenceText(context.currentText || '');
     if (!currentText && !context.chapterTitle) return null;
     return {
         id: 'scene:current',
@@ -237,9 +270,25 @@ function field(label, value) {
 }
 
 function summarize(content = '', fallback = '') {
-    const clean = String(content || '').replace(/\s+/g, ' ').trim();
+    const clean = cleanReferenceText(content).replace(/\s+/g, ' ').trim();
     if (!clean) return fallback || '';
     return clean.length > 260 ? `${clean.slice(0, 260)}...` : clean;
+}
+
+function cleanReferenceText(text = '') {
+    return String(text || '')
+        .split(/\r?\n/)
+        .filter(line => !isImportedNoiseLine(line))
+        .join('\n')
+        .replace(/\n{4,}/g, '\n\n\n')
+        .trim();
+}
+
+function isImportedNoiseLine(line = '') {
+    const text = String(line || '').trim();
+    if (!text) return false;
+    if (/^={6,}$/.test(text) || /^-{6,}$/.test(text)) return true;
+    return /知轩藏书|更多精校小说|zxcs8\.com|www\.zxcs8\.com|下载[:：]?http|精校小说尽在/i.test(text);
 }
 
 function tokenize(query = '') {

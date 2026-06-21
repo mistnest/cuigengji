@@ -2,8 +2,11 @@
  * Chat Tool — Shared tool definitions for Plan & Assist modes
  */
 import path from 'node:path';
-import fs from 'node:fs';
-import { getDataRoot } from '../config.js';
+import sanitize from 'sanitize-filename';
+import { ApiError } from '../lib/http.js';
+import { projectFile } from '../lib/project-paths.js';
+import { updateJson, writeJson } from '../lib/json-store.js';
+import { ensureCharacterSummaries, ensureWorldBookSummaries } from './reference-summaries.js';
 
 // ==================== Tool Definitions ====================
 
@@ -22,8 +25,11 @@ export const ASSIST_TOOLS = [
                         description: '导入目标类型',
                     },
                     data: {
-                        type: 'object',
-                        description: '要导入的JSON数据。character需含name/description/personality; worldbook需含entries数组(每项含comment/key/content); preset需含provider/model等信息',
+                        anyOf: [
+                            { type: 'object' },
+                            { type: 'array' },
+                        ],
+                        description: '要导入的JSON数据。character需含name/description/personality; worldbook可为单条{comment,key,content}、数组或{entries}; preset需含name/provider/model等信息',
                     },
                 },
                 required: ['target', 'data'],
@@ -32,142 +38,201 @@ export const ASSIST_TOOLS = [
     },
 ];
 
-export const PLAN_TOOLS = [
-    {
-        type: 'function',
-        function: {
-            name: 'update_outline',
-            description: '更新或创建大纲节点，将情节讨论结果写入大纲',
-            parameters: {
-                type: 'object',
-                properties: {
-                    nodes: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                id: { type: 'string', description: '节点ID，留空则创建新节点' },
-                                title: { type: 'string', description: '节点标题' },
-                                description: { type: 'string', description: '节点描述/情节概述' },
-                                completed: { type: 'boolean', description: '是否已完成' },
-                                parent_id: { type: 'string', description: '父节点ID' },
-                            },
-                            required: ['title'],
-                        },
-                    },
-                },
-                required: ['nodes'],
-            },
-        },
-    },
-];
-
 // ==================== Tool Executor ====================
 
 export async function executeTool(name, args = {}, novelId = '') {
-    const charsDir = path.join(getDataRoot(), 'characters');
-    const presetsDir = path.join(getDataRoot(), 'presets');
-    const root = path.join(getDataRoot(), 'novels', novelId);
-
     switch (name) {
         case 'import_data': {
             const { target, data } = args;
             if (!target || !data) return { error: '缺少 target 或 data 参数' };
+            if (!novelId) return { error: '缺少 novelId，无法写入项目' };
 
             if (target === 'character') {
-                if (!data.name) return { error: '角色名缺失' };
-                const card = {
-                    spec: 'chara_card_v3', spec_version: '3.0',
-                    data: {
-                        name: data.name,
-                        description: data.description || '',
-                        personality: data.personality || '',
-                        scenario: data.scenario || '',
-                        first_mes: data.first_mes || '',
-                        mes_example: data.mes_example || '',
-                        tags: data.tags || [],
-                        group: data.group || '',
-                        character_book: { entries: {} },
-                    },
-                };
-                fs.mkdirSync(charsDir, { recursive: true });
-                fs.writeFileSync(path.join(charsDir, `${data.name}.json`), JSON.stringify(card, null, 2), 'utf8');
-
-                // Also add to workspace character list
-                if (novelId) {
-                    const wsFile = path.join(root, 'workspace.json');
-                    let ws = {};
-                    if (fs.existsSync(wsFile)) ws = JSON.parse(fs.readFileSync(wsFile, 'utf8'));
-                    ws.characters = ws.characters || [];
-                    ws.characters.push(card);
-                    fs.writeFileSync(wsFile, JSON.stringify(ws, null, 2), 'utf8');
-                }
-                return { success: true, target: 'character', name: data.name };
+                return importCharacter(novelId, data);
             }
 
             if (target === 'worldbook') {
-                const entries = data.entries || (data.key ? [data] : []);
-                if (!entries.length) return { error: '没有提供世界书条目' };
-                const wsFile = path.join(root, 'workspace.json');
-                let ws = { worldBook: { entries: {} } };
-                if (fs.existsSync(wsFile)) ws = JSON.parse(fs.readFileSync(wsFile, 'utf8'));
-                const wb = ws.worldBook?.entries || {};
-                let uid = Math.max(0, ...Object.keys(wb).map(Number)) + 1;
-                let added = 0;
-                for (const e of entries) {
-                    if (!e.content || !e.key?.length) continue;
-                    wb[uid] = {
-                        uid, key: e.key, keysecondary: [],
-                        content: e.content, comment: e.comment || e.key[0],
-                        group: e.group || '', constant: false, selective: true,
-                        order: 100, position: 0, disable: false,
-                        probability: 100, depth: 4,
-                    };
-                    uid++; added++;
-                }
-                ws.worldBook = { entries: wb };
-                fs.writeFileSync(wsFile, JSON.stringify(ws, null, 2), 'utf8');
-                return { success: true, target: 'worldbook', entries_added: added };
+                return importWorldBookEntries(novelId, data);
             }
 
             if (target === 'preset') {
-                if (!data.name) return { error: '预设名称缺失' };
-                fs.mkdirSync(presetsDir, { recursive: true });
-                const preset = { name: data.name, ...data, savedAt: Date.now() };
-                fs.writeFileSync(path.join(presetsDir, `${data.name}.json`), JSON.stringify(preset, null, 2), 'utf8');
-                return { success: true, target: 'preset', name: data.name };
+                return importPreset(novelId, data);
             }
 
             return { error: `未知 target: ${target}` };
         }
 
-        case 'update_outline': {
-            const outlineFile = path.join(root, 'outline.json');
-            let outline = { nodes: [] };
-            if (fs.existsSync(outlineFile)) outline = JSON.parse(fs.readFileSync(outlineFile, 'utf8'));
-            const nodes = args.nodes || [];
-            for (const n of nodes) {
-                const exist = outline.nodes.find(on => on.id === n.id);
-                if (exist) {
-                    if (n.title) exist.title = n.title;
-                    if (n.description) exist.description = n.description;
-                    if (n.completed !== undefined) exist.completed = n.completed;
-                } else {
-                    outline.nodes.push({
-                        id: n.id || `node_${Date.now().toString(36)}`,
-                        title: n.title,
-                        description: n.description || '',
-                        completed: n.completed || false,
-                        parentId: n.parent_id || null,
-                        createdAt: Date.now(),
-                    });
-                }
-            }
-            fs.writeFileSync(outlineFile, JSON.stringify(outline, null, 2), 'utf8');
-            return { success: true, nodes_updated: nodes.length };
-        }
-
         default:
             return { error: `Unknown tool: ${name}` };
     }
+}
+
+async function importCharacter(novelId, data = {}) {
+    const name = String(data.data?.name || data.name || '').trim();
+    if (!name) return { error: '角色名缺失' };
+
+    const card = normalizeCharacterCard(data, name);
+    const character = ensureCharacterSummaries([card]).data[0];
+    const filePath = projectAssetFile(novelId, 'characters', name);
+    await writeJson(filePath, character);
+
+    const workspaceFile = projectFile(novelId, 'workspace.json');
+    await updateJson(workspaceFile, workspace => {
+        workspace = workspace || {};
+        const characters = Array.isArray(workspace.characters) ? workspace.characters : [];
+        const next = characters.filter(item => characterName(item) !== name);
+        next.push(character);
+        return {
+            ...workspace,
+            characters: next,
+            savedAt: Date.now(),
+        };
+    }, { defaultValue: {} });
+
+    return {
+        success: true,
+        target: 'character',
+        name,
+        character,
+        path: filePath,
+    };
+}
+
+async function importWorldBookEntries(novelId, data = {}) {
+    const entries = normalizeWorldBookInput(data);
+    if (!entries.length) return { error: '没有提供世界书条目' };
+
+    const workspaceFile = projectFile(novelId, 'workspace.json');
+    let addedEntries = {};
+    await updateJson(workspaceFile, workspace => {
+        workspace = workspace || {};
+        const currentBook = workspace.worldBook?.entries ? workspace.worldBook : { entries: {} };
+        const bookEntries = { ...(currentBook.entries || {}) };
+        let uid = Math.max(0, ...Object.keys(bookEntries).map(Number).filter(Number.isFinite)) + 1;
+
+        addedEntries = {};
+        for (const entry of entries) {
+            const normalized = normalizeWorldBookEntry(entry, uid);
+            if (!normalized.content || !normalized.key.length) continue;
+            bookEntries[uid] = normalized;
+            addedEntries[uid] = normalized;
+            uid++;
+        }
+
+        return {
+            ...workspace,
+            worldBook: ensureWorldBookSummaries({
+                ...currentBook,
+                entries: bookEntries,
+            }).data,
+            savedAt: Date.now(),
+        };
+    }, { defaultValue: { worldBook: { entries: {} } } });
+
+    if (!Object.keys(addedEntries).length) return { error: '世界书条目缺少 content 或 key' };
+
+    return {
+        success: true,
+        target: 'worldbook',
+        entries_added: Object.keys(addedEntries).length,
+        entries: addedEntries,
+    };
+}
+
+async function importPreset(novelId, data = {}) {
+    const name = String(data.name || '').trim();
+    if (!name) return { error: '预设名称缺失' };
+    const preset = { ...data, name, savedAt: Date.now() };
+    const filePath = projectAssetFile(novelId, 'presets', name);
+    await writeJson(filePath, preset);
+
+    const workspaceFile = projectFile(novelId, 'workspace.json');
+    await updateJson(workspaceFile, workspace => ({
+        ...(workspace || {}),
+        presets: {
+            ...((workspace || {}).presets || {}),
+            [name]: preset,
+        },
+        presetName: (workspace || {}).presetName || name,
+        savedAt: Date.now(),
+    }), { defaultValue: {} });
+
+    return { success: true, target: 'preset', name, preset, path: filePath };
+}
+
+function normalizeCharacterCard(data = {}, name) {
+    const source = data.data || data;
+    return {
+        ...data,
+        spec: data.spec || 'chara_card_v3',
+        spec_version: data.spec_version || '3.0',
+        data: {
+            ...source,
+            name,
+            description: source.description || '',
+            personality: source.personality || '',
+            scenario: source.scenario || '',
+            first_mes: source.first_mes || '',
+            mes_example: source.mes_example || '',
+            tags: Array.isArray(source.tags) ? source.tags : [],
+            group: source.group || '',
+            character_book: source.character_book || { entries: {} },
+        },
+    };
+}
+
+function normalizeWorldBookInput(data = {}) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.entries)) return data.entries;
+    if (data.entries && typeof data.entries === 'object') return Object.values(data.entries);
+    if (data.key || data.keys || data.content) return [data];
+    return [];
+}
+
+function normalizeWorldBookEntry(entry = {}, uid) {
+    const key = Array.isArray(entry.key)
+        ? entry.key
+        : Array.isArray(entry.keys)
+            ? entry.keys
+            : [entry.key].filter(Boolean);
+    const disabled = entry.disable === true || entry.disabled === true || entry.enabled === false;
+    return {
+        ...entry,
+        uid,
+        key,
+        keysecondary: Array.isArray(entry.keysecondary) ? entry.keysecondary : [],
+        content: entry.content || '',
+        comment: entry.comment || entry.name || key[0] || `条目${uid}`,
+        folder: entry.folder || entry._folder || entry._source || 'AI设定工具',
+        _folder: entry.folder || entry._folder || entry._source || 'AI设定工具',
+        sourceGroup: entry.sourceGroup || entry.group || '',
+        group: entry.sourceGroup || entry.group || '',
+        constant: entry.constant === true,
+        selective: entry.selective !== false,
+        order: Number(entry.order || entry.insertion_order || 100),
+        position: normalizePosition(entry.position ?? entry.extensions?.position),
+        disable: disabled,
+        disabled,
+        enabled: !disabled,
+        probability: Number(entry.probability || entry.extensions?.probability || 100),
+        depth: Number(entry.depth || entry.extensions?.depth || 4),
+        _source: entry._source || 'AI设定工具',
+    };
+}
+
+function normalizePosition(value) {
+    if (value === 'after_char') return 1;
+    if (value === 'before_char') return 0;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+}
+
+function characterName(character = {}) {
+    return character.data?.name || character.name || '';
+}
+
+function projectAssetFile(novelId, folder, name) {
+    const safe = sanitize(String(name || '')).substring(0, 100);
+    if (!safe) throw new ApiError(400, 'Invalid file name', 'INVALID_PATH');
+    return projectFile(novelId, 'assets', folder, `${safe}.json`);
 }

@@ -2,12 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ApiError } from '../lib/http.js';
 import { novelDir as resolveNovelDir } from '../lib/project-paths.js';
-import { ensureChapterSummaries, ensureCharacterSummaries, ensureWorldBookSummaries } from './reference-summaries.js';
+import { ensureChapterSummaries, ensureCharacterSummaries, ensureWorldBookSummaries, getChapterSummary } from './reference-summaries.js';
 
 export async function loadProjectContext(novelId, fallback = {}) {
     const workspace = await readWorkspace(novelId);
     const novelConfig = await readJson(path.join(novelDir(novelId), 'novel.json')) || {};
-    const worldBookResult = await loadWorldBook(novelId, workspace, fallback.worldBookEntries);
+    const worldBookResult = await loadWorldBook(novelId, workspace, fallback.worldBook || fallback.worldBookEntries);
     const characterResult = await loadCharacters(novelId, workspace, fallback.characters);
     const chapters = await loadChapters(novelId);
     const plotMemory = buildPlotMemory({ chapters, outline: fallback.outline || [] });
@@ -32,17 +32,37 @@ export async function readWorkspace(novelId) {
 }
 
 async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
-    if (workspace.worldBook?.entries) {
-        return { data: ensureWorldBookSummaries(workspace.worldBook).data, source: 'workspace' };
+    const assetBook = await loadWorldBookAssets(novelId);
+    if (workspace.worldBook?.entries && Object.keys(workspace.worldBook.entries).length) {
+        const merged = {
+            ...assetBook.data,
+            ...workspace.worldBook,
+            entries: {
+                ...(assetBook.data.entries || {}),
+                ...(workspace.worldBook.entries || {}),
+            },
+            folders: [
+                ...new Set([
+                    ...(assetBook.data.folders || []),
+                    ...(workspace.worldBook.folders || []),
+                ].filter(Boolean)),
+            ],
+        };
+        return {
+            data: ensureWorldBookSummaries(normalizeWorldBookFolders(merged)).data,
+            source: assetBook.count ? 'workspace+project_assets' : 'workspace',
+        };
     }
 
-    const assetDir = path.join(novelDir(novelId), 'assets', 'worldbooks');
-    if (await exists(assetDir)) {
-        const files = (await fs.readdir(assetDir)).filter(file => file.endsWith('.json')).sort();
-        for (const file of files) {
-            const book = await readJson(path.join(assetDir, file));
-            if (book?.entries) return { data: ensureWorldBookSummaries(book).data, source: `project_asset:${file}` };
-        }
+    if (assetBook.count) {
+        return { data: ensureWorldBookSummaries(assetBook.data).data, source: 'project_assets' };
+    }
+
+    if (fallbackEntries?.entries) {
+        return {
+            data: ensureWorldBookSummaries(normalizeWorldBookFolders(fallbackEntries)).data,
+            source: 'request_worldbook',
+        };
     }
 
     const fallbackBook = {
@@ -61,6 +81,60 @@ async function loadWorldBook(novelId, workspace, fallbackEntries = []) {
     return {
         data: ensureWorldBookSummaries(fallbackBook).data,
         source: 'request_summary',
+    };
+}
+
+async function loadWorldBookAssets(novelId) {
+    const assetDir = path.join(novelDir(novelId), 'assets', 'worldbooks');
+    const result = { entries: {}, folders: [] };
+    let count = 0;
+    if (await exists(assetDir)) {
+        const files = await listJsonFilesRecursive(assetDir);
+        for (const file of files) {
+            const book = await readJson(file);
+            if (!book?.entries) continue;
+            const rel = path.relative(assetDir, file);
+            const folder = inferWorldBookFolder(rel);
+            if (folder) result.folders.push(folder);
+            for (const [key, entry] of Object.entries(book.entries || {})) {
+                const normalized = {
+                    ...entry,
+                    folder: entry.folder || entry._folder || folder,
+                    _folder: entry.folder || entry._folder || folder,
+                    _source: entry._source || folder,
+                    sourceGroup: entry.sourceGroup || entry.group || '',
+                };
+                const finalKey = result.entries[key] ? `${rel}:${key}` : key;
+                result.entries[finalKey] = normalized;
+                count++;
+            }
+        }
+    }
+    return {
+        data: normalizeWorldBookFolders(result),
+        count,
+    };
+}
+
+function inferWorldBookFolder(relativeFile) {
+    const dir = path.dirname(relativeFile);
+    if (dir && dir !== '.') return dir.split(path.sep).join('/');
+    return path.basename(relativeFile, path.extname(relativeFile));
+}
+
+function normalizeWorldBookFolders(worldBook = {}) {
+    const folders = new Set((worldBook.folders || []).map(item => String(item || '').trim()).filter(Boolean));
+    for (const entry of Object.values(worldBook.entries || {})) {
+        if (entry.group && !entry.sourceGroup) entry.sourceGroup = entry.group;
+        const folder = String(entry.folder || entry._folder || entry._source || entry.group || '').trim();
+        if (!folder) continue;
+        entry.folder = folder;
+        entry._folder = folder;
+        folders.add(folder);
+    }
+    return {
+        ...worldBook,
+        folders: [...folders].sort((a, b) => a.localeCompare(b, 'zh-CN')),
     };
 }
 
@@ -132,16 +206,22 @@ async function loadChapters(novelId) {
     return ensureChapterSummaries(sorted).data;
 }
 
+function autoSummary(chapter = {}) {
+    const text = (chapter.content || '').replace(/\s+/g, ' ').trim();
+    return text.slice(0, 200) + (text.length > 200 ? '...' : '');
+}
+
 function buildPlotMemory({ chapters = [], outline = [] }) {
     const chapterSummaries = chapters
         .filter(chapter => chapter.content || chapter.notes || chapter.plotPoints?.length)
         .map(chapter => ({
             title: chapter.title || 'Untitled chapter',
-            summary: chapter.summary || buildChapterDigest(chapter),
+            summary: getChapterSummary(chapter) || autoSummary(chapter),
+            order: Number(chapter.order || 0),
             updated: chapter.updated || chapter.created || 0,
             wordCount: chapter.wordCount || (chapter.content || '').length,
-        }))
-        .filter(item => item.summary);
+        }));
+    // 不再丢弃无摘要的章节——用 autoSummary 兜底，保证章节列表完整
 
     const keyEvents = [];
     for (const chapter of chapters) {
@@ -165,24 +245,6 @@ function buildPlotMemory({ chapters = [], outline = [] }) {
         .filter(node => node.title || node.content);
 
     return { chapterSummaries, keyEvents, openOutline };
-}
-
-function buildChapterDigest(chapter) {
-    const parts = [];
-    if (chapter.notes) parts.push(`Notes: ${chapter.notes}`);
-    if (chapter.plotPoints?.length) {
-        parts.push(`Plot points: ${chapter.plotPoints.map(point =>
-            typeof point === 'string' ? point : (point.title || point.description || JSON.stringify(point)),
-        ).join(' / ')}`);
-    }
-    const text = chapter.content || '';
-    if (text.trim()) {
-        const clean = text.replace(/\s+/g, ' ').trim();
-        const head = clean.slice(0, 220);
-        const tail = clean.length > 520 ? clean.slice(-300) : '';
-        parts.push(tail ? `${head} ... ${tail}` : head);
-    }
-    return parts.join('\n');
 }
 
 function novelDir(novelId) {
@@ -209,4 +271,28 @@ async function exists(filePath) {
         if (err.code === 'ENOENT') return false;
         throw err;
     }
+}
+
+async function listJsonFilesRecursive(root) {
+    const files = [];
+    const visit = async dir => {
+        let entries;
+        try {
+            entries = await fs.readdir(dir, { withFileTypes: true });
+        } catch (err) {
+            if (err.code === 'ENOENT') return;
+            throw err;
+        }
+        entries.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+        for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                await visit(full);
+                continue;
+            }
+            if (entry.isFile() && entry.name.endsWith('.json')) files.push(full);
+        }
+    };
+    await visit(root);
+    return files;
 }

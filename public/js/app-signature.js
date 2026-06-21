@@ -4,7 +4,7 @@
     const signature = Object.freeze({
         name: 'cuigengji',
         displayName: '催更姬',
-        version: '0.1.0',
+        version: '1.0.0',
         owner: 'mistnest',
         repository: 'https://github.com/mistnest/cuigengji',
         appId: 'com.mistnest.cuigengji',

@@ -6,7 +6,8 @@ import {
     parseToolArguments,
     summarizeToolResult,
 } from './ai-tools/reference/index.js';
-import { applyWritingOutputGuard } from './writing-output-guard.js';
+import { executeTool } from './chat-tools.js';
+import { applyWritingOutputGuard, stripPseudoToolCalls } from './writing-output-guard.js';
 
 const MAX_REFERENCE_TOOL_ROUNDS = 4;
 const MAX_REFERENCE_TOOL_CALLS = 8;
@@ -190,9 +191,16 @@ async function callWithReferenceTools({ config, prompt, tools = getReferenceTool
             tools,
             toolChoice: 'auto',
         });
-        const toolCalls = response.message?.tool_calls || [];
+        let toolCalls = response.message?.tool_calls || [];
+        if (!toolCalls.length) toolCalls = parsePseudoReferenceToolCalls(messageContent(response.message));
         if (!toolCalls.length) return { reply: assistantText(config, response.message), toolTrace };
-        await appendReferenceToolResults({ messages, toolCalls, runtime, toolTrace });
+        await appendReferenceToolResults({
+            messages,
+            toolCalls,
+            runtime,
+            toolTrace,
+            assistantContent: stripPseudoToolCalls(messageContent(response.message)),
+        });
         if (toolTrace.length >= MAX_REFERENCE_TOOL_CALLS) break;
     }
 
@@ -220,19 +228,74 @@ async function callWithReferenceToolsStream({ config, prompt, tools = getReferen
     const toolTrace = [];
     const messages = [...prompt.messages];
     const runtime = { message, history, context };
+    let emittedReply = '';
+    const forwardEvent = event => {
+        if (event?.type === 'chunk') emittedReply += event.content || '';
+        onEvent?.(event);
+    };
     for (let round = 0; round < MAX_REFERENCE_TOOL_ROUNDS; round++) {
-        const response = await callAIChatRaw(config, prompt.systemPrompt, messages, {
+        const shouldBufferToolProbe = toolTrace.length === 0;
+        let discoveryContent = '';
+        let probeBuffer = '';
+        let probeSuppressed = false;
+        let probeReleased = false;
+        const flushProbeBuffer = () => {
+            if (!probeBuffer || probeSuppressed) return;
+            emittedReply += probeBuffer;
+            onEvent?.({ type: 'chunk', content: probeBuffer });
+            probeBuffer = '';
+            probeReleased = true;
+        };
+        const response = await streamAIChat(config, prompt.systemPrompt, messages, {
             signal,
             tools,
             toolChoice: 'auto',
+            onEvent: shouldBufferToolProbe
+                ? event => {
+                    if (event?.type === 'chunk') {
+                        const content = event.content || '';
+                        discoveryContent += content;
+                        if (probeSuppressed) return;
+                        probeBuffer += content;
+                        if (looksLikePseudoReferenceToolCall(probeBuffer)) {
+                            probeSuppressed = true;
+                            probeBuffer = '';
+                            return;
+                        }
+                        if (shouldReleaseProbeBuffer(probeBuffer)) flushProbeBuffer();
+                    }
+                    if (event?.type === 'reasoning') {
+                        onEvent?.(event);
+                    }
+                }
+                : forwardEvent,
         });
-        const toolCalls = response.message?.tool_calls || [];
+        let toolCalls = response.message?.tool_calls || [];
+        if (!toolCalls.length) toolCalls = parsePseudoReferenceToolCalls(messageContent(response.message) || discoveryContent);
         if (!toolCalls.length) {
-            if (!toolTrace.length) return { reply: emitAssistantMessage(response.message, onEvent), toolTrace };
-            const final = await streamReferenceFinal({ config, prompt, messages, tools, signal, onEvent });
-            return { reply: messageContent(final.message), toolTrace };
+            if (!shouldBufferToolProbe) {
+                return { reply: emittedReply || messageContent(response.message), toolTrace };
+            }
+            const content = stripPseudoToolCalls(messageContent(response.message) || discoveryContent);
+            if (!probeReleased && !probeSuppressed) flushProbeBuffer();
+            if (content) {
+                const alreadyEmitted = emittedReply === content || content.startsWith(emittedReply);
+                const rest = alreadyEmitted ? content.slice(emittedReply.length) : content;
+                if (rest) {
+                    emittedReply += rest;
+                    onEvent?.({ type: 'chunk', content: rest });
+                }
+            }
+            return { reply: emittedReply || content, toolTrace };
         }
-        await appendReferenceToolResults({ messages, toolCalls, runtime, toolTrace });
+        probeBuffer = '';
+        await appendReferenceToolResults({
+            messages,
+            toolCalls,
+            runtime,
+            toolTrace,
+            assistantContent: stripPseudoToolCalls(messageContent(response.message) || discoveryContent),
+        });
         if (toolTrace.length >= MAX_REFERENCE_TOOL_CALLS) break;
     }
 
@@ -244,9 +307,24 @@ async function callWithReferenceToolsStream({ config, prompt, tools = getReferen
         signal,
         tools,
         toolChoice: 'none',
-        onEvent,
+        onEvent: forwardEvent,
     });
-    return { reply: messageContent(final.message), toolTrace };
+    return { reply: emittedReply || messageContent(final.message), toolTrace };
+}
+
+function shouldReleaseProbeBuffer(text = '') {
+    const trimmed = String(text || '').trimStart();
+    if (!trimmed) return false;
+    if (trimmed.length >= 48 && !/[<>{}]/.test(trimmed.slice(0, 48))) return true;
+    return /[。！？.!?，,、；;：:]\s*$/.test(trimmed)
+        && !/(tool_calls|get_reference_detail|search_reference|get_scene_context|DSML)/i.test(trimmed);
+}
+
+function looksLikePseudoReferenceToolCall(text = '') {
+    const normalized = String(text || '').trimStart();
+    return /^<\s*[|｜]{2}\s*DSML/i.test(normalized)
+        || /^<\s*tool_calls/i.test(normalized)
+        || /get_reference_detail|search_reference|get_scene_context|DSML/i.test(normalized.slice(0, 240));
 }
 
 function streamReferenceFinal({ config, prompt, messages, tools, signal, onEvent }) {
@@ -258,10 +336,10 @@ function streamReferenceFinal({ config, prompt, messages, tools, signal, onEvent
     });
 }
 
-async function appendReferenceToolResults({ messages, toolCalls = [], runtime, toolTrace }) {
+async function appendReferenceToolResults({ messages, toolCalls = [], runtime, toolTrace, assistantContent = '' }) {
     messages.push({
         role: 'assistant',
-        content: '',
+        content: assistantContent,
         tool_calls: toolCalls,
     });
 
@@ -269,7 +347,9 @@ async function appendReferenceToolResults({ messages, toolCalls = [], runtime, t
     for (const call of toolCalls.slice(0, remaining)) {
         const name = call.function?.name || '';
         const args = parseToolArguments(call.function?.arguments);
-        const result = await executeReferenceTool(name, args, runtime);
+        const result = name === 'import_data'
+            ? await executeTool(name, args, runtime.context?.novelId || '')
+            : await executeReferenceTool(name, args, runtime);
         toolTrace.push({
             id: call.id,
             name,
@@ -295,6 +375,67 @@ function emitAssistantMessage(message = {}, onEvent) {
 
 function messageContent(message = {}) {
     return message?.content || '';
+}
+
+function parsePseudoReferenceToolCalls(content = '') {
+    const text = String(content || '');
+    if (!text || !/(tool_calls|get_reference_detail|search_reference|get_scene_context|DSML)/i.test(text)) return [];
+    const calls = [];
+    const blockRe = /<\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\s*\/\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*invoke\s*>/gi;
+    let match;
+    while ((match = blockRe.exec(text))) {
+        const name = match[1];
+        if (!isReferenceToolName(name)) continue;
+        calls.push({
+            id: `pseudo_ref_${calls.length + 1}`,
+            type: 'function',
+            function: {
+                name,
+                arguments: JSON.stringify(parsePseudoToolParameters(match[2] || '')),
+            },
+        });
+    }
+    return calls.slice(0, MAX_REFERENCE_TOOL_CALLS);
+}
+
+function parsePseudoToolParameters(body = '') {
+    const args = {};
+    const paramRe = /<\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\s*\/\s*[|｜]{2}\s*DSML\s*[|｜]{2}\s*parameter\s*>/gi;
+    let match;
+    while ((match = paramRe.exec(body))) {
+        const key = match[1];
+        const raw = decodePseudoToolValue(match[2] || '');
+        args[key] = coercePseudoToolValue(raw);
+    }
+    return args;
+}
+
+function decodePseudoToolValue(value = '') {
+    return String(value || '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+}
+
+function coercePseudoToolValue(value = '') {
+    const text = String(value || '').trim();
+    if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+    if (text === 'true') return true;
+    if (text === 'false') return false;
+    try {
+        if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+            return JSON.parse(text);
+        }
+    } catch {}
+    return text;
+}
+
+function isReferenceToolName(name = '') {
+    return ['search_reference', 'get_reference_detail', 'get_scene_context'].includes(String(name || ''));
 }
 
 function assistantText(config = {}, message = {}) {

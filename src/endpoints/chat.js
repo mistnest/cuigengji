@@ -6,7 +6,7 @@
  */
 import express from 'express';
 import { applyAiSecret } from '../services/ai-secrets.js';
-import { streamAIChat, callAIChatRaw } from '../services/ai-client.js';
+import { streamAIChat } from '../services/ai-client.js';
 import { capturePrompt } from './debug.js';
 import { ASSIST_TOOLS, executeTool } from '../services/chat-tools.js';
 import { generateWriting, generateWritingStream } from '../services/writing-service.js';
@@ -52,13 +52,22 @@ router.post('/', async (req, res) => {
 
         capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(messages) });
 
-        // Tool-calling loop: up to 4 rounds
+        setupSse(res);
+
+        // Tool-calling loop: up to 4 rounds. Each model round streams visible text
+        // immediately, while tool_call deltas are aggregated by ai-client.
         let reply = '';
+        let visibleReply = '';
+        const forwardModelEvent = event => {
+            if (event?.type === 'chunk') visibleReply += event.content || '';
+            sendSse(res, event);
+        };
         for (let round = 0; round < 4; round++) {
-            const resp = await callAIChatRaw(aiConfig, sysPrompt, messages, {
+            const resp = await streamAIChat(aiConfig, sysPrompt, messages, {
                 signal: requestController.signal,
                 tools: ASSIST_TOOLS,
                 toolChoice: 'auto',
+                onEvent: forwardModelEvent,
             });
 
             const toolCalls = resp.message?.tool_calls || [];
@@ -67,23 +76,35 @@ router.post('/', async (req, res) => {
                 break;
             }
 
+            // Stream tool call events to frontend
+            sendSse(res, { type: 'tool_start', count: toolCalls.length, round: round + 1 });
+
             // Execute tools and feed results back
-            messages.push({ role: 'assistant', content: '', tool_calls: toolCalls });
+            messages.push({
+                role: 'assistant',
+                content: resp.message?.content || '',
+                tool_calls: toolCalls,
+            });
             for (const call of toolCalls) {
-                const args = JSON.parse(call.function?.arguments || '{}');
-                const result = await executeTool(call.function?.name, args, novelId);
-                messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
+                const toolName = call.function?.name;
+                const args = parseToolArguments(call.function?.arguments);
+                sendSse(res, { type: 'tool_call', name: toolName, target: args.target, data: args.data });
+                const result = await executeTool(toolName, args, novelId);
+                sendSse(res, { type: 'tool_result', name: toolName, result });
+                messages.push({ role: 'tool', tool_call_id: call.id, name: toolName, content: JSON.stringify(result) });
             }
+
+            sendSse(res, { type: 'tool_end', round: round + 1 });
         }
 
-        setupSse(res);
-        sendSse(res, { type: 'chunk', content: reply || '(未收到回复)' });
-        sendSse(res, { type: 'done', reply: reply || '(未收到回复)' });
+        const finalReply = visibleReply || reply || '(未收到回复)';
+        if (!visibleReply) sendSse(res, { type: 'chunk', content: finalReply });
+        sendSse(res, { type: 'done', reply: finalReply });
         res.end();
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
         console.error('[Chat Assist]', err.message);
-        res.status(500).json({ error: err.message });
+        streamError(res, err);
     }
 });
 
@@ -108,31 +129,46 @@ router.post('/plan', async (req, res) => {
 
         capturePrompt({ provider: aiConfig.provider, model: aiConfig.model, temperature: aiConfig.temperature ?? 0.7, maxTokens: 4096, topP: aiConfig.topP ?? 0.9, systemPrompt: sysPrompt, userPrompt: JSON.stringify(msgs) });
 
-        const novelId = context?.novelId || '';
-        const refTools = getReferenceToolDefinitions();
+        // Plan mode only needs look-up tools, not scene context
+        const allRefTools = getReferenceToolDefinitions();
+        const planTools = allRefTools.filter(t =>
+            t.function.name === 'search_reference' || t.function.name === 'get_reference_detail'
+        );
         let reply = '';
+        let visibleReply = '';
+        const forwardModelEvent = event => {
+            if (event?.type === 'chunk') visibleReply += event.content || '';
+            sendSse(res, event);
+        };
+        setupSse(res);
         for (let round = 0; round < 4; round++) {
-            const resp = await callAIChatRaw(aiConfig, sysPrompt, msgs, {
+            const resp = await streamAIChat(aiConfig, sysPrompt, msgs, {
                 signal: requestController.signal,
-                tools: refTools,
+                tools: planTools,
                 toolChoice: 'auto',
+                onEvent: forwardModelEvent,
             });
             const toolCalls = resp.message?.tool_calls || [];
             if (!toolCalls.length) {
                 reply = resp.message?.content || '';
                 break;
             }
-            msgs.push({ role: 'assistant', content: '', tool_calls: toolCalls });
+            sendSse(res, { type: 'tool_start', count: toolCalls.length, round: round + 1 });
+            msgs.push({ role: 'assistant', content: resp.message?.content || '', tool_calls: toolCalls });
             for (const call of toolCalls) {
-                const args = JSON.parse(call.function?.arguments || '{}');
-                const result = await executeReferenceTool(call.function?.name, args, { message, history, context });
-                msgs.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
+                const toolName = call.function?.name;
+                const args = parseToolArguments(call.function?.arguments);
+                sendSse(res, { type: 'tool_call', name: toolName, target: args.types?.[0] || args.id || args.query || '', data: args });
+                const result = await executeReferenceTool(toolName, args, { message, history, context });
+                sendSse(res, { type: 'tool_result', name: toolName, result });
+                msgs.push({ role: 'tool', tool_call_id: call.id, name: toolName, content: JSON.stringify(result) });
             }
+            sendSse(res, { type: 'tool_end', round: round + 1 });
         }
 
-        setupSse(res);
-        sendSse(res, { type: 'chunk', content: reply || '(未收到回复)' });
-        sendSse(res, { type: 'done', reply: reply || '(未收到回复)' });
+        const finalReply = visibleReply || reply || '(未收到回复)';
+        if (!visibleReply) sendSse(res, { type: 'chunk', content: finalReply });
+        sendSse(res, { type: 'done', reply: finalReply });
         res.end();
     } catch (err) {
         if (err.name === 'AbortError' && requestController.signal.aborted) return;
@@ -178,7 +214,7 @@ function buildPlanSystemPrompt(ctx) {
 router.post('/write', async (req, res) => {
     const requestController = createRequestAbortController(req, res);
     try {
-        const { message, history, context, config, promptTemplates, promptOrder, presetName } = req.body;
+        const { message, history, context, config, promptTemplates, promptOrder, presetName, importConfig } = req.body;
         const aiConfig = applyAiSecret(config, presetName);
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
@@ -187,7 +223,7 @@ router.post('/write', async (req, res) => {
         const generated = await generateWritingStream({
             message,
             history,
-            context: context || {},
+            context: importConfig ? { ...(context || {}), importConfig } : (context || {}),
             config: { ...aiConfig, stream: true },
             promptTemplates,
             promptOrder,
@@ -260,6 +296,20 @@ router.post('/infill', async (req, res) => {
     }
 });
 
+// POST /api/chat/import-data — 前端检测到AI输出的JSON后，调用此接口导入数据
+router.post('/import-data', async (req, res) => {
+    try {
+        const { name, args, novelId } = req.body;
+        if (!name || !args) return res.status(400).json({ error: 'name and args required' });
+        if (name !== 'import_data') return res.status(400).json({ error: 'unsupported tool' });
+        const result = await executeTool(name, args, novelId || '');
+        res.json(result);
+    } catch (err) {
+        console.error('[Chat ImportData]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 function createRequestAbortController(req, res) {
     const controller = new AbortController();
     const abort = () => {
@@ -323,36 +373,23 @@ function buildAssistSystemPrompt(ctx) {
     p.push('你是 催更姬 的「设定制作」向导，专门帮助作者创建角色卡和世界书。');
     p.push('');
     p.push('## 你的工作方式');
-    p.push('你采用启发式引导法：不一次性抛出所有问题，而是顺着作者的思路逐步深入。');
-    p.push('每次只问 1-2 个最关键的问题，根据回答自然引出下一个话题。');
+    p.push('采用启发式引导：顺着作者的思路逐步深入，每次只问 1-2 个最关键的问题。');
     p.push('');
-    p.push('## 创作角色卡的引导流程');
-    p.push('1. **建立锚点** — 先问「这个角色在故事中做什么？处于什么位置？」（一句话就能建立角色坐标）');
-    p.push('2. **性格调色盘** — 引导作者用对比词描述性格：「表面上TA...但实际上TA...」');
-    p.push('3. **三面性** — 社会面具 / 独处状态 / 压力下的真实面目');
-    p.push('4. **外观特征** — 2-3个最具辨识度的外貌特征，能与性格呼应最佳');
-    p.push('5. **语言风格** — 口头禅、说话节奏、用词习惯');
-    p.push('6. **收尾整合** — 将以上内容整理为标准角色卡格式');
+    p.push('## ⚠️ 关键：用户可见结果 + 工具导入必须同时完成');
     p.push('');
-    p.push('## 创作世界书条目的引导流程');
-    p.push('1. **确定条目** — 「这个设定在什么场景下会用到？」');
-    p.push('2. **提炼关键词** — 「当文中出现哪些词时，读者需要知道这个设定？」');
-    p.push('3. **撰写内容** — 简洁说明设定本身，不展开不评价。控制在 200 字内');
-    p.push('4. **配置参数** — 建议合适的触发深度、是否始终激活');
+    p.push('用户说「导出」「输出角色卡」「生成卡片」「生成 JSON」「保存」「创建」「导入」或你已收集到足够信息时：');
+    p.push('1. 先在回复正文里给用户展示制作好的结果，包含名称、核心设定和完整 JSON 代码块。');
+    p.push('2. 同一轮必须调用 import_data 工具，把这份数据写入当前项目。');
+    p.push('3. 工具调用成功后，继续用简短中文告诉用户已导入，以及导入到了角色、世界书或预设。');
     p.push('');
-    p.push('## ⚠️ 关键：输出 JSON 的时机（必须遵守）');
+    p.push('⚠️ 不要只描述不保存，也不要只调用工具不展示。用户需要看见成品，项目也需要同步落盘。');
     p.push('');
-    p.push('当用户说「导出」「输出角色卡」「生成卡片」「生成 JSON」「保存」或你已收集到足够信息时——');
-    p.push('你必须立即用 ```json 代码块输出完整格式。不要等！不要问「要我输出JSON吗？」直接输出！');
-    p.push('');
-    p.push('每次输出 JSON 前，先确认已收集了以下信息，缺少的主动询问后再输出。');
-    p.push('');
-    p.push('角色卡 JSON（复制此模板，填好字段）：');
+    p.push('## 角色卡 JSON 格式（严格按此模板）：');
     p.push('```json');
     p.push('{');
     p.push('  "name": "角色名",');
     p.push('  "description": "外貌与身份描述（50-150字）",');
-    p.push('  "personality": "性格（可用对比式：表面上...但实际上...）",');
+    p.push('  "personality": "性格（对比式：表面上...但实际上...）",');
     p.push('  "scenario": "背景处境",');
     p.push('  "first_mes": "用角色口吻写的第一句话",');
     p.push('  "mes_example": "<START>\\n{{char}}: 示例对话\\n{{user}}: 示例回应",');
@@ -360,26 +397,31 @@ function buildAssistSystemPrompt(ctx) {
     p.push('}');
     p.push('```');
     p.push('');
-    p.push('世界书条目 JSON（复制此模板）：');
+    p.push('## 世界书条目 JSON 格式（严格按此模板）：');
     p.push('```json');
     p.push('{');
     p.push('  "comment": "条目名称",');
     p.push('  "key": ["触发词1", "触发词2"],');
-    p.push('  "keysecondary": [],');
     p.push('  "content": "注入的设定内容（100-200字）",');
     p.push('  "depth": 4,');
     p.push('  "order": 100,');
     p.push('  "constant": false');
     p.push('}');
     p.push('```');
-    p.push('');
-    p.push('**记住：用户说「导出/输出/生成/保存」= 立刻输出 JSON，不要多问！**');
+    p.push('如需一次创建多条世界书，用数组：');
+    p.push('```json');
+    p.push('[');
+    p.push('  {"comment":"条目1","key":["触发词"],"content":"..."},');
+    p.push('  {"comment":"条目2","key":["触发词"],"content":"..."}');
+    p.push(']');
+    p.push('```');
     p.push('');
     p.push('## 重要规则');
-    p.push('- 始终保持对话感，不要变成填表');
-    p.push('- 根据已有的世界观和角色信息来提问，避免重复');
-    p.push('- 当作者表现出犹豫时，给出 2-3 个具体选项让TA选择');
-    p.push('- 每个回答最后用**粗体**问出下一个问题');
+    p.push('- 收集到足够信息后**立即展示 JSON 并调用 import_data**，不要等多轮');
+    p.push('- JSON 必须完整、合法，字段名用英文，值用中文');
+    p.push('- 调用 import_data 时，target 必须是 character、worldbook 或 preset');
+    p.push('- character 的 data 使用角色卡对象；worldbook 的 data 可用单条、数组或 {entries:[...]}；preset 的 data 必须带 name');
+    p.push('- 保持对话感，每个回答末尾用**粗体**问下一个问题');
     p.push('- 用中文交流');
     p.push('');
     if (ctx.novelTitle) p.push(`书名: ${ctx.novelTitle}`);
@@ -398,15 +440,15 @@ function buildAssistSystemPrompt(ctx) {
         ctx.outline.slice(0, 8).forEach(n => p.push(`- ${n.completed ? '✅' : '⬜'} ${n.title}`));
     }
 
-    p.push('');
-    p.push('## 工具调用');
-    p.push('你可以调用 import_data 工具将生成的设定直接导入编辑器：');
-    p.push('- 导入角色：target="character", data={name, description, personality, scenario, first_mes}');
-    p.push('- 导入世界书：target="worldbook", data={entries: [{comment, key: [触发词], content}]}');
-    p.push('- 导入预设：target="preset", data={name, provider, model, temperature, ...}');
-    p.push('当用户说"导出""保存""导入"或确认了设定内容后，直接调用工具写入，不要多问。');
-
     return p.join('\n');
+}
+
+function parseToolArguments(raw = '{}') {
+    try {
+        return JSON.parse(raw || '{}');
+    } catch {
+        return {};
+    }
 }
 
 // Kept temporarily for migration comparison with preset-orchestrator.
@@ -512,6 +554,3 @@ function buildWriteMessages(history, currentMsg, ctx) {
 
     return msgs;
 }
-
-
-

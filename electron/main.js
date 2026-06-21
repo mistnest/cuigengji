@@ -84,7 +84,7 @@ function createWindow() {
                     click: () => dialog.showMessageBox(mainWindow, {
                         type: 'info',
                         title: '关于',
-                        message: '催更姬 v0.1.0',
+                        message: '催更姬 v1.0',
                         detail: 'AI 小说创作助手',
                     }),
                 },

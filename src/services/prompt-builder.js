@@ -184,16 +184,6 @@ export function buildInspirePrompt(params) {
     };
 }
 
-/**
- * 构建章节摘要 prompt
- */
-export function buildSummaryPrompt(chapterContent) {
-    return {
-        systemPrompt: '你是一个专业的小说编辑，擅长撰写简洁准确的章节摘要。',
-        userPrompt: '请为以下章节内容写一个简短的摘要（200字以内），包含主要情节进展和关键人物出场：\n\n' + chapterContent,
-    };
-}
-
 // ==================== Helpers ====================
 
 function buildSimpleSystemPrompt(worldBook, characters, styleGuide) {

@@ -1,15 +1,24 @@
 {
     "name": "cuigengji",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "description": "催更姬 - AI 小说创作助手",
     "type": "module",
     "main": "electron/index.js",
-    "license": "AGPL-3.0",
+    "author": "mistnest",
+    "license": "SEE LICENSE IN LICENSE",
+    "homepage": "https://github.com/mistnest/cuigengji",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mistnest/cuigengji.git"
+    },
     "scripts": {
         "start": "node src/server.js",
         "start:electron": "node scripts/start-electron.js",
         "dev": "node --watch src/server.js",
         "build": "electron-builder",
+        "build:win": "node scripts/build-win.js",
+        "package:win": "node scripts/package-win.js",
+        "package:win:test": "node scripts/package-win.js --with-tests",
         "lint": "eslint src/**/*.js public/**/*.js",
         "test": "npx playwright test",
         "test:smoke": "npx playwright test --grep @smoke",
@@ -19,7 +28,8 @@
         "test:regression": "npx playwright test --grep @regression",
         "test:ui": "npx playwright test --ui",
         "test:report": "npx playwright show-report test-results/html",
-        "test:install": "npx playwright install chromium"
+        "test:install": "npx playwright install chromium",
+        "fingerprint": "node scripts/create-fingerprint-manifest.js"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",
@@ -57,37 +67,40 @@
         "node": ">= 20"
     },
     "build": {
-        "appId": "com.cuigengji.app",
+        "appId": "com.mistnest.cuigengji",
         "productName": "催更姬",
+        "extraMetadata": {
+            "cuigengjiSignature": "cgj-mistnest-2026-community-source",
+            "cuigengjiSchemaOwner": "mistnest-cuigengji",
+            "repository": "https://github.com/mistnest/cuigengji"
+        },
         "directories": {
             "output": "dist"
         },
+        "asar": false,
         "files": [
             "src/**/*",
             "public/**/*",
             "electron/**/*",
             "shared/**/*",
-            "data/**/*",
-            "node_modules/**/*",
             "package.json"
-        ],
-        "extraResources": [
-            {
-                "from": "data",
-                "to": "data"
-            }
         ],
         "win": {
             "target": [
-                "nsis"
+                "nsis",
+                "portable"
             ],
-            "icon": "public/st.ico"
+            "icon": "public/avatar.ico"
         },
         "nsis": {
             "oneClick": false,
             "allowToChangeInstallationDirectory": true,
             "createDesktopShortcut": true,
-            "shortcutName": "催更姬"
+            "shortcutName": "催更姬",
+            "artifactName": "${productName}-${version}-setup-${arch}.${ext}"
+        },
+        "portable": {
+            "artifactName": "${productName}-${version}-portable-${arch}.${ext}"
         },
         "mac": {
             "target": [
