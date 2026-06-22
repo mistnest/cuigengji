@@ -1,0 +1,590 @@
+/**
+ * 催更姬 — Import API
+ * SillyTavern 数据导入
+ */
+import express from 'express';
+import path from 'node:path';
+import fs from 'node:fs';
+import sanitize from 'sanitize-filename';
+import mammoth from 'mammoth';
+import iconv from 'iconv-lite';
+import jschardet from 'jschardet';
+import multer from 'multer';
+
+import { getDataRoot } from '../config.js';
+import { read as readPngCharCard } from '../character-card-parser.js';
+import { writeJson } from '../lib/json-store.js';
+import { projectFile, resolveInside } from '../lib/project-paths.js';
+import { ensureCharacterSummaries, ensureChapterSummary, ensureWorldBookSummaries } from '../services/reference-summaries.js';
+
+export const router = express.Router();
+
+const upload = multer({
+    dest: path.join(getDataRoot(), '_uploads'),
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
+});
+
+router.use((req, res, next) => {
+    let cleaned = false;
+    const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        const files = [req.file, ...(Array.isArray(req.files) ? req.files : [])].filter(Boolean);
+        for (const file of files) {
+            try {
+                if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            } catch {}
+        }
+    };
+    res.once('finish', cleanup);
+    res.once('close', cleanup);
+    next();
+});
+
+// POST /api/import/worldbook — 导入世界书 JSON
+function normalizeEnabledDisabled(target = {}) {
+    const disabled = target.disable === true
+        || target.disabled === true
+        || target.enabled === false;
+    return {
+        ...target,
+        disable: disabled,
+        disabled,
+        enabled: !disabled,
+    };
+}
+
+function normalizeWorldBookData(data = {}) {
+    return {
+        ...data,
+        entries: normalizeWorldBookEntries(data.entries || {}),
+    };
+}
+
+function normalizeWorldBookEntries(entries = {}) {
+    if (Array.isArray(entries)) {
+        return Object.fromEntries(entries.map((entry, index) => [
+            entry?.uid ?? index,
+            normalizeWorldBookEntry(entry, index),
+        ]));
+    }
+    return Object.fromEntries(Object.entries(entries || {}).map(([key, entry], index) => [
+        key,
+        normalizeWorldBookEntry(entry, index),
+    ]));
+}
+
+function normalizeWorldBookEntry(entry = {}, index = 0) {
+    const normalized = normalizeEnabledDisabled(entry || {});
+    return {
+        ...normalized,
+        uid: normalized.uid ?? index,
+        key: Array.isArray(normalized.key)
+            ? normalized.key
+            : Array.isArray(normalized.keys)
+                ? normalized.keys
+                : [normalized.key].filter(Boolean),
+        keysecondary: Array.isArray(normalized.keysecondary) ? normalized.keysecondary : [],
+        content: normalized.content || '',
+        comment: normalized.comment || normalized.name || '',
+        selective: normalized.selective !== false,
+    };
+}
+
+function applyWorldBookFolder(worldBook = {}, folder = '') {
+    const targetFolder = String(folder || '').trim();
+    for (const entry of Object.values(worldBook.entries || {})) {
+        if (entry.group && !entry.sourceGroup) entry.sourceGroup = entry.group;
+        entry.folder = entry.folder || entry._folder || targetFolder;
+        entry._folder = entry.folder;
+    }
+    if (targetFolder) {
+        const folders = Array.isArray(worldBook.folders) ? worldBook.folders : [];
+        worldBook.folders = [...new Set([...folders, targetFolder].filter(Boolean))];
+    }
+    return worldBook;
+}
+
+function normalizeCharacterData(character = {}) {
+    const normalized = normalizeEnabledDisabled(character || {});
+    const data = normalizeEnabledDisabled(normalized.data || normalized);
+    const charBook = data.character_book || normalized.character_book;
+    if (charBook?.entries) {
+        data.character_book = {
+            ...charBook,
+            entries: normalizeWorldBookEntries(charBook.entries),
+        };
+    }
+    return {
+        ...normalized,
+        data,
+        disable: data.disable || normalized.disable,
+        disabled: data.disabled || normalized.disabled,
+        enabled: !(data.disabled || normalized.disabled),
+    };
+}
+
+router.post('/worldbook', async (req, res) => {
+    try {
+        const { novelId, name, data } = req.body;
+
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+        if (!data || !data.entries) {
+            return res.status(400).json({ error: 'Invalid world book format: missing "entries"' });
+        }
+
+        const sourceName = sanitize(name || 'imported_world') || 'imported_world';
+        const filename = sourceName + '.json';
+        const filePath = projectFile(novelId, 'assets', 'worldbooks', filename);
+
+        // Ensure the data has proper structure
+        const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
+        applyWorldBookFolder(worldBook, sourceName);
+
+        await writeJson(filePath, worldBook);
+
+        res.json({
+            success: true,
+            name: filename,
+            path: filePath,
+            entryCount: Object.keys(worldBook.entries).length,
+            entries: worldBook.entries,
+        });
+    } catch (err) {
+        console.error('[Import] World book error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/import/character-png — 导入角色卡 PNG
+router.post('/character-png', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+        if (!req.body.novelId) return res.status(400).json({ error: 'novelId required' });
+
+        // Parse PNG character card using SillyTavern's parser
+        const pngBuffer = fs.readFileSync(req.file.path);
+        let charData;
+
+        try {
+            const rawData = readPngCharCard(new Uint8Array(pngBuffer));
+            charData = JSON.parse(rawData);
+        } catch (parseErr) {
+            // If PNG parsing fails, try reading as plain JSON
+            return res.status(400).json({ error: 'Invalid character card PNG: ' + parseErr.message });
+        }
+
+        const charsDir = projectFile(req.body.novelId, 'assets', 'characters');
+
+        const charName = sanitize(charData.data?.name || req.file.originalname.replace('.png', ''));
+        const jsonFilename = `${charName}.json`;
+        const jsonPath = path.join(charsDir, jsonFilename);
+
+        // Save JSON
+        charData = ensureCharacterSummaries([normalizeCharacterData(charData)]).data[0];
+        await writeJson(jsonPath, charData);
+
+        // Also save PNG as avatar/thumbnail
+        const pngFilename = `${charName}.png`;
+        const pngPath = path.join(charsDir, pngFilename);
+        fs.mkdirSync(charsDir, { recursive: true });
+        fs.copyFileSync(req.file.path, pngPath);
+
+        // Clean up multer temp file
+        fs.unlinkSync(req.file.path);
+
+        res.json({
+            success: true,
+            name: charName,
+            data: charData,
+            character: charData,
+            jsonPath: jsonPath,
+            pngPath: pngPath,
+            hasEmbeddedWorldBook: hasEmbeddedWorldBook(charData),
+        });
+    } catch (err) {
+        console.error('[Import] Character PNG error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/import/character-json — 导入角色卡 JSON
+router.post('/character-json', async (req, res) => {
+    try {
+        const { novelId, data } = req.body;
+
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+        if (!data) {
+            return res.status(400).json({ error: 'No character data provided' });
+        }
+
+        const charsDir = projectFile(novelId, 'assets', 'characters');
+
+        const charName = sanitize(data.data?.name || data.name || 'imported_character');
+        const filename = `${charName}.json`;
+        const filePath = path.join(charsDir, filename);
+
+        const character = ensureCharacterSummaries([normalizeCharacterData(data)]).data[0];
+        await writeJson(filePath, character);
+
+        res.json({
+            success: true,
+            name: charName,
+            data: character,
+            character,
+            path: filePath,
+            hasEmbeddedWorldBook: hasEmbeddedWorldBook(character),
+        });
+    } catch (err) {
+        console.error('[Import] Character JSON error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/import/preset — 导入预设 JSON
+router.post('/preset', async (req, res) => {
+    try {
+        const { novelId, name, data } = req.body;
+
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+        if (!data) {
+            return res.status(400).json({ error: 'No preset data provided' });
+        }
+
+        const filename = sanitize(name || 'imported_preset') + '.json';
+        const filePath = projectFile(novelId, 'assets', 'presets', filename);
+
+        await writeJson(filePath, data);
+
+        res.json({
+            success: true,
+            name: filename,
+            data: data,
+            path: filePath,
+        });
+    } catch (err) {
+        console.error('[Import] Preset error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/import/document — 导入 TXT/DOCX 文件为章节
+router.post('/document', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        const { novelId, volumeId, autoSplit } = req.body;
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+
+        let text = '';
+        const ext = path.extname(req.file.originalname).toLowerCase();
+
+        if (ext === '.docx') {
+            const result = await mammoth.extractRawText({ path: req.file.path });
+            text = result.value;
+        } else {
+            text = readTextFile(req.file.path);
+        }
+
+        fs.unlinkSync(req.file.path); // Clean up temp
+
+        if (!text.trim()) return res.status(400).json({ error: 'File is empty' });
+
+        const chapters = [];
+        const chaptersDir = projectFile(novelId, 'chapters');
+
+        if (autoSplit === 'true') {
+            for (const part of splitTextIntoChapters(text)) {
+                if (!part.content.trim()) continue;
+                const title = part.title || `第 ${chapters.length + 1} 章`;
+                const content = part.content.trim();
+                let chapter = {
+                    id: uuidv4(), novelId, title, content, status: 'draft', wordCount: countWords(content),
+                    created: Date.now(), updated: Date.now(), order: chapters.length,
+                };
+                chapter = ensureChapterSummary(chapter).chapter;
+                chapters.push(chapter);
+                const filename = sanitize(`${String(chapters.length).padStart(3, '0')}-${title}`) + '.json';
+                const targetDir = importedChapterDir(chaptersDir, volumeId);
+                await writeJson(resolveInside(targetDir, filename), chapter);
+            }
+        } else if (false) {
+            // Split by chapter markers: "第X章", "Chapter X", "第X卷", etc.
+            const parts = text.split(/(?=第[一二三四五六七八九十百千\d]+[章卷节回篇])|(?=Chapter\s+\d+)|(?=CHAPTER\s+\d+)/i);
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i].trim();
+                if (!part) continue;
+                const titleMatch = part.match(/^(第[一二三四五六七八九十百千\d]+[章卷节回篇]|Chapter\s+\d+|CHAPTER\s+\d+).*/);
+                const title = titleMatch ? titleMatch[0].substring(0, 50).replace(/[^\w一-鿿\s]/g, '').trim() : `第${chapters.length + 1}章`;
+                const content = titleMatch
+                    ? part.replace(/^.+(?:\r?\n|$)/, '').trim()
+                    : part;
+                let chapter = {
+                    id: uuidv4(), novelId, title, content, status: 'draft', wordCount: countWords(content),
+                    created: Date.now(), updated: Date.now(), order: chapters.length,
+                };
+                chapter = ensureChapterSummary(chapter).chapter;
+                chapters.push(chapter);
+                const filename = sanitize(`${String(chapters.length).padStart(3, '0')}-${title}`) + '.json';
+                const targetDir = importedChapterDir(chaptersDir, volumeId);
+                await writeJson(resolveInside(targetDir, filename), chapter);
+            }
+        } else {
+            // Single chapter import
+            const title = req.file.originalname.replace(ext, '').substring(0, 50);
+            let chapter = {
+                id: uuidv4(), novelId, title, content: text, status: 'draft', wordCount: countWords(text),
+                created: Date.now(), updated: Date.now(), order: 0,
+            };
+            chapter = ensureChapterSummary(chapter).chapter;
+            chapters.push(chapter);
+            const filename = sanitize(`001-${title}`) + '.json';
+            const targetDir = importedChapterDir(chaptersDir, volumeId);
+            await writeJson(resolveInside(targetDir, filename), chapter);
+        }
+
+        res.json({ success: true, chapters, count: chapters.length });
+    } catch (err) {
+        console.error('[Import] Document error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/import/folder — 导入文件夹结构（卷=文件夹，章=文件）
+router.post('/folder', upload.array('files', 200), async (req, res) => {
+    try {
+        const { novelId } = req.body;
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+        const chaptersDir = projectFile(novelId, 'chapters');
+        const results = { volumes: 0, chapters: 0, errors: [] };
+
+        for (const file of req.files) {
+            try {
+                const ext = path.extname(file.originalname).toLowerCase();
+                if (!['.txt', '.docx', '.json'].includes(ext)) continue;
+
+                let text = '';
+                if (ext === '.docx') {
+                    const result = await mammoth.extractRawText({ path: file.path });
+                    text = result.value;
+                } else {
+                    text = readTextFile(file.path);
+                }
+                if (!text.trim()) continue;
+
+                const relPath = file.originalname.replace(/\\/g, '/');
+                const parts = relPath.split('/');
+                let targetDir = chaptersDir;
+
+                // If file is inside subfolders, create volumes
+                if (parts.length > 1) {
+                    const volName = parts[0];
+                    targetDir = resolveInside(chaptersDir, sanitize(volName));
+                    if (!fs.existsSync(targetDir)) { fs.mkdirSync(targetDir, { recursive: true }); results.volumes++; }
+                }
+
+                const title = path.basename(parts[parts.length - 1], ext).substring(0, 50);
+                let chapter = {
+                    id: uuidv4(), novelId, title, content: text, status: 'draft', wordCount: countWords(text),
+                    created: Date.now(), updated: Date.now(), order: results.chapters,
+                };
+                chapter = ensureChapterSummary(chapter).chapter;
+                const filename = sanitize(`${String(results.chapters + 1).padStart(3, '0')}-${title}`) + '.json';
+                await writeJson(resolveInside(targetDir, filename), chapter);
+                results.chapters++;
+            } catch (e) {
+                results.errors.push(`${file.originalname}: ${e.message}`);
+            }
+        }
+
+        // Clean up temp files
+        req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch {} });
+
+        res.json({ success: true, results });
+    } catch (err) {
+        console.error('[Import] Folder error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+function importedChapterDir(chaptersDir, volumeId) {
+    if (!volumeId) return chaptersDir;
+    const raw = String(volumeId).replace(/^vol_/, '');
+    const safe = sanitize(raw);
+    return safe ? resolveInside(chaptersDir, safe) : chaptersDir;
+}
+
+export function splitTextIntoChapters(text = '') {
+    const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    const headings = [];
+    let offset = 0;
+    for (const line of lines) {
+        const raw = line;
+        const trimmed = raw.trim();
+        if (isChapterHeading(trimmed)) {
+            headings.push({ title: normalizeChapterTitle(trimmed), start: offset, lineLength: raw.length });
+        }
+        offset += raw.length + 1;
+    }
+
+    if (!headings.length) {
+        return [{ title: '', content: normalized.trim() }];
+    }
+
+    const parts = [];
+    const firstHeading = headings[0];
+    const preface = normalized.slice(0, firstHeading.start).trim();
+    if (preface) parts.push({ title: '导入前言', content: preface });
+
+    for (let index = 0; index < headings.length; index += 1) {
+        const current = headings[index];
+        const next = headings[index + 1];
+        const titleLineEnd = current.start + current.lineLength;
+        const contentStart = normalized[titleLineEnd] === '\n' ? titleLineEnd + 1 : titleLineEnd;
+        const contentEnd = next ? next.start : normalized.length;
+        parts.push({
+            title: current.title,
+            content: normalized.slice(contentStart, contentEnd).trim(),
+        });
+    }
+
+    return parts;
+}
+
+function isChapterHeading(line = '') {
+    const title = normalizeChapterTitle(line);
+    if (!title || title.length > 48) return false;
+    if (/[。！？；?!;]/.test(title)) return false;
+    const marker = '(?:第?[0-9一二三四五六七八九十百千万零〇两]+[章节回卷篇]|Chapter\\s+\\d+|CHAPTER\\s+\\d+)';
+    if (!new RegExp(`^${marker}`, 'i').test(title)) return false;
+    const match = title.match(new RegExp(`^(${marker})(.*)$`, 'i'));
+    const suffix = (match?.[2] || '').trim();
+    if (!suffix) return true;
+    if (/^[的了着过]/.test(suffix) && title.length > 18) return false;
+    if (/^[：:、.．\-—\s　]/.test(match?.[2] || '')) return true;
+    return title.length <= 18;
+}
+
+function normalizeChapterTitle(line = '') {
+    return String(line || '')
+        .replace(/^[\s　#*【《<]+/, '')
+        .replace(/[\s　】》>]*$/, '')
+        .trim();
+}
+
+// Auto-detect encoding and read file as UTF-8 text
+function readTextFile(filePath) {
+    const buffer = fs.readFileSync(filePath);
+
+    // UTF-8 is the modern default. Decode it strictly before asking a
+    // heuristic detector, which can misclassify short Chinese UTF-8 files.
+    try {
+        return new TextDecoder('utf-8', { fatal: true }).decode(buffer).replace(/^\uFEFF/, '');
+    } catch { /* continue with legacy encodings */ }
+
+    // Use jschardet to guess encoding
+    const detected = jschardet.detect(buffer);
+    if (detected.encoding && detected.encoding !== 'UTF-8' && detected.confidence > 0.7) {
+        try {
+            return iconv.decode(buffer, detected.encoding);
+        } catch { /* fallback */ }
+    }
+    // Try GBK (most common for Chinese text files)
+    try {
+        const gbk = iconv.decode(buffer, 'gbk');
+        // Check if it looks like valid Chinese text
+        const chineseRatio = (gbk.match(/[一-鿿]/g) || []).length / Math.max(gbk.length, 1);
+        if (chineseRatio > 0.05) return gbk;
+    } catch { /* fallback */ }
+    // Fallback: return UTF-8, strip BOM
+    return buffer.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+function countWords(text) {
+    const chinese = (text.match(/[一-鿿]/g) || []).length;
+    const other = (text.match(/[a-zA-Z0-9]+/g) || []).length;
+    return chinese + other;
+}
+
+function hasEmbeddedWorldBook(character) {
+    const book = character?.data?.character_book
+        || character?.character_book
+        || character?.data?.data?.character_book;
+    const entries = book?.entries;
+    if (!entries) return false;
+    return Array.isArray(entries) ? entries.length > 0 : Object.keys(entries).length > 0;
+}
+
+function uuidv4() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+// POST /api/import/batch — 批量导入
+router.post('/batch', upload.array('files', 50), async (req, res) => {
+    try {
+        const { novelId } = req.body;
+        if (!novelId) return res.status(400).json({ error: 'novelId required' });
+        const results = { worldBooks: 0, characters: 0, presets: 0, errors: [] };
+
+        for (const file of req.files) {
+            try {
+                const ext = path.extname(file.originalname).toLowerCase();
+                const content = readTextFile(file.path);
+
+                if (file.originalname.includes('world') || ext === '.json' && content.includes('"entries"')) {
+                    const data = JSON.parse(content);
+                    if (data.entries) {
+                        const worldsDir = projectFile(novelId, 'assets', 'worldbooks');
+                        const filename = sanitize(file.originalname);
+                        const folder = filename.replace(/\.json$/i, '') || 'imported_world';
+                        const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
+                        applyWorldBookFolder(worldBook, folder);
+                        await writeJson(resolveInside(worldsDir, filename), worldBook);
+                        results.worldBooks++;
+                        continue;
+                    }
+                }
+
+                if (ext === '.png') {
+                    const pngBuffer = fs.readFileSync(file.path);
+                    const rawData = readPngCharCard(new Uint8Array(pngBuffer));
+                    let charData = JSON.parse(rawData);
+                    const charsDir = projectFile(novelId, 'assets', 'characters');
+                    fs.mkdirSync(charsDir, { recursive: true });
+                    const charName = sanitize(charData.data?.name || file.originalname.replace('.png', ''));
+                    charData = ensureCharacterSummaries([normalizeCharacterData(charData)]).data[0];
+                    await writeJson(resolveInside(charsDir, `${charName}.json`), charData);
+                    fs.copyFileSync(file.path, resolveInside(charsDir, `${charName}.png`));
+                    results.characters++;
+                    continue;
+                }
+
+                // Try as preset
+                const data = JSON.parse(content);
+                if (data.temperature !== undefined || data.max_tokens !== undefined) {
+                    const presetsDir = projectFile(novelId, 'assets', 'presets');
+                    await writeJson(resolveInside(presetsDir, sanitize(file.originalname)), data);
+                    results.presets++;
+                    continue;
+                }
+            } catch (e) {
+                results.errors.push(`${file.originalname}: ${e.message}`);
+            }
+        }
+
+        // Clean up temp files
+        for (const file of req.files) {
+            try { fs.unlinkSync(file.path); } catch {}
+        }
+
+        res.json({ success: true, results });
+    } catch (err) {
+        console.error('[Import] Batch error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});

@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai http://localhost:*; img-src 'self' data: blob:; media-src 'self' data:;">
+    <meta name="application-name" content="催更姬">
+    <meta name="cuigengji:repository" content="https://github.com/mistnest/cuigengji">
+    <meta name="cuigengji:signature" content="cgj-mistnest-2026-community-source">
+    <title>催更姬</title>
+    <link rel="stylesheet" href="css/editor.css">
+</head>
+<body data-cuigengji-app="mistnest-cuigengji">
+    <div id="toast-container"></div>
+    <div id="global-tooltip" class="global-tooltip" style="display:none;"></div>
+
+    <div id="welcome-page">
+        <div class="welcome-container">
+            <div class="welcome-logo">
+                <img src="avatar.png" alt="催更姬" class="welcome-avatar">
+                <h1>催更姬</h1>
+                <p>小说创作 AI 助手</p>
+            </div>
+
+            <div class="welcome-section">
+                <div class="welcome-section-title">开始</div>
+                <div class="welcome-start-actions">
+                    <button type="button" class="welcome-start-btn" id="btn-welcome-create">
+                        <span class="welcome-start-icon">+</span> 新建工作区
+                    </button>
+                    <button type="button" class="welcome-start-btn" id="btn-welcome-import">
+                        <span class="welcome-start-icon">→</span> 导入文档
+                    </button>
+                </div>
+            </div>
+            <!-- 欢迎页弹窗 -->
+            <div id="welcome-modal-overlay" class="plot-modal-overlay" style="display:none;">
+                <div class="plot-modal" style="max-width:360px;">
+                    <div class="plot-modal-header"><h3>新建工作区</h3></div>
+                    <div class="plot-modal-body" style="padding:16px;">
+                        <input type="text" id="welcome-modal-input" class="ai-input" placeholder="请输入工作区名称" style="width:100%;">
+                        <div id="welcome-modal-error" class="modal-inline-error"></div>
+                    </div>
+                    <div class="plot-modal-footer">
+                        <button type="button" id="btn-welcome-modal-confirm" class="ai-btn-primary">确认</button>
+                        <button type="button" id="btn-welcome-modal-cancel" class="ai-btn-secondary">取消</button>
+                    </div>
+                </div>
+            </div>
+            <!-- 保存预设弹窗 -->
+            <div id="preset-save-overlay" class="plot-modal-overlay" style="display:none;">
+                <div class="plot-modal" style="max-width:360px;">
+                    <div class="plot-modal-header"><h3>保存配置方案</h3></div>
+                    <div class="plot-modal-body" style="padding:16px;">
+                        <input type="text" id="preset-save-input" class="ai-input" placeholder="输入配置方案名称" style="width:100%;">
+                    </div>
+                    <div class="plot-modal-footer">
+                        <button type="button" id="btn-preset-save-confirm" class="ai-btn-primary">保存</button>
+                        <button type="button" id="btn-preset-save-cancel" class="ai-btn-secondary">取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="welcome-section">
+                <div class="welcome-section-title">最近</div>
+                <div class="welcome-novels" id="welcome-novel-list">
+                    <div class="welcome-loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-main" style="display:none;">
+        <header id="toolbar">
+            <div class="toolbar-left">
+                <button id="btn-home" title="返回工作区列表">← 退出</button>
+                <span class="toolbar-separator"></span>
+                <button id="btn-save" title="保存 (Ctrl+S)">保存</button>
+                <button id="btn-export" title="导出">导出</button>
+            </div>
+            <div class="toolbar-center">
+                <span id="current-novel-title" class="novel-title">未命名小说</span>
+                <span id="current-chapter-title" class="chapter-title">- 未选择章节</span>
+            </div>
+            <div class="toolbar-right">
+                <button id="btn-import" title="导入资料或文档">导入</button>
+                <button id="btn-settings" title="设置 (Ctrl+,)">设置</button>
+                <button id="btn-contact-author" title="联系作者">联系作者</button>
+            </div>
+        </header>
+
+        <div id="import-menu" class="dropdown-menu hidden">
+            <div class="dropdown-item" data-action="import-document">导入文档 (TXT/DOCX)</div>
+            <div class="dropdown-item" data-action="import-split">导入并自动分章</div>
+            <div class="dropdown-item" data-action="import-folder">导入文件夹 (一章一个文件)</div>
+            <div class="dropdown-separator"></div>
+            <div class="dropdown-item" data-action="import-worldbook">导入世界书 (.json)</div>
+            <div class="dropdown-item" data-action="import-character">导入角色卡 (.png/.json)</div>
+            <div class="dropdown-item" data-action="import-preset">导入预设 (.json)</div>
+        </div>
+
+        <div id="main-container">
+            <aside id="left-sidebar" class="sidebar">
+                <div class="sidebar-tabs">
+                    <button class="sidebar-tab active" data-panel="chapters">章节</button>
+                    <button class="sidebar-tab" data-panel="outline">大纲</button>
+                </div>
+
+                <div id="panel-chapters" class="sidebar-panel active">
+                    <div class="panel-toolbar">
+                        <button id="btn-add-chapter" title="添加章节">新章节</button>
+                        <button id="btn-add-volume" title="添加卷">新卷</button>
+                    </div>
+                    <div id="chapter-tree" class="tree-view">
+                        <div class="tree-placeholder">尚未创建章节<br>点击"新章节"开始写作</div>
+                    </div>
+                </div>
+
+                <div id="panel-outline" class="sidebar-panel">
+                    <div class="panel-toolbar">
+                        <button id="btn-add-outline-node" title="添加大纲节点">新节点</button>
+                    </div>
+                    <div id="outline-tree" class="tree-view">
+                        <div class="tree-placeholder">尚未创建大纲<br>点击"新节点"规划情节</div>
+                    </div>
+                </div>
+            </aside>
+
+            <main id="editor-area">
+                <div id="editor-toolbar">
+                    <div class="editor-toolbar-left">
+                        <select id="chapter-select" title="选择章节">
+                            <option value="">- 选择章节 -</option>
+                        </select>
+                        <button id="btn-editor-bold" title="粗体 (Ctrl+B)"><b>B</b></button>
+                        <button id="btn-editor-italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+                        <button id="btn-editor-format" title="一键排版正文">排版</button>
+                        <span class="toolbar-separator"></span>
+                        <input type="text" id="chapter-title-input" placeholder="章节标题..." class="chapter-title-input">
+                    </div>
+                    <div class="editor-toolbar-right">
+                        <span id="word-count" class="word-count">字数: 0</span>
+                        <span id="token-count" class="token-count">Token: 0</span>
+                    </div>
+                </div>
+                <div id="editor-container">
+                    <textarea id="chapter-editor" placeholder="开始写作你的故事...&#10;&#10;提示：右侧可以续写正文、补写片段，或让 AI 帮你整理情节。"></textarea>
+                </div>
+                <div id="chapter-summary-area" class="chapter-summary-area" style="display:none;">
+                    <div class="chapter-summary-drag" id="summary-drag" title="拖动调整高度"></div>
+                    <div class="chapter-summary-bar" id="summary-bar">
+                        <div class="chapter-summary-bar-left">
+                            <span class="chapter-summary-bar-label">本章摘要</span>
+                            <span class="chapter-summary-bar-hint" id="summary-hint"></span>
+                        </div>
+                        <div class="chapter-summary-bar-right">
+                            <button id="btn-save-summary">保存修改</button>
+                            <button id="btn-ai-summary">AI 提取</button>
+                            <button id="btn-summary-toggle" title="折叠摘要">−</button>
+                        </div>
+                    </div>
+                    <textarea id="chapter-summary-input" class="chapter-summary-input" rows="4" placeholder="摘要（自动生成或手动填写）…"></textarea>
+                </div>
+            </main>
+
+            <aside id="right-sidebar" class="sidebar">
+                <div class="sidebar-tabs">
+                    <button class="sidebar-tab active" data-panel="chat">对话</button>
+                    <button class="sidebar-tab" data-panel="worldbook">世界书</button>
+                    <button class="sidebar-tab" data-panel="characters">角色</button>
+                    <button class="sidebar-tab" data-panel="ai-tools">AI</button>
+                </div>
+
+                <div id="panel-chat" class="sidebar-panel active">
+                    <div class="chat-header">
+                        <span class="chat-header-title" id="chat-header-title">聊天</span>
+                        <div class="chat-header-right">
+                            <div class="chat-history-popover" id="chat-history-popover">
+                                <button class="chat-header-btn" id="btn-history" title="历史会话">📋</button>
+                                <div class="chat-history-dropdown" id="chat-history-dropdown">
+                                    <div class="chat-history-search">
+                                        <input type="text" class="chat-history-search-input" id="session-search" placeholder="搜索会话...">
+                                    </div>
+                                    <div class="chat-history-list" id="session-list"></div>
+                                </div>
+                            </div>
+                            <button class="chat-header-btn" id="btn-new-chat" title="新建聊天">+</button>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="chat-welcome">
+                            <p>输入消息告诉催更姬你的需求，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
+                        </div>
+                    </div>
+
+                    <div class="cc-input-area">
+                        <div class="cc-context-bar"><div class="cc-context-fill" id="context-fill"></div></div>
+                        <textarea class="cc-input" id="chat-input" rows="1" placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"></textarea>
+                        <div class="cc-input-footer">
+                            <div class="cc-ctx-circle" id="ctx-circle" title="上下文用量">
+                                <svg width="20" height="20">
+                                    <circle cx="10" cy="10" r="7" fill="none" stroke="var(--bg-tertiary)" stroke-width="3"></circle>
+                                    <circle cx="10" cy="10" r="7" fill="none" stroke="var(--success)" stroke-width="3" stroke-dasharray="44" stroke-dashoffset="44" transform="rotate(-90 10 10)" id="ctx-arc" stroke-linecap="round"></circle>
+                                </svg>
+                            </div>
+                            <span class="cc-ctx-text" id="ctx-text" style="font-size:10px;color:var(--text-muted);margin-right:4px;">0</span>
+                            <span style="flex:1;"></span>
+                            <span class="cc-mode-desc" id="mode-desc">正文模式 - AI 协作续写</span>
+                            <div class="cc-mode-popover" id="mode-popover">
+                                <button class="cc-mode-current" id="mode-current">正文</button>
+                                <div class="cc-mode-dropdown" id="mode-dropdown">
+                                    <div class="cc-dropdown-group">
+                                        <button class="cc-dropdown-item active" data-mode="write">
+                                            <span class="cd-title">正文模式</span>
+                                            <span class="cd-desc">AI 协作续写，生成后可接受、重试或修改</span>
+                                        </button>
+                                        <button class="cc-dropdown-item" data-mode="plan">
+                                            <span class="cd-title">情节研讨</span>
+                                            <span class="cd-desc">先讨论走向，再落到正文</span>
+                                        </button>
+                                        <button class="cc-dropdown-item" data-mode="assist">
+                                            <span class="cd-title">设定制作</span>
+                                            <span class="cd-desc">辅助创建角色卡和世界书</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="cc-send-btn" id="btn-send">▶</button>
+                            <button id="btn-stop" class="cc-send-btn" style="display:none">■</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="panel-worldbook" class="sidebar-panel">
+                    <div class="panel-toolbar">
+                        <button id="btn-add-wb-entry" title="添加世界书条目">新建</button>
+                        <button id="btn-import-wb" title="导入世界书">导入</button>
+                        <button id="btn-export-wb" title="导出世界书">导出</button>
+                        <span class="panel-toolbar-spacer"></span>
+                        <button id="btn-wb-search" class="panel-tool-btn" title="搜索世界书" aria-expanded="false">搜索</button>
+                        <button class="btn-batch-toggle panel-tool-btn" data-list="worldbook" title="批量管理">批量操作</button>
+                    </div>
+                    <details class="reference-control" data-reference-kind="worldbook">
+                        <summary class="reference-title">本次写作使用</summary>
+                        <div class="reference-segments">
+                            <button data-reference-mode="all">全部</button>
+                            <button data-reference-mode="selected">选分组</button>
+                            <button data-reference-mode="off">关闭</button>
+                        </div>
+                        <div class="reference-picks" id="worldbook-reference-picks"></div>
+                    </details>
+                    <div class="panel-search" data-search-panel="worldbook" hidden>
+                        <input type="text" id="wb-search" placeholder="搜索世界书条目...">
+                        <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
+                        <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
+                    </div>
+                    <div id="worldbook-list" class="item-list">
+                        <div class="list-placeholder">尚未导入世界书<br>点击 "导入" 导入世界书</div>
+                    </div>
+                </div>
+
+                <div id="panel-characters" class="sidebar-panel">
+                    <div class="panel-toolbar">
+                        <button id="btn-add-character" title="添加角色">新角色</button>
+                        <button id="btn-import-character" title="导入角色卡">导入</button>
+                        <button id="btn-export-char" title="导出角色卡">导出</button>
+                        <span class="panel-toolbar-spacer"></span>
+                        <button id="btn-char-search" class="panel-tool-btn" title="搜索角色" aria-expanded="false">搜索</button>
+                        <button class="btn-batch-toggle panel-tool-btn" data-list="character" title="批量管理">批量操作</button>
+                    </div>
+                    <details class="reference-control" data-reference-kind="character">
+                        <summary class="reference-title">本次写作使用</summary>
+                        <div class="reference-segments">
+                            <button data-reference-mode="auto">自动识别</button>
+                            <button data-reference-mode="selected">手动选择</button>
+                            <button data-reference-mode="off">关闭</button>
+                        </div>
+                        <div class="reference-picks" id="character-reference-picks"></div>
+                    </details>
+                    <div class="panel-search" data-search-panel="character" hidden>
+                        <input type="text" id="character-search" placeholder="搜索角色...">
+                        <button type="button" class="panel-search-clear" title="清空搜索" aria-label="清空搜索">×</button>
+                        <button type="button" class="panel-search-close" title="关闭搜索" aria-label="关闭搜索">收起</button>
+                    </div>
+                    <div id="character-list" class="item-list">
+                        <div class="list-placeholder">尚未导入角色<br>点击 "导入" 导入角色卡</div>
+                    </div>
+                </div>
+
+                <div id="panel-ai-tools" class="sidebar-panel ai-panel-pro">
+                    <div class="ai-hero">
+                        <div>
+                            <h3>催更姬</h3>
+                            <p>连接模型后即可开始写作</p>
+                        </div>
+                        <span class="ai-hero-badge" id="ai-connection-badge">未连接</span>
+                    </div>
+
+                    <div class="ai-onboarding" id="ai-onboarding">
+                        <div class="ai-onboarding-title">快速上手</div>
+                        <div class="ai-onboarding-step" id="onboard-step-1"><span class="ai-onboarding-num">1</span><span>选择模型服务商</span><span class="ai-onboarding-check">✓</span></div>
+                        <div class="ai-onboarding-step" id="onboard-step-2"><span class="ai-onboarding-num">2</span><span>输入 API Key</span><span class="ai-onboarding-check">✓</span></div>
+                        <div class="ai-onboarding-step" id="onboard-step-3"><span class="ai-onboarding-num">3</span><span>用聊天框开始写作</span><span class="ai-onboarding-check">✓</span></div>
+                    </div>
+
+                    <div class="ai-section">
+                        <button id="btn-extract-setting" class="ai-btn-secondary">提取设定</button>
+                    </div>
+
+                    <div class="ai-section ai-quick-config">
+                        <div class="ai-section-title"><span>当前配置</span><small id="ai-quick-status">未连接</small></div>
+                        <div class="ai-quick-model" id="ai-quick-model">Claude (Anthropic)</div>
+                        <div class="ai-quick-detail" id="ai-quick-detail">尚未选择可用模型</div>
+                    <button id="btn-manage-ai-settings" class="ai-btn-secondary">管理 AI 服务</button>
+                    </div>
+
+                    <details class="ai-section ai-connection-section" id="ai-connection-section" open>
+                        <summary>
+                            <span>连接设置</span>
+                            <small id="ai-connection-summary">配置模型服务</small>
+                        </summary>
+                        <label class="ai-field-label" for="ai-provider">模型服务商</label>
+                        <select id="ai-provider" class="ai-select">
+                            <optgroup label="海外主流">
+                                <option value="anthropic">Claude (Anthropic)</option>
+                                <option value="openai">ChatGPT (OpenAI)</option>
+                                <option value="google">Gemini (Google AI Studio)</option>
+                                <option value="google-vertex">Gemini (Google Vertex AI)</option>
+                                <option value="mistral">Mistral AI</option>
+                                <option value="xai">Grok (xAI)</option>
+                                <option value="groq">Groq</option>
+                                <option value="openrouter">OpenRouter (多模型)</option>
+                            </optgroup>
+                            <optgroup label="国内大模型">
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="qwen">通义千问 (阿里)</option>
+                                <option value="doubao">豆包 (字节)</option>
+                                <option value="spark">讯飞星火</option>
+                                <option value="zai">GLM (智谱)</option>
+                                <option value="moonshot">Kimi (月之暗面)</option>
+                                <option value="siliconflow">SiliconFlow</option>
+                                <option value="minimax">MiniMax</option>
+                            </optgroup>
+                            <optgroup label="本地/自定义">
+                                <option value="ollama">Ollama (本地)</option>
+                                <option value="custom">自定义 OpenAI API</option>
+                            </optgroup>
+                        </select>
+
+                        <div id="ai-api-key-field">
+                            <label class="ai-field-label" for="ai-api-key">API Key <span class="info-tooltip" data-tooltip="连接 AI 服务的密钥，只保存在本机。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">不同服务商有不同的 API Key。粘贴后会保存在本机，不会上传到第三方。</span></span></label>
+                            <div class="ai-key-row">
+                                <input type="password" id="ai-api-key" placeholder="粘贴后自动保存到本机" class="ai-input" autocomplete="off" spellcheck="false">
+                                <button type="button" id="btn-toggle-api-key" class="ai-key-toggle" aria-label="显示 API Key" aria-pressed="false" title="显示 API Key">
+                                    <svg class="ai-key-eye ai-key-eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                                    <svg class="ai-key-eye ai-key-eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 6.1A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.1 2.8M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a10 10 0 0 0 4-.8M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+                                </button>
+                            </div>
+                            <div id="ai-api-key-status" class="ai-key-status">未配置 API Key</div>
+                        </div>
+
+                        <label class="ai-field-label" for="ai-endpoint">接口地址 <span class="info-tooltip" data-tooltip="通常不用修改；本地模型或自定义代理时填写。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">使用 Ollama、本地模型或自定义 API 代理时，填写完整接口地址。</span></span></label>
+                        <input type="text" id="ai-endpoint" placeholder="通常不用修改" class="ai-input">
+
+                        <label class="ai-field-label" for="ai-model">模型</label>
+                        <div class="ai-model-row">
+                            <select id="ai-model" class="ai-select" style="flex:1;min-width:0;">
+                                <option value="">— 先选服务商再刷新模型列表 —</option>
+                            </select>
+                            <button id="btn-fetch-models" class="ai-btn-inline">刷新模型列表</button>
+                        </div>
+                        <div id="model-context-info" class="model-context-info" style="display:none;"></div>
+                        <button id="btn-connect-model" class="ai-btn-primary ai-connect-btn">连接模型</button>
+                    </details>
+
+                    <div class="ai-section" id="ai-memory-settings">
+                        <div class="ai-section-title">
+                            <span>设定注入方式</span>
+                            <small id="reference-mode-summary">智能摘要：摘要注入 + 工具查询</small>
+                        </div>
+                        <div class="reference-mode-control" id="reference-injection-mode">
+                            <div class="reference-mode-options">
+                                <label class="reference-mode-option active">
+                                    <input type="radio" name="reference-injection-mode" value="tool" checked>
+                                    <span>
+                                        <strong>智能摘要</strong>
+                                        <em>注入简略摘要与信息，通过工具按需查询完整内容，上下文更稳定，缓存命中率较高</em>
+                                    </span>
+                                </label>
+                                <label class="reference-mode-option">
+                                    <input type="radio" name="reference-injection-mode" value="sillytavern">
+                                    <span>
+                                        <strong>完整注入</strong>
+                                        <em>按原文完整注入上下文，频繁更换内容，类似 ST 注入方式，缓存命中率较低</em>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <details class="ai-section ai-advanced" id="ai-generation-settings" open>
+                        <summary><span>高级参数</span><small>普通用户通常不用修改</small></summary>
+                        <div class="ai-control-row">
+                            <div><label>创造性 (Temperature) <span id="temp-value">0.7</span></label><p>越高越有变化，越低越稳定。小说通常 0.7-1.1。</p></div>
+                            <input type="range" id="ai-temperature" min="0" max="2" step="0.05" value="0.7" class="ai-range">
+                        </div>
+                        <div class="ai-control-row">
+                            <div><label>单次输出长度 <span id="max-tokens-value">5%</span></label><p>占模型上下文窗口的百分比。例如 1M 上下文中 5% = 50K tokens。</p></div>
+                            <input type="range" id="ai-max-tokens" min="1" max="50" step="1" value="5" class="ai-range">
+                        </div>
+                        <div class="ai-control-row">
+                            <div><label>Top P (候选范围) <span id="top-p-value">0.9</span></label><p>通常固定即可，避免和创造性一起大幅调整。</p></div>
+                            <input type="range" id="ai-top-p" min="0" max="1" step="0.05" value="0.9" class="ai-range">
+                        </div>
+                    </details>
+
+                    <div class="ai-section" id="preset-section">
+                        <div class="ai-section-title"><span>配置方案</span><small>保存和加载完整配置</small></div>
+                        <label class="ai-field-label" for="ai-preset">已保存的配置</label>
+                        <div class="ai-model-row">
+                            <select id="ai-preset" class="ai-select" style="flex:1;min-width:0;">
+                                <option value="">— 选择已保存的配置 —</option>
+                            </select>
+                            <button id="btn-load-preset" class="ai-icon-btn" title="加载配置">▶</button>
+                        </div>
+                        <span id="current-preset-name" class="ai-current-preset"></span>
+                        <div class="ai-config-actions" style="margin-top:6px;">
+                            <button id="btn-save-preset" class="ai-btn-secondary">保存当前</button>
+                            <button id="btn-import-preset" class="ai-btn-secondary">导入</button>
+                            <button id="btn-export-preset" class="ai-btn-secondary">导出</button>
+                        </div>
+                    </div>
+
+                    <div class="ai-section" id="regex-section">
+                        <div class="ai-section-title"><span>正则规则 <span id="regex-rules-count">0条</span></span><small>AI输出后自动替换</small></div>
+                        <div id="regex-rules-list" style="font-size:11px;color:var(--text-muted);line-height:1.6;"></div>
+                        <button id="btn-edit-regex" class="ai-btn-secondary" style="margin-top:4px;">编辑正则</button>
+                    </div>
+
+                    <!-- Regex editor overlay -->
+                    <div id="regex-editor-overlay" class="plot-modal-overlay" style="display:none;">
+                        <div class="plot-modal settings-modal" role="dialog">
+                            <div class="plot-modal-header">
+                                <div><h3>正则规则编辑器</h3><p class="settings-subtitle">AI输出后自动应用的正则替换规则</p></div>
+                                <button type="button" id="btn-regex-editor-close" class="plot-modal-close">×</button>
+                            </div>
+                            <div class="settings-body" id="regex-editor-body" style="overflow:hidden;grid-template-columns:auto 6px 1fr;">
+                                <nav class="settings-nav" id="regex-editor-nav" style="width:200px;min-width:140px;max-width:400px;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
+                                    <div class="prompt-editor-nav-list" id="regex-editor-nav-list" style="flex:1;overflow-y:auto;min-height:0;"></div>
+                                    <button type="button" id="btn-regex-editor-add" class="ai-btn-secondary">＋ 新增规则</button>
+                                </nav>
+                                <div class="prompt-editor-resizer" id="regex-editor-resizer"></div>
+                                <div class="settings-content">
+                                    <div class="settings-page active" id="regex-editor-form-area">
+                                        <div id="regex-editor-empty" class="prompt-editor-empty">← 选择一条规则编辑</div>
+                                        <div id="regex-editor-form" class="prompt-editor-form" style="display:none;">
+                                            <div class="settings-group"><label class="ai-field-label" for="regex-edit-name">名称</label><input type="text" id="regex-edit-name" class="ai-input" placeholder="规则名称"></div>
+                                            <div class="settings-group"><label class="ai-field-label" for="regex-edit-find">匹配正则</label><input type="text" id="regex-edit-find" class="ai-input" placeholder="/pattern/flags"></div>
+                                            <div class="settings-group"><label class="ai-field-label" for="regex-edit-replace">替换为</label><textarea id="regex-edit-replace" class="prompt-editor-content" style="min-height:120px;" placeholder="替换文本，\$1 \$2 为捕获组"></textarea></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="plot-modal-footer">
+                                <button type="button" id="btn-regex-editor-delete" class="ai-btn-secondary" style="color:var(--error);border-color:rgba(229,72,77,0.45);">删除</button>
+                                <button type="button" id="btn-regex-editor-save" class="ai-btn-primary">保存</button>
+                                <button type="button" id="btn-regex-editor-done" class="ai-btn-secondary">完成</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <details class="ai-section" id="prompt-templates-section" open>
+                        <summary><span>Prompt 模板 <span id="prompt-template-count"></span></span><small>控制写作行为和优先级</small></summary>
+                        <div class="prompt-template-tools">
+                            <button id="btn-add-prompt-template" class="ai-btn-secondary">新增</button>
+                            <button id="btn-edit-prompt-templates" class="ai-btn-secondary">编辑模板</button>
+                        </div>
+                        <input type="text" id="prompt-template-search" class="ai-input prompt-template-search" placeholder="搜索模板名称、内容、角色...">
+                        <div id="prompt-templates-list" class="prompt-templates-list">
+                            <div class="list-placeholder" style="font-size:11px;padding:8px;">尚未导入预设<br><button id="btn-import-preset-inline" style="margin-top:6px;font-size:11px;">导入预设</button></div>
+                        </div>
+                    </details>
+
+                    <div class="ai-section" id="extraction-section" style="display:none;">
+                        <div class="ai-section-title"><span>AI 发现的新内容</span><small>可整理进设定</small></div>
+                        <div id="extraction-results" class="extraction-results"></div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <footer id="status-bar">
+            <span id="status-message">就绪</span>
+            <span id="status-connection">未连接</span>
+            <span id="status-model">-</span>
+            <span id="status-words">字数: 0</span>
+            <span id="status-save">已保存</span>
+        </footer>
+    </div>
+
+    <div id="contact-author-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal contact-author-modal" role="dialog" aria-modal="true" aria-labelledby="contact-author-title">
+            <div class="plot-modal-header">
+                <div>
+                    <h3 id="contact-author-title">联系作者</h3>
+                    <p class="settings-subtitle">感谢你使用催更姬，欢迎支持、反馈和给项目点星。</p>
+                </div>
+                <button type="button" id="btn-contact-author-close" class="plot-modal-close" aria-label="关闭联系作者">×</button>
+            </div>
+            <div class="contact-author-body">
+                <a class="contact-author-card" href="https://space.bilibili.com/3707006961584592" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">B站主页</span>
+                    <strong>https://space.bilibili.com/3707006961584592</strong>
+                    <em>来 B 站看看催更姬的更新和碎碎念。</em>
+                </a>
+                <a class="contact-author-card" href="https://ifdian.net/a/cuigengji" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">爱发电</span>
+                    <strong>https://ifdian.net/a/cuigengji</strong>
+                    <em>支持作者继续开发催更姬。</em>
+                </a>
+                <a class="contact-author-card" href="https://github.com/mistnest/cuigengji" target="_blank" rel="noopener noreferrer">
+                    <span class="contact-author-label">GitHub</span>
+                    <strong>https://github.com/mistnest/cuigengji</strong>
+                    <em>多点几个 star！！</em>
+                </a>
+                <div class="contact-author-mascot">
+                    <img src="images/haoye.png" alt="好耶">
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note">链接会在浏览器中打开。</span>
+                <button type="button" id="btn-contact-author-done" class="ai-btn-primary">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div class="plot-modal-header">
+                <div>
+                    <h3 id="settings-title">设置</h3>
+                    <p class="settings-subtitle">管理界面、编辑器、工作区和 AI 服务</p>
+                </div>
+                <button type="button" id="btn-settings-close" class="plot-modal-close" aria-label="关闭设置">×</button>
+            </div>
+            <div class="settings-body">
+                <nav class="settings-nav" aria-label="设置分类">
+                    <button type="button" class="active" data-settings-page="general">通用</button>
+                    <button type="button" data-settings-page="editor">编辑器</button>
+                    <button type="button" data-settings-page="ai-service">AI 服务</button>
+                    <button type="button" data-settings-page="generation">生成参数</button>
+                </nav>
+                <div class="settings-content">
+                    <section class="settings-page active" data-settings-content="general">
+                        <div class="settings-page-heading">
+                            <h4>通用</h4>
+                            <p>调整应用外观和工作区行为。</p>
+                        </div>
+                        <div class="settings-group">
+                            <h5>外观</h5>
+                            <label class="settings-row" for="setting-theme">
+                                <span><strong>界面主题</strong><span>跟随系统，或固定使用浅色、深色主题。</span></span>
+                                <select id="setting-theme" class="ai-select">
+                                    <option value="auto">跟随系统</option>
+                                    <option value="light">浅色</option>
+                                    <option value="dark">深色</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="settings-group">
+                            <h5>保存与工作区</h5>
+                            <label class="settings-row" for="setting-autosave-delay">
+                                <span><strong>自动保存等待</strong><span>停止输入多久后自动保存当前章节。</span></span>
+                                <select id="setting-autosave-delay" class="ai-select">
+                                    <option value="1000">1 秒</option>
+                                    <option value="2000">2 秒</option>
+                                    <option value="5000">5 秒</option>
+                                </select>
+                            </label>
+                            <div class="settings-actions">
+                                <button type="button" id="btn-reset-panel-layout" class="ai-btn-secondary">重置侧栏宽度</button>
+                                <button type="button" id="btn-clear-recent-order" class="ai-btn-secondary">清除最近排序</button>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="settings-page" data-settings-content="editor">
+                        <div class="settings-page-heading">
+                            <h4>编辑器</h4>
+                            <p>调整正文阅读与输入体验，修改会立即生效。</p>
+                        </div>
+                        <div class="settings-group">
+                            <label class="settings-row" for="setting-editor-font">
+                                <span><strong>正文字体</strong><span>选择更适合长篇阅读或快速输入的字体。</span></span>
+                                <select id="setting-editor-font" class="ai-select">
+                                    <option value="serif">衬线体</option>
+                                    <option value="sans">无衬线体</option>
+                                    <option value="mono">等宽字体</option>
+                                </select>
+                            </label>
+                            <label class="settings-row" for="setting-editor-font-size">
+                                <span><strong>正文字号</strong><span>调整章节正文的显示大小。</span></span>
+                                <input id="setting-editor-font-size" type="range" min="14" max="24" step="1">
+                                <b id="setting-editor-font-size-value">17px</b>
+                            </label>
+                            <label class="settings-row" for="setting-editor-line-height">
+                                <span><strong>正文行距</strong><span>较宽行距适合校阅，较紧行距适合浏览。</span></span>
+                                <input id="setting-editor-line-height" type="range" min="1.5" max="2.6" step="0.1">
+                                <b id="setting-editor-line-height-value">2.0</b>
+                            </label>
+                        </div>
+                    </section>
+                    <section class="settings-page" data-settings-content="ai-service">
+                        <div class="settings-page-heading">
+                            <h4>AI 服务</h4>
+                            <p>配置服务商、密钥、接口地址和模型连接。</p>
+                        </div>
+                        <div id="settings-ai-service-slot"></div>
+                    </section>
+                    <section class="settings-page" data-settings-content="generation">
+                        <div class="settings-page-heading">
+                            <h4>生成参数</h4>
+                            <p>控制模型的创造性、输出长度和候选范围。</p>
+                        </div>
+                        <div id="settings-generation-slot"></div>
+                    </section>
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note">修改会自动保存到本机</span>
+                <button type="button" id="btn-settings-done" class="ai-btn-primary">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="prompt-editor-overlay" class="plot-modal-overlay" style="display:none;">
+        <div class="plot-modal settings-modal" role="dialog" aria-modal="true">
+            <div class="plot-modal-header">
+                <div><h3>Prompt 模板编辑器</h3><p class="settings-subtitle">管理写作模板 — 名称、角色和内容均可编辑</p></div>
+                <button type="button" id="btn-prompt-editor-close" class="plot-modal-close">×</button>
+            </div>
+            <div class="settings-body" id="prompt-editor-body">
+                <nav class="settings-nav" id="prompt-editor-nav" style="width:200px;min-width:140px;max-width:400px;">
+                    <div class="prompt-editor-nav-tools" style="display:none;" id="prompt-editor-nav-tools">
+                        <button type="button" id="btn-prompt-batch-toggle" class="ai-btn-secondary">批量</button>
+                        <button type="button" id="btn-prompt-select-all" class="ai-btn-secondary" style="display:none;">全选</button>
+                        <button type="button" id="btn-prompt-invert" class="ai-btn-secondary" style="display:none;">反选</button>
+                    </div>
+                    <div class="prompt-editor-nav-list" id="prompt-editor-nav-list"></div>
+                    <div class="prompt-editor-batch-actions" style="display:none;" id="prompt-editor-batch-actions">
+                        <button type="button" data-action="enable" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;">启用</button>
+                        <button type="button" data-action="disable" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;">停用</button>
+                        <button type="button" data-action="delete" class="ai-btn-secondary" style="flex:1;margin-bottom:0;font-size:11px;color:var(--error);border-color:rgba(229,72,77,0.4);">删除</button>
+                    </div>
+                    <button type="button" id="btn-prompt-editor-add" class="ai-btn-secondary" style="margin-top:8px;">＋ 新增模板</button>
+                </nav>
+                <div class="prompt-editor-resizer" id="prompt-editor-resizer"></div>
+                <div class="settings-content">
+                    <div class="settings-page active" id="prompt-editor-form-area">
+                        <div class="prompt-editor-empty" id="prompt-editor-empty"><p>← 从左侧选择一个模板进行编辑</p><p style="color:var(--text-muted);font-size:12px;">或点击「＋ 新增模板」创建</p></div>
+                        <div class="prompt-editor-form" id="prompt-editor-form" style="display:none;">
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-name">名称</label><input type="text" id="prompt-editor-name" class="ai-input" placeholder="模板名称"></div>
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-role">优先级 <span class="info-tooltip"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">控制模板注入的先后顺序和重要程度。<br><br><b>高</b> — 全局规则，最先注入AI。适合写：世界观约束、禁止事项、文风底线。<br><br><b>中</b> — 用户指令，紧随其后。适合写：当前任务说明、输出格式要求。<br><br><b>低</b> — 写作示例，最后注入。适合写：对话示范、期望的文风样本。</span></span></label><select id="prompt-editor-role" class="ai-select"><option value="system">高 — 全局规则</option><option value="user">中 — 用户指令</option><option value="assistant">低 — 写作示例</option></select></div>
+                            <div class="settings-group"><label class="settings-check"><input type="checkbox" id="prompt-editor-is-system"> 设为系统提示词</label><label class="settings-check" style="border-bottom:none;"><input type="checkbox" id="prompt-editor-is-marker"> 占位标记（无实际内容）</label></div>
+                            <div class="settings-group"><label class="ai-field-label" for="prompt-editor-content">内容</label><textarea id="prompt-editor-content" class="prompt-editor-content" placeholder="Prompt 模板内容..."></textarea></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="plot-modal-footer">
+                <span class="settings-save-note" id="prompt-editor-note"></span>
+                <button type="button" id="btn-prompt-editor-delete" class="ai-btn-secondary" style="color:var(--error);border-color:rgba(229,72,77,0.45);width:auto;">删除</button>
+                <button type="button" id="btn-prompt-editor-save" class="ai-btn-primary" style="width:auto;">保存</button>
+                <button type="button" id="btn-prompt-editor-done" class="ai-btn-secondary" style="width:auto;">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" id="file-input-worldbook" accept=".json" style="display:none">
+    <input type="file" id="file-input-character" accept=".png,.json" multiple style="display:none">
+    <input type="file" id="file-input-preset" accept=".json" style="display:none">
+    <input type="file" id="file-input-document" accept=".txt,.docx,.doc" style="display:none">
+    <input type="file" id="file-input-folder" webkitdirectory directory style="display:none">
+
+    <script src="js/app-signature.js"></script>
+    <script src="js/core/api-client.js"></script>
+    <script src="js/editor/chapter-tree.js"></script>
+    <script src="js/editor/resizable-panels.js"></script>
+    <script src="js/ai/plot-candidates.js"></script>
+    <script src="js/ai/chat-panel.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
