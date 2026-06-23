@@ -75,3 +75,12 @@ export function stripPseudoToolCalls(text = '') {
         .replace(/```(?:json|xml)?\s*[\s\S]*?(?:tool_calls|get_reference_detail|search_reference|get_scene_context)[\s\S]*?```/gi, '')
         .trim();
 }
+
+export function stripReasoningBlocks(text = '') {
+    return String(text || '')
+        .replace(/\[REASONING\][\s\S]*?\[\/REASONING\]/gi, '')
+        .replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, '')
+        .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+        .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, '')
+        .trim();
+}

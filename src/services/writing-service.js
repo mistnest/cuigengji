@@ -7,7 +7,7 @@ import {
     summarizeToolResult,
 } from './ai-tools/reference/index.js';
 import { executeTool } from './chat-tools.js';
-import { applyWritingOutputGuard, stripPseudoToolCalls } from './writing-output-guard.js';
+import { applyWritingOutputGuard, stripPseudoToolCalls, stripReasoningBlocks } from './writing-output-guard.js';
 
 const MAX_REFERENCE_TOOL_ROUNDS = 4;
 const MAX_REFERENCE_TOOL_CALLS = 8;
@@ -152,11 +152,11 @@ function sanitizeWritingHistory(history = [], promptTemplates = []) {
 }
 
 function sanitizeAssistantWritingMessage(message = {}, promptTemplates = []) {
-        const guarded = applyWritingOutputGuard(message.content || '', { promptTemplates });
-        return {
-            role: 'assistant',
-            content: String(guarded.reply || '').trim(),
-        };
+    const guarded = applyWritingOutputGuard(message.content || '', { promptTemplates });
+    return {
+        role: 'assistant',
+        content: stripReasoningBlocks(guarded.reply || ''),
+    };
 }
 
 function isAssistantErrorContent(content = '') {

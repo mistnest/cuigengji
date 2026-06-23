@@ -12,6 +12,7 @@ import {
     isStMarkerIdentifier,
     isStSpecialMarker,
 } from './context-chains/st-compatible-chain.js';
+import { stripReasoningBlocks } from './writing-output-guard.js';
 
 const VALID_TEMPLATE_ROLES = new Set(['system', 'developer', 'user', 'assistant']);
 
@@ -322,6 +323,9 @@ function sanitizeConversationHistory(history = []) {
         let content = String(msg.content || '').trim();
         content = content.replace(/^## 当前作者要求\n+/g, '');
         content = content.replace(/^## 第 \d+ 轮(?: · 作者要求)?\n+/g, '');
+        if (msg.role === 'assistant') {
+            content = stripReasoningBlocks(content);
+        }
         if (!content) continue;
         if (msg.role === 'assistant' && isAssistantErrorContent(content)) continue;
 
