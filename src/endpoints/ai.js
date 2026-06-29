@@ -14,7 +14,7 @@ import { prepareContext } from '../services/context-manager.js';
 import { NovelMemory } from '../services/novel-memory.js';
 import { getAuthorProfile } from '../services/author-profile.js';
 import { applyAiSecret } from '../services/ai-secrets.js';
-import { callAIText, fetchModelList } from '../services/ai-client.js';
+import { callAIText, detectNetworkProxy, fetchModelList, isLikelyNetworkProxyError } from '../services/ai-client.js';
 import { applyAiReferenceSummary, normalizeAiSummary } from '../services/reference-summaries.js';
 import { capturePrompt } from './debug.js';
 import { projectFile } from '../lib/project-paths.js';
@@ -27,7 +27,13 @@ const EXTRACTION_JOB_LIMIT = 30;
 const EXTRACTION_JOB_PROGRESS_LIMIT = 160;
 
 function hasApiKey(config) {
-    return !!config?.apiKey || config?.provider === 'ollama';
+    return !!config?.apiKey
+        || config?.provider === 'ollama'
+        || (
+            config?.provider === 'google-vertex'
+            && String(config?.vertexAuthMode || 'express') === 'full'
+            && !!config?.vertexServiceAccountJson
+        );
 }
 
 function createExtractionJob({ type, title, novelId = '', range = null }) {
@@ -370,7 +376,9 @@ router.post('/extract-jobs', async (req, res) => {
             type = 'current',
             text = '',
             novelId = '',
+            chapterId = '',
             chapterTitle = '',
+            chapterOrder = null,
             config,
             presetName,
             startOrder = 1,
@@ -409,7 +417,9 @@ router.post('/extract-jobs', async (req, res) => {
                 text: String(text || ''),
                 novelId,
                 aiConfig,
+                chapterId,
                 chapterTitle,
+                chapterOrder,
                 startOrder: Number(startOrder),
                 endOrder: Number(endOrder),
                 maxChapters: Number(maxChapters) || 100,
@@ -450,7 +460,21 @@ async function runCurrentExtractionJob(job, payload) {
     capturePrompt({ provider: payload.aiConfig.provider, model: payload.aiConfig.model, systemPrompt: sysPrompt, userPrompt });
     const raw = await callAIText(payload.aiConfig, sysPrompt, userPrompt, { maxTokens: 8000 });
     const parsed = parseExtractionResult(raw);
-    const result = { ...parsed, rawResponse: raw };
+    let persistedSummary = false;
+    if (payload.novelId && payload.chapterId && parsed.chapterSummary?.brief) {
+        const chapter = await loadExtractionChapterById(payload.novelId, payload.chapterId);
+        persistedSummary = await persistChapterAiSummary(chapter, parsed.chapterSummary);
+        if (persistedSummary) pushExtractionProgress(job, '本章摘要已写入章节文件。');
+    }
+    const result = {
+        ...parsed,
+        mode: 'current',
+        chapterId: payload.chapterId || '',
+        chapterTitle: payload.chapterTitle || '',
+        chapterOrder: payload.chapterOrder ?? null,
+        chapterSummaryPersisted: persistedSummary,
+        rawResponse: raw,
+    };
     pushExtractionProgress(job, `当前章节提取完成：角色 ${parsed.characters.length}，世界书 ${parsed.worldEntries.length}。`);
     updateExtractionJob(job, {
         status: 'done',
@@ -462,9 +486,12 @@ async function runCurrentExtractionJob(job, payload) {
 
 async function runProjectExtractionJob(job, payload) {
     pushExtractionProgress(job, '正在读取项目章节。');
-    const chapters = (await loadExtractionChapters(payload.novelId))
-        .filter(chapter => chapter.order >= Number(payload.startOrder) && chapter.order <= Number(payload.endOrder))
-        .slice(0, Math.max(1, Math.min(200, Number(payload.maxChapters) || 100)));
+    const chapters = selectExtractionChapterRange(
+        await loadExtractionChapters(payload.novelId),
+        payload.startOrder,
+        payload.endOrder,
+        payload.maxChapters,
+    );
     if (!chapters.length) throw new Error('No chapters in selected range');
 
     updateExtractionJob(job, {
@@ -566,15 +593,50 @@ router.post('/test-connection', async (req, res) => {
     try {
         const { config, presetName } = req.body;
         const aiConfig = applyAiSecret(config, presetName);
-        {
-            const result = await callAIText(
-                aiConfig,
-                '\u7b80\u77ed\u56de\u590d\u3002',
-                '\u53ea\u56de\u590d\u201c\u8fde\u63a5\u6210\u529f\u201d\u3002',
-                { maxTokens: 512 },
-            );
+        const runTest = cfg => callAIText(
+            cfg,
+            '\u7b80\u77ed\u56de\u590d\u3002',
+            '\u53ea\u56de\u590d\u201c\u8fde\u63a5\u6210\u529f\u201d\u3002',
+            { maxTokens: 512 },
+        );
+        try {
+            const result = await runTest(aiConfig);
             return res.json({ success: true, response: result });
+        } catch (err) {
+            const mode = String(aiConfig.networkProxyMode || 'auto');
+            if (mode !== 'auto' || aiConfig.networkProxyUrl || !isLikelyNetworkProxyError(err)) {
+                throw err;
+            }
+            const detected = await detectNetworkProxy({ timeoutMs: 3500 });
+            if (!detected?.proxyUrl) throw err;
+            const retryConfig = { ...aiConfig, networkProxyMode: 'manual', networkProxyUrl: detected.proxyUrl };
+            try {
+                const result = await runTest(retryConfig);
+                return res.json({
+                    success: true,
+                    response: result,
+                    detectedNetworkProxy: detected.proxyUrl,
+                    networkProxyStatus: `已自动识别代理 ${detected.proxyUrl}`,
+                });
+            } catch (retryErr) {
+                return res.json({
+                    success: false,
+                    error: retryErr.message,
+                    detectedNetworkProxy: detected.proxyUrl,
+                    networkProxyStatus: `已自动识别代理 ${detected.proxyUrl}，但模型服务返回错误`,
+                });
+            }
         }
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+router.post('/detect-network-proxy', async (_req, res) => {
+    try {
+        const detected = await detectNetworkProxy({ timeoutMs: 3500 });
+        if (!detected?.proxyUrl) return res.json({ success: false, error: '未检测到可用的本机网络代理' });
+        res.json({ success: true, ...detected });
     } catch (err) {
         res.json({ success: false, error: err.message });
     }
@@ -689,9 +751,12 @@ router.post('/extract-project', async (req, res) => {
         if (!novelId) return res.status(400).json({ error: 'novelId is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
 
-        const chapters = (await loadExtractionChapters(novelId))
-            .filter(chapter => chapter.order >= Number(startOrder) && chapter.order <= Number(endOrder))
-            .slice(0, Math.max(1, Math.min(200, Number(maxChapters) || 100)));
+        const chapters = selectExtractionChapterRange(
+            await loadExtractionChapters(novelId),
+            startOrder,
+            endOrder,
+            maxChapters,
+        );
         if (!chapters.length) return res.status(400).json({ error: 'No chapters in selected range' });
 
         const aggregate = {
@@ -764,9 +829,12 @@ router.post('/extract-project-stream', async (req, res) => {
             return res.end();
         }
 
-        const chapters = (await loadExtractionChapters(novelId))
-            .filter(chapter => chapter.order >= Number(startOrder) && chapter.order <= Number(endOrder))
-            .slice(0, Math.max(1, Math.min(200, Number(maxChapters) || 100)));
+        const chapters = selectExtractionChapterRange(
+            await loadExtractionChapters(novelId),
+            startOrder,
+            endOrder,
+            maxChapters,
+        );
         if (!chapters.length) {
             sendSse(res, { type: 'error', message: 'No chapters in selected range' });
             return res.end();
@@ -953,6 +1021,26 @@ async function loadExtractionChapters(novelId) {
         Number(a.order || 0) - Number(b.order || 0)
         || a.title.localeCompare(b.title, 'zh-CN')
     );
+}
+
+function selectExtractionChapterRange(chapters = [], startOrder = 1, endOrder = 50, maxChapters = 100) {
+    const ordered = (Array.isArray(chapters) ? chapters : [])
+        .filter(chapter => chapter && String(chapter.content || '').trim())
+        .slice()
+        .sort((a, b) =>
+            Number(a.order || 0) - Number(b.order || 0)
+            || String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN')
+        );
+    const start = Math.max(1, Number(startOrder) || 1);
+    const end = Math.max(start, Number(endOrder) || start);
+    const limit = Math.max(1, Math.min(200, Number(maxChapters) || 100));
+    return ordered.slice(start - 1, end).slice(0, limit);
+}
+
+async function loadExtractionChapterById(novelId, chapterId) {
+    if (!novelId || !chapterId) return null;
+    const chapters = await loadExtractionChapters(novelId);
+    return chapters.find(chapter => String(chapter.id || '') === String(chapterId)) || null;
 }
 
 function buildProjectExtractionPrompt() {

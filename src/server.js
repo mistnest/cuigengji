@@ -102,6 +102,7 @@ import { router as novelsRouter } from './endpoints/novels.js';
 import { router as sessionsRouter } from './endpoints/sessions.js';
 import { router as debugRouter } from './endpoints/debug.js';
 import { router as aiSecretsRouter } from './endpoints/ai-secrets.js';
+import { router as updateRouter } from './endpoints/update.js';
 
 app.use('/api/chapters', chaptersRouter);
 app.use('/api/outline', outlineRouter);
@@ -113,6 +114,7 @@ app.use('/api/novels', novelsRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/debug', debugRouter);
 app.use('/api/ai-secrets', aiSecretsRouter);
+app.use('/api/update', updateRouter);
 
 // ---- 404 ----
 app.use(notFoundHandler);

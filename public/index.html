@@ -7,7 +7,7 @@
     <meta name="application-name" content="催更姬">
     <meta name="cuigengji:repository" content="https://github.com/mistnest/cuigengji">
     <meta name="cuigengji:signature" content="cgj-mistnest-2026-community-source">
-    <title>催更姬</title>
+    <title>催更姬 — AI 写作助手</title>
     <link rel="stylesheet" href="css/editor.css">
 </head>
 <body data-cuigengji-app="mistnest-cuigengji">
@@ -19,7 +19,7 @@
             <div class="welcome-logo">
                 <img src="avatar.png" alt="催更姬" class="welcome-avatar">
                 <h1>催更姬</h1>
-                <p>小说创作 AI 助手</p>
+                <p>长篇网文创作工具</p>
             </div>
 
             <div class="welcome-section">
@@ -112,7 +112,7 @@
                         <button id="btn-add-volume" title="添加卷">新卷</button>
                     </div>
                     <div id="chapter-tree" class="tree-view">
-                        <div class="tree-placeholder">尚未创建章节<br>点击"新章节"开始写作</div>
+                        <div class="tree-placeholder">尚未创建章节<br>点击「新章节」开始写作</div>
                     </div>
                 </div>
 
@@ -121,7 +121,7 @@
                         <button id="btn-add-outline-node" title="添加大纲节点">新节点</button>
                     </div>
                     <div id="outline-tree" class="tree-view">
-                        <div class="tree-placeholder">尚未创建大纲<br>点击"新节点"规划情节</div>
+                        <div class="tree-placeholder">尚未创建大纲<br>点击「新节点」规划情节</div>
                     </div>
                 </div>
             </aside>
@@ -140,11 +140,10 @@
                     </div>
                     <div class="editor-toolbar-right">
                         <span id="word-count" class="word-count">字数: 0</span>
-                        <span id="token-count" class="token-count">Token: 0</span>
                     </div>
                 </div>
                 <div id="editor-container">
-                    <textarea id="chapter-editor" placeholder="开始写作你的故事...&#10;&#10;提示：右侧可以续写正文、补写片段，或让 AI 帮你整理情节。"></textarea>
+                    <textarea id="chapter-editor" placeholder="开始写作…&#10;&#10;提示：右侧对话面板可以续写正文、研讨情节或整理设定。"></textarea>
                 </div>
                 <div id="chapter-summary-area" class="chapter-summary-area" style="display:none;">
                     <div class="chapter-summary-drag" id="summary-drag" title="拖动调整高度"></div>
@@ -190,13 +189,13 @@
 
                     <div class="chat-messages" id="chat-messages">
                         <div class="chat-welcome">
-                            <p>输入消息告诉催更姬你的需求，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
+                            <p>输入消息，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
                         </div>
                     </div>
 
                     <div class="cc-input-area">
                         <div class="cc-context-bar"><div class="cc-context-fill" id="context-fill"></div></div>
-                        <textarea class="cc-input" id="chat-input" rows="1" placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"></textarea>
+                        <textarea class="cc-input" id="chat-input" rows="1" placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"></textarea>
                         <div class="cc-input-footer">
                             <div class="cc-ctx-circle" id="ctx-circle" title="上下文用量">
                                 <svg width="20" height="20">
@@ -362,6 +361,62 @@
 
                         <label class="ai-field-label" for="ai-endpoint">接口地址 <span class="info-tooltip" data-tooltip="通常不用修改；本地模型或自定义代理时填写。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">使用 Ollama、本地模型或自定义 API 代理时，填写完整接口地址。</span></span></label>
                         <input type="text" id="ai-endpoint" placeholder="通常不用修改" class="ai-input">
+
+                        <div id="ai-vertex-fields" class="ai-provider-extra" style="display:none;">
+                            <label class="ai-field-label" for="ai-vertex-auth-mode">Vertex AI 认证方式</label>
+                            <select id="ai-vertex-auth-mode" class="ai-select">
+                                <option value="express">Express API Key</option>
+                                <option value="full">Service Account JSON</option>
+                            </select>
+
+                            <label class="ai-field-label" for="ai-vertex-region">Vertex AI Region</label>
+                            <input type="text" id="ai-vertex-region" class="ai-input" value="us-central1" placeholder="global, us-central1, europe-west1, asia-northeast1" list="ai-vertex-region-options">
+                            <datalist id="ai-vertex-region-options">
+                                <option value="global"></option>
+                                <option value="us-central1"></option>
+                                <option value="us-east1"></option>
+                                <option value="us-east4"></option>
+                                <option value="us-west1"></option>
+                                <option value="us-west4"></option>
+                                <option value="europe-west1"></option>
+                                <option value="europe-west4"></option>
+                                <option value="asia-northeast1"></option>
+                                <option value="asia-southeast1"></option>
+                            </datalist>
+
+                            <label class="ai-field-label" for="ai-vertex-project-id">Project ID <span class="info-tooltip" data-tooltip="Express 模式下部分 Region 需要；Service Account 模式通常会从 JSON 里读取，也可以手动填写覆盖。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">Vertex AI 的 GCP Project ID。Express 默认区可能可不填，其他区或 Full 模式建议填写。</span></span></label>
+                            <input type="text" id="ai-vertex-project-id" class="ai-input" placeholder="your-gcp-project-id">
+
+                            <div id="ai-vertex-service-account-field" style="display:none;">
+                                <label class="ai-field-label" for="ai-vertex-service-account-json">Service Account JSON</label>
+                                <textarea id="ai-vertex-service-account-json" class="ai-input ai-textarea" placeholder="粘贴 service_account JSON，保存后只保存在本机"></textarea>
+                                <div id="ai-vertex-service-account-status" class="ai-key-status">未配置 Service Account JSON</div>
+                            </div>
+                        </div>
+
+                        <div id="ai-compatible-extra-fields" class="ai-provider-extra" style="display:none;">
+                            <div id="ai-siliconflow-endpoint-field" style="display:none;">
+                                <label class="ai-field-label" for="ai-siliconflow-endpoint">SiliconFlow 接口区域</label>
+                                <select id="ai-siliconflow-endpoint" class="ai-select">
+                                    <option value="global">Global (siliconflow.com)</option>
+                                    <option value="cn">中国站 (siliconflow.cn)</option>
+                                </select>
+                            </div>
+                            <div id="ai-minimax-endpoint-field" style="display:none;">
+                                <label class="ai-field-label" for="ai-minimax-endpoint">MiniMax 接口区域</label>
+                                <select id="ai-minimax-endpoint" class="ai-select">
+                                    <option value="global">Global (minimax.io)</option>
+                                    <option value="cn">中国站 (minimaxi.com)</option>
+                                </select>
+                            </div>
+                            <div id="ai-zai-endpoint-field" style="display:none;">
+                                <label class="ai-field-label" for="ai-zai-endpoint">Z.AI 接口类型</label>
+                                <select id="ai-zai-endpoint" class="ai-select">
+                                    <option value="common">通用 API</option>
+                                    <option value="coding">编程 API</option>
+                                </select>
+                            </div>
+                        </div>
 
                         <label class="ai-field-label" for="ai-model">模型</label>
                         <div class="ai-model-row">
@@ -548,6 +603,7 @@
                 <nav class="settings-nav" aria-label="设置分类">
                     <button type="button" class="active" data-settings-page="general">通用</button>
                     <button type="button" data-settings-page="editor">编辑器</button>
+                    <button type="button" data-settings-page="network">网络代理</button>
                     <button type="button" data-settings-page="ai-service">AI 服务</button>
                     <button type="button" data-settings-page="generation">生成参数</button>
                 </nav>
@@ -583,6 +639,17 @@
                                 <button type="button" id="btn-clear-recent-order" class="ai-btn-secondary">清除最近排序</button>
                             </div>
                         </div>
+                        <div class="settings-group">
+                            <h5>软件更新</h5>
+                            <p class="settings-subtitle" id="update-current-version">当前版本：读取中...</p>
+                            <div id="update-status" class="ai-key-status">点击检查更新，查看 GitHub Releases 是否有新版本。</div>
+                            <div id="update-release-notes" class="settings-update-notes" hidden></div>
+                            <div class="settings-actions">
+                                <button type="button" id="btn-check-update" class="ai-btn-secondary">检查更新</button>
+                                <button type="button" id="btn-open-release" class="ai-btn-secondary" disabled>打开下载页</button>
+                                <button type="button" id="btn-ignore-update" class="ai-btn-secondary" hidden>忽略这个版本</button>
+                            </div>
+                        </div>
                     </section>
                     <section class="settings-page" data-settings-content="editor">
                         <div class="settings-page-heading">
@@ -609,6 +676,13 @@
                                 <b id="setting-editor-line-height-value">2.0</b>
                             </label>
                         </div>
+                    </section>
+                    <section class="settings-page" data-settings-content="network">
+                        <div class="settings-page-heading">
+                            <h4>网络代理</h4>
+                            <p>管理模型请求使用的本机代理。适合 VPN、代理软件或公司网络环境。</p>
+                        </div>
+                        <div id="settings-network-proxy-slot"></div>
                     </section>
                     <section class="settings-page" data-settings-content="ai-service">
                         <div class="settings-page-heading">

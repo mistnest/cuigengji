@@ -1,3 +1,6 @@
+import crypto from 'node:crypto';
+import { ProxyAgent } from 'undici';
+
 import { createApiCallId, logApiCall } from './api-call-logger.js';
 
 const DEFAULT_ENDPOINTS = {
@@ -6,14 +9,18 @@ const DEFAULT_ENDPOINTS = {
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     doubao: 'https://ark.cn-beijing.volces.com/api/v3',
     spark: 'https://spark-api-open.xf-yun.com/v1',
-    siliconflow: 'https://api.siliconflow.cn/v1',
+    siliconflow: 'https://api.siliconflow.com/v1',
+    siliconflow_cn: 'https://api.siliconflow.cn/v1',
     groq: 'https://api.groq.com/openai/v1',
     mistral: 'https://api.mistral.ai/v1',
     xai: 'https://api.x.ai/v1',
-    moonshot: 'https://api.moonshot.cn/v1',
+    moonshot: 'https://api.moonshot.ai/v1',
     zai: 'https://api.z.ai/api/paas/v4',
+    zai_coding: 'https://api.z.ai/api/coding/paas/v4',
     minimax: 'https://api.minimax.io/v1',
+    minimax_cn: 'https://api.minimaxi.com/v1',
     openrouter: 'https://openrouter.ai/api/v1',
+    'google-vertex': '',
     custom: '',
 };
 
@@ -25,19 +32,56 @@ const DEFAULT_MODELS = {
     doubao: 'doubao-pro-32k',
     spark: 'lite',
     google: 'gemini-2.5-flash',
+    'google-vertex': 'gemini-2.5-flash',
     siliconflow: 'deepseek-ai/DeepSeek-V3',
     groq: 'llama-3.3-70b-versatile',
     mistral: 'mistral-large-latest',
-    xai: 'grok-2',
-    moonshot: 'moonshot-v1-8k',
-    zai: 'glm-4',
-    minimax: 'abab6.5s-chat',
+    xai: 'grok-3-beta',
+    moonshot: 'kimi-latest',
+    zai: 'glm-5-turbo',
+    minimax: 'MiniMax-M2.7',
     openrouter: 'anthropic/claude-sonnet-4-6',
     ollama: 'llama3',
 };
 
+const GOOGLE_VERTEX_MODELS = [
+    { id: 'gemini-3-pro-preview', name: 'gemini-3-pro-preview', contextLimit: 1000000 },
+    { id: 'gemini-3-flash-preview', name: 'gemini-3-flash-preview', contextLimit: 1000000 },
+    { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro', contextLimit: 1000000 },
+    { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash', contextLimit: 1000000 },
+    { id: 'gemini-2.5-flash-lite', name: 'gemini-2.5-flash-lite', contextLimit: 1000000 },
+    { id: 'gemini-2.0-flash-001', name: 'gemini-2.0-flash-001', contextLimit: 1000000 },
+    { id: 'gemini-2.0-flash-lite-001', name: 'gemini-2.0-flash-lite-001', contextLimit: 1000000 },
+];
+
+const PROXY_TEST_URLS = [
+    'https://aiplatform.googleapis.com',
+    'https://generativelanguage.googleapis.com',
+    'https://api.openai.com/v1/models',
+];
+
+const COMMON_LOCAL_PROXY_URLS = [
+    'http://127.0.0.1:7890',
+    'http://127.0.0.1:7897',
+    'http://127.0.0.1:7899',
+    'http://127.0.0.1:10809',
+    'http://127.0.0.1:1087',
+    'http://127.0.0.1:20171',
+    'http://localhost:7890',
+];
+
+const proxyAgentCache = new Map();
+
 function cleanBase(endpoint, provider) {
     return (endpoint || DEFAULT_ENDPOINTS[provider] || DEFAULT_ENDPOINTS.openai).replace(/\/+$/, '');
+}
+
+function providerEndpoint(config = {}) {
+    const provider = config.provider || '';
+    if (provider === 'siliconflow' && config.siliconflowEndpoint === 'cn') return DEFAULT_ENDPOINTS.siliconflow_cn;
+    if (provider === 'minimax' && config.minimaxEndpoint === 'cn') return DEFAULT_ENDPOINTS.minimax_cn;
+    if (provider === 'zai' && config.zaiEndpoint === 'coding') return DEFAULT_ENDPOINTS.zai_coding;
+    return config.endpoint || DEFAULT_ENDPOINTS[provider] || '';
 }
 
 function generationOptions(config = {}, options = {}) {
@@ -49,6 +93,9 @@ function generationOptions(config = {}, options = {}) {
     let result = rawMax;
     if (config.provider === 'deepseek') {
         result = Math.min(Math.max(rawMax * 2, 8192), 262144);
+    }
+    if (config.provider === 'google' || config.provider === 'google-vertex') {
+        result = Math.min(Math.max(rawMax, 512), 8192);
     }
     return {
         maxTokens: result,
@@ -74,6 +121,79 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
     }
 }
 
+function normalizeProxyUrl(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (/^(https?|socks[45]?):\/\//i.test(text)) return text;
+    if (/^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d+$/i.test(text)) return `http://${text}`;
+    return text;
+}
+
+function resolveNetworkProxy(config = {}) {
+    const mode = String(config.networkProxyMode || 'auto');
+    if (mode === 'off') return '';
+    const manual = normalizeProxyUrl(config.networkProxyUrl);
+    if (manual) return manual;
+    if (mode === 'manual') return '';
+    return normalizeProxyUrl(
+        process.env.HTTPS_PROXY
+        || process.env.https_proxy
+        || process.env.HTTP_PROXY
+        || process.env.http_proxy
+        || process.env.ALL_PROXY
+        || process.env.all_proxy
+        || '',
+    );
+}
+
+function getProxyDispatcher(config = {}) {
+    const proxyUrl = resolveNetworkProxy(config);
+    if (!proxyUrl || /^socks/i.test(proxyUrl)) return null;
+    if (!proxyAgentCache.has(proxyUrl)) {
+        proxyAgentCache.set(proxyUrl, new ProxyAgent(proxyUrl));
+    }
+    return proxyAgentCache.get(proxyUrl);
+}
+
+function withNetworkProxy(options = {}, config = {}) {
+    const dispatcher = getProxyDispatcher(config);
+    return dispatcher ? { ...options, dispatcher } : options;
+}
+
+function isNetworkConnectError(err) {
+    const text = `${err?.message || ''} ${err?.cause?.code || ''} ${err?.cause?.message || ''}`;
+    return /fetch failed|connect timeout|UND_ERR_CONNECT_TIMEOUT|ECONNREFUSED|ENETUNREACH|ETIMEDOUT|EHOSTUNREACH/i.test(text);
+}
+
+export function isLikelyNetworkProxyError(err) {
+    return isNetworkConnectError(err);
+}
+
+export async function detectNetworkProxy({ targetUrl = '', timeoutMs = 3500 } = {}) {
+    const candidates = [
+        normalizeProxyUrl(process.env.HTTPS_PROXY || process.env.https_proxy || ''),
+        normalizeProxyUrl(process.env.HTTP_PROXY || process.env.http_proxy || ''),
+        normalizeProxyUrl(process.env.ALL_PROXY || process.env.all_proxy || ''),
+        ...COMMON_LOCAL_PROXY_URLS,
+    ].filter(Boolean);
+    const unique = [...new Set(candidates)];
+    const urls = targetUrl ? [targetUrl] : PROXY_TEST_URLS;
+    for (const proxyUrl of unique) {
+        if (/^socks/i.test(proxyUrl)) continue;
+        const dispatcher = proxyAgentCache.get(proxyUrl) || new ProxyAgent(proxyUrl);
+        proxyAgentCache.set(proxyUrl, dispatcher);
+        for (const url of urls) {
+            try {
+                const response = await fetchWithTimeout(url, { method: 'HEAD', dispatcher }, timeoutMs);
+                if (response.status > 0 && response.status < 500) {
+                    return { proxyUrl, testUrl: url, status: response.status };
+                }
+            } catch {}
+        }
+    }
+    return null;
+}
+
 function toText(messages) {
     return messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}:\n${m.content}`).join('\n\n');
 }
@@ -83,6 +203,10 @@ function toGeminiContents(messages) {
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content || '' }],
     }));
+}
+
+function extractGeminiText(data = {}) {
+    return data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
 function normalizeMessages(systemPrompt, userPromptOrMessages) {
@@ -224,6 +348,25 @@ function adaptMessagesForProvider(provider, messages) {
     return flattenToolMessages(messages);
 }
 
+function prepareOpenAICompatibleMessages(_provider, systemPrompt, messages = []) {
+    return [{ role: 'system', content: systemPrompt || '' }, ...messages]
+        .map(message => {
+            const role = message.role === 'developer'
+                ? 'system'
+                : (['system', 'user', 'assistant', 'tool'].includes(message.role) ? message.role : 'user');
+            const cleaned = { ...message, role, content: message.content || '' };
+            // Many OpenAI-compatible providers reject message.name on system/user/assistant.
+            // Tool result names are harmless and useful for debugging, so keep those.
+            if (role !== 'tool') delete cleaned.name;
+            return cleaned;
+        })
+        .filter(message => {
+            if (message.role === 'tool') return Boolean(message.content || message.tool_call_id);
+            if (message.tool_calls?.length) return true;
+            return Boolean(String(message.content || '').trim());
+        });
+}
+
 export async function callAIText(config, systemPrompt, userPrompt, options = {}) {
     return callAIChat(config, systemPrompt, [{ role: 'user', content: userPrompt || '' }], options);
 }
@@ -241,11 +384,13 @@ export async function callAIChatRaw(config = {}, systemPrompt, messages, options
 
     switch (provider) {
         case 'anthropic':
-            return callAnthropic({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
+            return callAnthropic({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         case 'google':
-            return textResult(await callGoogle({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal }));
+            return textResult(await callGoogle({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal }));
+        case 'google-vertex':
+            return textResult(await callGoogleVertex({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, signal: options.signal }));
         case 'openrouter':
-            return callOpenRouterRaw({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
+            return callOpenRouterRaw({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         case 'ollama':
             return textResult(await callOllama({ endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, signal: options.signal }));
         case 'openai':
@@ -261,14 +406,14 @@ export async function callAIChatRaw(config = {}, systemPrompt, messages, options
         case 'zai':
         case 'minimax':
         case 'custom':
-            return callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
+            return callOpenAICompatibleRaw({ config, provider, apiKey, endpoint: providerEndpoint(config), model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal });
         default:
             throw new Error(`Unsupported: ${provider}`);
     }
 }
 
 export async function streamAIChat(config = {}, systemPrompt, messages, options = {}) {
-    const { provider, apiKey, endpoint } = config;
+    const { provider, apiKey } = config;
     const model = config.model || DEFAULT_MODELS[provider];
     const { maxTokens, temperature, topP, topK } = generationOptions(config, options);
     const chatMessages = adaptMessagesForProvider(provider, normalizeMessages(systemPrompt, messages));
@@ -276,9 +421,9 @@ export async function streamAIChat(config = {}, systemPrompt, messages, options 
 
     switch (provider) {
         case 'anthropic':
-            return callAnthropicStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
+            return callAnthropicStream({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, topK, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
         case 'openrouter':
-            return callOpenRouterStream({ apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
+            return callOpenRouterStream({ config, apiKey, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
         case 'openai':
         case 'deepseek':
         case 'qwen':
@@ -292,8 +437,9 @@ export async function streamAIChat(config = {}, systemPrompt, messages, options 
         case 'zai':
         case 'minimax':
         case 'custom':
-            return callOpenAICompatibleStream({ provider, apiKey, endpoint, model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
+            return callOpenAICompatibleStream({ config, provider, apiKey, endpoint: providerEndpoint(config), model, systemPrompt, messages: chatMessages, temperature, maxTokens, topP, tools: options.tools, toolChoice: options.toolChoice, signal: options.signal, onEvent });
         case 'google':
+        case 'google-vertex':
         case 'ollama':
             return streamFallback(config, systemPrompt, chatMessages, options, onEvent);
         default:
@@ -320,25 +466,135 @@ function extractAssistantText(provider, message = {}) {
     return content;
 }
 
-async function callGoogle({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
+async function callGoogle({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
     const requestModel = model || DEFAULT_MODELS.google;
     const body = {
         systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
         contents: toGeminiContents(messages),
         generationConfig: { temperature, maxOutputTokens: maxTokens, topP },
     };
-    const r = await fetchLoggedChat(`https://generativelanguage.googleapis.com/v1beta/models/${requestModel}:generateContent?key=${apiKey}`, {
+    const r = await fetchLoggedChat(`https://generativelanguage.googleapis.com/v1beta/models/${requestModel}:generateContent?key=${apiKey}`, withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal,
-    }, { provider: 'google', model: requestModel, mode: 'chat', stream: false });
+    }, config), { provider: 'google', model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Gemini ${r.status}`); }
     const d = await readLoggedJsonResponse(r);
-    return d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+    return extractGeminiText(d);
 }
 
-async function callAnthropic({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal }) {
+async function callGoogleVertex({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, signal }) {
+    const requestModel = model || DEFAULT_MODELS['google-vertex'];
+    const authMode = String(config.vertexAuthMode || 'express');
+    const region = String(config.vertexRegion || 'us-central1').trim() || 'us-central1';
+    const body = {
+        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+        contents: toGeminiContents(messages),
+        generationConfig: { temperature, maxOutputTokens: maxTokens, topP },
+    };
+    const { url, headers } = await buildVertexGenerateRequest({
+        authMode,
+        region,
+        projectId: config.vertexProjectId,
+        apiKey,
+        serviceAccountJson: config.vertexServiceAccountJson,
+        model: requestModel,
+        responseType: 'generateContent',
+        config,
+    });
+    const r = await fetchLoggedChat(url, withNetworkProxy({
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+    }, config), { provider: 'google-vertex', model: requestModel, mode: 'chat', stream: false });
+    if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || e.message || `Google Vertex AI ${r.status}`); }
+    const d = await readLoggedJsonResponse(r);
+    return extractGeminiText(d);
+}
+
+async function buildVertexGenerateRequest({ authMode, region, projectId, apiKey, serviceAccountJson, model, responseType, config = {} }) {
+    const normalizedRegion = region || 'us-central1';
+    const baseUrl = normalizedRegion === 'global'
+        ? 'https://aiplatform.googleapis.com'
+        : `https://${normalizedRegion}-aiplatform.googleapis.com`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (authMode === 'full') {
+        if (!serviceAccountJson) throw new Error('Vertex AI Full 模式需要 Service Account JSON');
+        const serviceAccount = parseVertexServiceAccount(serviceAccountJson);
+        const resolvedProjectId = String(projectId || serviceAccount.project_id || '').trim();
+        if (!resolvedProjectId) throw new Error('Vertex AI Full 模式需要 Project ID');
+        const accessToken = await getVertexAccessToken(serviceAccount, config);
+        headers.Authorization = `Bearer ${accessToken}`;
+        return {
+            url: `${baseUrl}/v1/projects/${encodeURIComponent(resolvedProjectId)}/locations/${encodeURIComponent(normalizedRegion)}/publishers/google/models/${encodeURIComponent(model)}:${responseType}`,
+            headers,
+        };
+    }
+
+    if (!apiKey) throw new Error('Vertex AI Express 模式需要 API Key');
+    const resolvedProjectId = String(projectId || '').trim();
+    const path = resolvedProjectId
+        ? `/v1/projects/${encodeURIComponent(resolvedProjectId)}/locations/${encodeURIComponent(normalizedRegion)}/publishers/google/models/${encodeURIComponent(model)}:${responseType}`
+        : `/v1/publishers/google/models/${encodeURIComponent(model)}:${responseType}`;
+    return {
+        url: `${resolvedProjectId ? 'https://aiplatform.googleapis.com' : baseUrl}${path}?key=${encodeURIComponent(apiKey)}`,
+        headers,
+    };
+}
+
+function parseVertexServiceAccount(serviceAccountJson = '') {
+    let serviceAccount;
+    try {
+        serviceAccount = JSON.parse(serviceAccountJson);
+    } catch {
+        throw new Error('Service Account JSON 格式不正确');
+    }
+    if (serviceAccount?.type !== 'service_account') {
+        throw new Error('Service Account JSON 的 type 必须是 service_account');
+    }
+    if (!serviceAccount.client_email || !serviceAccount.private_key) {
+        throw new Error('Service Account JSON 缺少 client_email 或 private_key');
+    }
+    return serviceAccount;
+}
+
+async function getVertexAccessToken(serviceAccount, config = {}) {
+    const now = Math.floor(Date.now() / 1000);
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const payload = {
+        iss: serviceAccount.client_email,
+        scope: 'https://www.googleapis.com/auth/cloud-platform',
+        aud: 'https://oauth2.googleapis.com/token',
+        iat: now,
+        exp: now + 3600,
+    };
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signatureInput = `${encodedHeader}.${encodedPayload}`;
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(signatureInput);
+    const signature = sign.sign(serviceAccount.private_key, 'base64url');
+    const jwt = `${signatureInput}.${signature}`;
+    const r = await fetchWithTimeout('https://oauth2.googleapis.com/token', withNetworkProxy({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion: jwt,
+        }),
+    }, config));
+    if (!r.ok) {
+        const text = await r.text().catch(() => '');
+        throw new Error(`Service Account 获取 Access Token 失败: ${text || r.status}`);
+    }
+    const data = await r.json();
+    if (!data.access_token) throw new Error('Service Account 没有返回 Access Token');
+    return data.access_token;
+}
+
+async function callAnthropic({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal }) {
     const requestModel = model || DEFAULT_MODELS.anthropic;
     const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages };
     if (topK) body.top_k = topK;
@@ -347,18 +603,18 @@ async function callAnthropic({ apiKey, model, systemPrompt, messages, temperatur
         body.tools = anthropicTools;
         if (toolChoice) body.tool_choice = convertToolChoiceToAnthropic(toolChoice);
     }
-    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
+    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2024-02-15' },
         body: JSON.stringify(body),
         signal,
-    }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: false });
+    }, config), { provider: 'anthropic', model: requestModel, mode: 'chat', stream: false });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
     const d = await readLoggedJsonResponse(r);
     return convertAnthropicResponse(d);
 }
 
-async function callAnthropicStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal, onEvent }) {
+async function callAnthropicStream({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, topK, tools, toolChoice, signal, onEvent }) {
     const requestModel = model || DEFAULT_MODELS.anthropic;
     const body = { model: requestModel, max_tokens: maxTokens, temperature, top_p: topP, system: systemPrompt, messages, stream: true };
     if (topK) body.top_k = topK;
@@ -367,12 +623,12 @@ async function callAnthropicStream({ apiKey, model, systemPrompt, messages, temp
         body.tools = anthropicTools;
         if (toolChoice) body.tool_choice = convertToolChoiceToAnthropic(toolChoice);
     }
-    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', {
+    const r = await fetchLoggedChat('https://api.anthropic.com/v1/messages', withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2024-02-15' },
         body: JSON.stringify(body),
         signal,
-    }, { provider: 'anthropic', model: requestModel, mode: 'chat', stream: true });
+    }, config), { provider: 'anthropic', model: requestModel, mode: 'chat', stream: true });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `Anthropic ${r.status}`); }
 
     let content = '';
@@ -540,7 +796,7 @@ async function callOpenAICompatible({ provider, apiKey, endpoint, model, systemP
             max_tokens: maxTokens,
             temperature,
             top_p: topP,
-            messages: [{ role: 'system', content: systemPrompt }, ...messages],
+            messages: prepareOpenAICompatibleMessages(provider, systemPrompt, messages),
         }),
         signal,
     }, { provider, model: requestModel, mode: 'chat', stream: false });
@@ -574,7 +830,7 @@ async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperatu
             max_tokens: maxTokens,
             temperature,
             top_p: topP,
-            messages: [{ role: 'system', content: systemPrompt }, ...messages],
+            messages: prepareOpenAICompatibleMessages('openrouter', systemPrompt, messages),
         }),
         signal,
     }, { provider: 'openrouter', model: requestModel, mode: 'chat', stream: false });
@@ -583,7 +839,7 @@ async function callOpenRouter({ apiKey, model, systemPrompt, messages, temperatu
     return d.choices?.[0]?.message?.content || '';
 }
 
-async function callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
+async function callOpenAICompatibleRaw({ config = {}, provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
     const base = cleanBase(endpoint, provider);
     const requestModel = model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
     const body = {
@@ -591,19 +847,19 @@ async function callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, syst
         max_tokens: maxTokens,
         temperature,
         top_p: topP,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: prepareOpenAICompatibleMessages(provider, systemPrompt, messages),
     };
     if (Array.isArray(tools) && tools.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
     }
 
-    const r = await fetchLoggedChat(`${base}/chat/completions`, {
+    const r = await fetchLoggedChat(`${base}/chat/completions`, withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify(body),
         signal,
-    }, { provider, model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
+    }, config), { provider, model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `${provider} ${r.status}`); }
     const d = await readLoggedJsonResponse(r);
     const message = d.choices?.[0]?.message;
@@ -611,7 +867,7 @@ async function callOpenAICompatibleRaw({ provider, apiKey, endpoint, model, syst
     return { message, raw: d };
 }
 
-async function callOpenAICompatibleStream({ provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
+async function callOpenAICompatibleStream({ config = {}, provider, apiKey, endpoint, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
     const base = cleanBase(endpoint, provider);
     const requestModel = model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
     const body = {
@@ -620,43 +876,43 @@ async function callOpenAICompatibleStream({ provider, apiKey, endpoint, model, s
         temperature,
         top_p: topP,
         stream: true,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: prepareOpenAICompatibleMessages(provider, systemPrompt, messages),
     };
     if (Array.isArray(tools) && tools.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
     }
 
-    const r = await fetchLoggedChat(`${base}/chat/completions`, {
+    const r = await fetchLoggedChat(`${base}/chat/completions`, withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify(body),
         signal,
-    }, { provider, model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
+    }, config), { provider, model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `${provider} ${r.status}`); }
     return readOpenAICompatibleStream(r, onEvent);
 }
 
-async function callOpenRouterRaw({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
+async function callOpenRouterRaw({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal }) {
     const requestModel = model || DEFAULT_MODELS.openrouter;
     const body = {
         model: requestModel,
         max_tokens: maxTokens,
         temperature,
         top_p: topP,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: prepareOpenAICompatibleMessages('openrouter', systemPrompt, messages),
     };
     if (Array.isArray(tools) && tools.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
     }
 
-    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
+    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify(body),
         signal,
-    }, { provider: 'openrouter', model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
+    }, config), { provider: 'openrouter', model: requestModel, mode: 'chat.raw', stream: false, toolChoice: body.tool_choice });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
     const d = await readLoggedJsonResponse(r);
     const message = d.choices?.[0]?.message;
@@ -664,7 +920,7 @@ async function callOpenRouterRaw({ apiKey, model, systemPrompt, messages, temper
     return { message, raw: d };
 }
 
-async function callOpenRouterStream({ apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
+async function callOpenRouterStream({ config = {}, apiKey, model, systemPrompt, messages, temperature, maxTokens, topP, tools, toolChoice, signal, onEvent }) {
     const requestModel = model || DEFAULT_MODELS.openrouter;
     const body = {
         model: requestModel,
@@ -672,19 +928,19 @@ async function callOpenRouterStream({ apiKey, model, systemPrompt, messages, tem
         temperature,
         top_p: topP,
         stream: true,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: prepareOpenAICompatibleMessages('openrouter', systemPrompt, messages),
     };
     if (Array.isArray(tools) && tools.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
     }
 
-    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, {
+    const r = await fetchLoggedChat(`${DEFAULT_ENDPOINTS.openrouter}/chat/completions`, withNetworkProxy({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify(body),
         signal,
-    }, { provider: 'openrouter', model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
+    }, config), { provider: 'openrouter', model: requestModel, mode: 'chat.stream', stream: true, toolChoice: body.tool_choice });
     if (!r.ok) { const e = await readLoggedError(r); throw new Error(e.error?.message || `OpenRouter ${r.status}`); }
     return readOpenAICompatibleStream(r, onEvent);
 }
@@ -828,9 +1084,9 @@ async function callOllama({ endpoint, model, systemPrompt, messages, temperature
 }
 
 export async function fetchModelList(config = {}) {
-    const { provider, apiKey, endpoint } = config;
-    const base = endpoint?.replace(/\/+$/, '') || DEFAULT_ENDPOINTS[provider];
-    if (!base && provider !== 'anthropic' && provider !== 'google' && provider !== 'ollama') return [];
+    const { provider, apiKey } = config;
+    const base = providerEndpoint(config)?.replace(/\/+$/, '') || DEFAULT_ENDPOINTS[provider];
+    if (!base && provider !== 'anthropic' && provider !== 'google' && provider !== 'google-vertex' && provider !== 'ollama') return [];
 
     if (provider === 'anthropic') {
         return [
@@ -842,7 +1098,7 @@ export async function fetchModelList(config = {}) {
     }
 
     if (provider === 'google') {
-        const r = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        const r = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, withNetworkProxy({}, config));
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         return (d.models || []).filter(m => m.supportedGenerationMethods?.includes('generateContent')).map(m => ({
@@ -852,8 +1108,12 @@ export async function fetchModelList(config = {}) {
         }));
     }
 
+    if (provider === 'google-vertex') {
+        return GOOGLE_VERTEX_MODELS;
+    }
+
     if (provider === 'ollama') {
-        const baseUrl = (endpoint || 'http://localhost:11434').replace(/\/+$/, '');
+        const baseUrl = (config.endpoint || 'http://localhost:11434').replace(/\/+$/, '');
         const r = await fetchWithTimeout(`${baseUrl}/api/tags`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
@@ -881,13 +1141,13 @@ export async function fetchModelList(config = {}) {
     const headers = { 'Authorization': `Bearer ${apiKey}` };
     if (provider === 'openrouter') headers['HTTP-Referer'] = 'https://cuigengji.app';
 
-    const r = await fetchWithTimeout(`${base}/models`, { headers });
+    const r = await fetchWithTimeout(`${base}/models`, withNetworkProxy({ headers }, config));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     const rawModels = (d.data || []).slice(0, provider === 'openrouter' ? 100 : undefined);
 
     // Try to enrich with per-model context info (batch, limited concurrency)
-    const enriched = await enrichModelContexts(rawModels, base, headers, provider);
+    const enriched = await enrichModelContexts(rawModels, base, headers, provider, config);
     return enriched;
 }
 
@@ -895,7 +1155,7 @@ export async function fetchModelList(config = {}) {
  * Try to get real context limits per model via API queries.
  * Runs in parallel with concurrency limit to avoid rate-limiting.
  */
-async function enrichModelContexts(models, base, headers, _provider) {
+async function enrichModelContexts(models, base, headers, _provider, config = {}) {
     const CONCURRENCY = 3;
     const MAX_PROBE = 20; // don't probe more than 20 models
 
@@ -915,7 +1175,7 @@ async function enrichModelContexts(models, base, headers, _provider) {
     for (let i = 0; i < toProbe.length; i += CONCURRENCY) {
         const batch = toProbe.slice(i, i + CONCURRENCY);
         const batchResults = await Promise.all(batch.map(async (m) => {
-            const ctx = await probeModelContext(base, m.id, headers);
+            const ctx = await probeModelContext(base, m.id, headers, config);
             return { id: m.id, name: m.name || m.id, contextLimit: ctx };
         }));
         results.push(...batchResults);
@@ -932,10 +1192,10 @@ async function enrichModelContexts(models, base, headers, _provider) {
 /**
  * Try to determine a model's context limit by querying the API.
  */
-async function probeModelContext(base, modelId, headers) {
+async function probeModelContext(base, modelId, headers, config = {}) {
     try {
         // Try models/{id} endpoint (supported by most OpenAI-compatible APIs)
-        const r = await fetchWithTimeout(`${base}/models/${encodeURIComponent(modelId)}`, { headers });
+        const r = await fetchWithTimeout(`${base}/models/${encodeURIComponent(modelId)}`, withNetworkProxy({ headers }, config));
         if (r.ok) {
             const info = await r.json();
             // Check various possible fields

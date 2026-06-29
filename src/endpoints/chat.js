@@ -15,7 +15,13 @@ import { getReferenceToolDefinitions, executeReferenceTool } from '../services/a
 export const router = express.Router();
 
 function hasApiKey(config) {
-    return !!config?.apiKey || config?.provider === 'ollama';
+    return !!config?.apiKey
+        || config?.provider === 'ollama'
+        || (
+            config?.provider === 'google-vertex'
+            && String(config?.vertexAuthMode || 'express') === 'full'
+            && !!config?.vertexServiceAccountJson
+        );
 }
 
 function setupSse(res) {
@@ -388,6 +394,7 @@ function buildAssistSystemPrompt(ctx) {
     p.push('```json');
     p.push('{');
     p.push('  "name": "角色名",');
+    p.push('  "summary": "约50字，面向正文写作注入的角色短摘要，写清身份、关系、当前状态或关键矛盾",');
     p.push('  "description": "外貌与身份描述（50-150字）",');
     p.push('  "personality": "性格（对比式：表面上...但实际上...）",');
     p.push('  "scenario": "背景处境",');
@@ -402,6 +409,7 @@ function buildAssistSystemPrompt(ctx) {
     p.push('{');
     p.push('  "comment": "条目名称",');
     p.push('  "key": ["触发词1", "触发词2"],');
+    p.push('  "summary": "约50字，面向正文写作注入的设定短摘要，写清规则、限制、关系或剧情影响",');
     p.push('  "content": "注入的设定内容（100-200字）",');
     p.push('  "depth": 4,');
     p.push('  "order": 100,');
@@ -411,14 +419,15 @@ function buildAssistSystemPrompt(ctx) {
     p.push('如需一次创建多条世界书，用数组：');
     p.push('```json');
     p.push('[');
-    p.push('  {"comment":"条目1","key":["触发词"],"content":"..."},');
-    p.push('  {"comment":"条目2","key":["触发词"],"content":"..."}');
+    p.push('  {"comment":"条目1","key":["触发词"],"summary":"约50字短摘要","content":"..."},');
+    p.push('  {"comment":"条目2","key":["触发词"],"summary":"约50字短摘要","content":"..."}');
     p.push(']');
     p.push('```');
     p.push('');
     p.push('## 重要规则');
     p.push('- 收集到足够信息后**立即展示 JSON 并调用 import_data**，不要等多轮');
     p.push('- JSON 必须完整、合法，字段名用英文，值用中文');
+    p.push('- 角色卡和世界书条目必须包含 summary 字段；summary 不是营销简介，而是给正文续写注入用的短事实摘要');
     p.push('- 调用 import_data 时，target 必须是 character、worldbook 或 preset');
     p.push('- character 的 data 使用角色卡对象；worldbook 的 data 可用单条、数组或 {entries:[...]}；preset 的 data 必须带 name');
     p.push('- 保持对话感，每个回答末尾用**粗体**问下一个问题');

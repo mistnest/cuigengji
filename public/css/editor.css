@@ -1,41 +1,42 @@
 /* ==================== 催更姬 — Styles ==================== */
 
-/* ---- CSS Variables — Clean Studio (明亮简约) ---- */
+/* ---- CSS Variables — 简约大气 ---- */
+/* 设计理念：克制、留白、编辑器是主角 */
 :root {
-    /* ===== Backgrounds — CC-like warm gray hierarchy ===== */
-    --bg-deepest:    #edebe9;   /* status bar, bottom bars */
-    --bg-primary:    #f3f2f1;   /* toolbar, chat input area */
-    --bg-secondary:  #faf9f8;   /* sidebars */
-    --bg-tertiary:   #f3f2f1;   /* card bg, hover zones */
+    /* ===== Backgrounds — 中性灰层次 ===== */
+    --bg-deepest:    #eae9e7;   /* status bar */
+    --bg-primary:    #f4f3f1;   /* toolbar */
+    --bg-secondary:  #fafaf9;   /* sidebars */
+    --bg-tertiary:   #f2f1ef;   /* card bg, hover zones */
     --bg-surface:    #ffffff;   /* dropdowns, modals, cards */
-    --bg-hover:      #edebe9;   /* clear hover feedback */
+    --bg-hover:      #edebe8;   /* clear hover feedback */
     --bg-raised:     #ffffff;   /* elevated surfaces */
-    --bg-editor:     #ffffff;   /* clean white editor */
-    --bg-editor-dim: #faf9f8;   /* editor focus state */
+    --bg-editor:     #ffffff;   /* editor paper */
+    --bg-editor-dim: #fafaf9;   /* editor dim state */
 
-    /* ===== Text — crisp hierarchy ===== */
-    --text-primary:   #1b1b1b;
-    --text-secondary: #5c5c5c;
-    --text-muted:     #8a8886;
-    --text-ink:       #1b1b1b;
-    --text-ink-dim:   #a19f9d;
+    /* ===== Text ===== */
+    --text-primary:   #181818;
+    --text-secondary: #555558;
+    --text-muted:     #8b8b90;
+    --text-ink:       #181818;
+    --text-ink-dim:   #a8a8ab;
 
-    /* ===== Accent — refined blue ===== */
-    --accent-primary:   #346df1;
-    --accent-secondary: #5b8def;
-    --accent-dark:      #2854c5;
-    --accent-glow:      rgba(52, 109, 241, 0.08);
-    --accent-glow-strong: rgba(52, 109, 241, 0.18);
+    /* ===== Accent — DeepSeek 蓝 ===== */
+    --accent-primary:   #4d6bfe;
+    --accent-secondary: #7b93fe;
+    --accent-dark:      #3b54d4;
+    --accent-glow:      rgba(77, 107, 254, 0.08);
+    --accent-glow-strong: rgba(77, 107, 254, 0.18);
 
-    /* ===== Borders — visible but subtle ===== */
-    --border-color: #e1dfdd;
-    --border-light: #edebe9;
+    /* ===== Borders ===== */
+    --border-color: #e7e5e2;
+    --border-light: #f0efed;
 
     /* ===== Functional ===== */
     --success: #34b76a;
     --warning: #e8a317;
     --error:   #e5484d;
-    --info:    #346df1;
+    --info:    #4d6bfe;
 
     /* ===== Typography ===== */
     --font-sans:  'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -55,13 +56,15 @@
     --radius-sm: 3px;  --radius: 5px;  --radius-md: 7px;
     --radius-lg: 9px;  --radius-xl: 12px;
 
-    /* ===== Shadows — subtle ===== */
+    /* ===== Shadows ===== */
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
     --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
     --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
     --shadow-xl: 0 8px 30px rgba(0,0,0,0.10);
     --shadow-glow: 0 0 0 3px var(--accent-glow);
     --shadow-glow-strong: 0 0 0 4px var(--accent-glow-strong);
+    /* 编辑器抬升 — 纸浮在桌面上 */
+    --shadow-editor: 0 0 0 1px rgba(0,0,0,0.04), 0 2px 16px rgba(0,0,0,0.05);
 
     /* ===== Easing ===== */
     --ease-out:    cubic-bezier(0, 0, 0.2, 1);
@@ -71,6 +74,38 @@
     --transition-fast: 0.12s var(--ease-out);
     --transition:      0.18s var(--ease-out);
     --transition-slow:  0.3s var(--ease-smooth);
+}
+
+:root[data-theme="light"] {
+    --bg-deepest: #ebeae7;
+    --bg-primary: #f6f5f3;
+    --bg-secondary: #fefefd;
+    --bg-tertiary: #f2f1ef;
+    --bg-surface: #ffffff;
+    --bg-hover: #ededeb;
+    --bg-editor: #ffffff;
+    --text-primary: #181818;
+    --text-secondary: #555558;
+    --text-muted: #8b8b90;
+    --border-color: #e7e5e2;
+    --border-light: #f0efed;
+}
+
+:root[data-theme="dark"] {
+    --bg-deepest: #1b1b1f;
+    --bg-primary: #232327;
+    --bg-secondary: #29292d;
+    --bg-tertiary: #2f2f34;
+    --bg-surface: #34343a;
+    --bg-hover: #3b3b42;
+    --bg-editor: #26262a;
+    --text-primary: #e6e6ea;
+    --text-secondary: #b2b2b8;
+    --text-muted: #8a8a92;
+    --text-ink: #e6e6ea;
+    --text-ink-dim: #92929a;
+    --border-color: #42424a;
+    --border-light: #373740;
 }
 
 :root[data-theme="light"] {
@@ -151,10 +186,10 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 48px;
-    padding: 0 12px;
+    height: 44px;
+    padding: 0 14px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-light);
     flex-shrink: 0;
     user-select: none;
     -webkit-app-region: drag;
@@ -241,11 +276,11 @@ button:focus-visible {
 
 /* ---- Sidebars ---- */
 .sidebar {
-    width: 280px;
-    min-width: 240px;
+    width: 260px;
+    min-width: 220px;
     min-height: 0;
     background: var(--bg-secondary);
-    border-right: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-light);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -264,17 +299,17 @@ button:focus-visible {
 
 .sidebar-tab {
     flex: 1;
-    padding: 10px 8px;
+    padding: 8px 6px;
     border: none;
     border-radius: 0;
     background: transparent;
     border-bottom: 2px solid transparent;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     color: var(--text-muted);
     cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .sidebar-tab:hover {
@@ -323,8 +358,8 @@ button:focus-visible {
     align-items: center;
     justify-content: space-between;
     gap: 4px;
-    padding: 8px;
-    border-bottom: 1px solid var(--border-color);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-light);
     flex-shrink: 0;
 }
 
@@ -743,15 +778,20 @@ button:focus-visible {
     flex-direction: column;
     overflow: hidden;
     min-width: 400px;
+    background: var(--bg-editor);
+    box-shadow: var(--shadow-editor);
+    position: relative;
+    z-index: 1;
+    margin: 0 1px;
 }
 
 #editor-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 8px 16px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-light);
     flex-shrink: 0;
     gap: 8px;
 }
@@ -804,7 +844,7 @@ button:focus-visible {
     color: var(--text-muted);
 }
 
-.word-count, .token-count {
+.word-count {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-muted);
@@ -826,7 +866,7 @@ button:focus-visible {
 #chapter-editor {
     width: 100%;
     height: 100%;
-    padding: 24px 32px;
+    padding: 32px 40px;
     border: none;
     background: var(--bg-editor);
     color: var(--text-ink);
@@ -1033,6 +1073,22 @@ button:focus-visible {
     font-size: 12px;
     outline: none;
     font-family: var(--font-sans);
+}
+
+.ai-textarea {
+    min-height: 82px;
+    height: auto;
+    resize: vertical;
+    line-height: 1.45;
+    font-family: var(--font-mono);
+}
+
+.ai-provider-extra {
+    margin: 6px 0 8px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
 }
 
 .ai-select:focus, .ai-input:focus {
@@ -2226,10 +2282,10 @@ button:focus-visible {
     display: flex;
     align-items: center;
     gap: 16px;
-    height: 26px;
-    padding: 0 12px;
+    height: 28px;
+    padding: 0 14px;
     background: var(--bg-secondary);
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-light);
     font-size: 11px;
     color: var(--text-muted);
     flex-shrink: 0;
@@ -2705,12 +2761,12 @@ button:focus-visible {
     outline-offset: -1px;
 }
 
-/* Chapter indent group — the key to VS Code tree look */
+/* Chapter indent group */
 .tree-chapter-group {
     position: relative;
     margin-left: 6px;
     padding-left: 12px;
-    border-left: 1px solid var(--border-light);
+    border-left: 1px solid rgba(0,0,0,0.06);
     min-height: 32px;
 }
 
@@ -2725,7 +2781,7 @@ button:focus-visible {
     align-items: center;
     gap: 4px;
     padding: 4px 6px 4px 4px;
-    font-size: 13px;
+    font-size: 12.5px;
     cursor: pointer;
     border-radius: 4px;
     transition: background-color 0.1s, opacity 0.1s;
@@ -2740,7 +2796,7 @@ button:focus-visible {
     top: 50%;
     width: 8px;
     height: 1px;
-    background: var(--border-light);
+    background: rgba(0,0,0,0.06);
 }
 
 .tree-chapter-item:hover {
@@ -3434,8 +3490,8 @@ button:disabled {
 
 /* ---- Message Content ---- */
 .chat-msg-content {
-    font-size: 13px;
-    line-height: 1.75;
+    font-size: 12.5px;
+    line-height: 1.65;
     color: var(--text-primary);
     word-break: break-word;
 }
@@ -3944,7 +4000,7 @@ button:disabled {
     align-items: center;
     justify-content: space-between;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-light);
     background: var(--bg-primary);
     flex-shrink: 0;
     user-select: none;
@@ -5038,6 +5094,20 @@ details[open] > .reference-title::before {
     border-color: rgba(229, 72, 77, 0.45);
 }
 
+.settings-update-notes {
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.7;
+}
+
 /* ==================== Infill Modal ==================== */
 .infill-modal {
     width: min(780px, calc(100vw - 28px));
@@ -5202,6 +5272,7 @@ details[open] > .reference-title::before {
 }
 
 .welcome-logo h1 {
+    font-family: var(--font-serif);
     font-size: 24px;
     font-weight: 600;
     color: var(--text-primary);
@@ -5221,12 +5292,9 @@ details[open] > .reference-title::before {
 .welcome-section-title {
     font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--text-muted);
     margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-light);
 }
 
 /* Start actions */

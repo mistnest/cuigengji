@@ -30,6 +30,8 @@ const ChatPanel = (function () {
     let streamPendingFinalize = null;
     let streamUserScrollLocked = false;
     let streamUserPrompt = '';
+    let streamModelRequest = '';
+    let streamRevisionChain = null;
 
     const MESSAGE_PAGE_SIZE = 15;
     let renderedStart = 0;
@@ -185,31 +187,38 @@ const ChatPanel = (function () {
     // ==================== Send ====================
     let _sessionAutoNamed = false;
 
-    async function sendMessage(directPrompt) {
+    async function sendMessage(directPrompt, options = {}) {
         const input = document.getElementById('chat-input');
         const text = directPrompt || input.value.trim();
         if (!text || isLoading) return;
+        const modelText = String(options.modelText || text).trim();
+        const displayText = String(options.displayText || text).trim();
+        if (!modelText || !displayText) return;
 
         if (!directPrompt) input.value = '';
         _sessionRoundCount = Math.max(_sessionRoundCount, deriveRoundCountFromMessages()) + 1;
-        addMessage('user', text, currentMode, {
+        addMessage('user', displayText, currentMode, {
             currentTextSnapshot: getCurrentEditorText(),
             chapterTitle: document.getElementById('chapter-title-input')?.value || '',
             roundNumber: _sessionRoundCount,
+            draft: Boolean(options.excludeFromModelHistory),
         });
 
         // Auto-name session on first message (CC-style)
         if (!_sessionAutoNamed && window.autoNameSession) {
             _sessionAutoNamed = true;
-            window.autoNameSession(text);
+            window.autoNameSession(displayText);
         }
 
-        await sendMessageStream(text);
+        await sendMessageStream(modelText, {
+            reviewPrompt: options.reviewPrompt || displayText,
+            revisionChain: options.revisionChain || null,
+        });
     }
 
     // ==================== Streaming Send ====================
 
-    async function sendMessageStream(text) {
+    async function sendMessageStream(text, options = {}) {
         const loadingId = addLoading();
         isLoading = true;
         updateButtons();
@@ -244,7 +253,9 @@ const ChatPanel = (function () {
         streamUserScrollLocked = false;
         streamingActive = false;
         streamMsgId = null;
-        streamUserPrompt = text;
+        streamUserPrompt = options.reviewPrompt || text;
+        streamModelRequest = text;
+        streamRevisionChain = options.revisionChain || null;
 
         try {
             await startStream(endpoint, text, context, streamAbortController.signal);
@@ -370,11 +381,16 @@ const ChatPanel = (function () {
                         for (const line of lines) {
                             if (line.startsWith('data: ')) {
                                 const jsonStr = line.slice(6);
+                                let event;
                                 try {
-                                    const event = JSON.parse(jsonStr);
-                                    const shouldStop = processStreamEvent(event);
-                                    if (shouldStop) { stopped = true; resolve(); return; }
-                                } catch { /* skip malformed JSON line */ }
+                                    event = JSON.parse(jsonStr);
+                                } catch {
+                                    // Skip malformed JSON lines, but never swallow
+                                    // errors raised while handling a valid event.
+                                    continue;
+                                }
+                                const shouldStop = processStreamEvent(event);
+                                if (shouldStop) { stopped = true; resolve(); return; }
                             }
                         }
                     }
@@ -485,14 +501,14 @@ const ChatPanel = (function () {
                 streamingActive = false;  // Allow session save to proceed
                 if (streamMsgId) {
                     const fullReply = event.reply || streamAccumulatedText;
-                    finalizeStreamMessageAfterTypewriter(streamMsgId, fullReply, streamReasoningBlocks, currentMode, streamUserPrompt);
+                    finalizeStreamMessageAfterTypewriter(streamMsgId, fullReply, streamReasoningBlocks, currentMode, streamUserPrompt, streamRevisionChain, streamModelRequest);
                 }
                 window.saveActiveChatSession?.();
                 window.onAISuccess?.();
                 return true;  // Signal stream complete
 
             case 'error':
-                throw new Error(event.message || 'Stream error');
+                throw new Error(formatModelError(event.message || 'Stream error'));
 
             default:
                 break;
@@ -523,7 +539,14 @@ const ChatPanel = (function () {
         msgList.appendChild(el);
         scrollBottom(msgList, { force: true });
 
-        const msg = { id: id, role: role, content: '', rawContent: '', mode: mode };
+        const msg = {
+            id: id,
+            role: role,
+            content: '',
+            rawContent: '',
+            mode: mode,
+            draft: role === 'assistant' && mode === 'write',
+        };
         messages.push(msg);
         renderedStart = Math.max(0, messages.length - MESSAGE_PAGE_SIZE);
         while (msgList.querySelectorAll('.chat-message').length > MESSAGE_PAGE_SIZE) {
@@ -572,8 +595,8 @@ const ChatPanel = (function () {
         streamTypewriterTimer = null;
     }
 
-    function finalizeStreamMessageAfterTypewriter(msgId, fullText, reasoningBlocks, mode, userPrompt) {
-        const finalize = () => finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt);
+    function finalizeStreamMessageAfterTypewriter(msgId, fullText, reasoningBlocks, mode, userPrompt, revisionChain, requestText) {
+        const finalize = () => finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt, revisionChain, requestText);
         if (streamPendingText || streamTypewriterTimer) {
             streamPendingFinalize = finalize;
             return;
@@ -915,7 +938,7 @@ const ChatPanel = (function () {
         window.autoSaveEditor?.();
     }
 
-    function finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt) {
+    function finalizeStreamMessage(msgId, fullText, reasoningBlocks, mode, userPrompt, revisionChain = null, requestText = '') {
         const el = document.getElementById(msgId);
         if (!el) return;
 
@@ -940,11 +963,16 @@ const ChatPanel = (function () {
 
         // Update message object
         const msg = messages.find(m => m.id === msgId);
-        if (msg) { msg.content = boundReply; msg.rawContent = boundReply; }
+        if (msg) {
+            msg.content = boundReply;
+            msg.rawContent = boundReply;
+            if (revisionChain) msg.revisionChain = revisionChain;
+            if (requestText) msg.modelRequest = requestText;
+        }
 
         // Add review buttons (write mode) — only if reply has <content> tags
         if (mode === 'write' && msg && hasContentTag(boundReply)) {
-            addReviewButtons(msg, boundReply, userPrompt);
+            addReviewButtons(msg, boundReply, userPrompt, revisionChain);
         }
 
         // Auto-detect JSON for import (assist mode)
@@ -995,6 +1023,20 @@ const ChatPanel = (function () {
         }
     }
 
+    function formatModelError(message = '') {
+        const text = String(message || 'Stream error');
+        if (/Resource exhausted|error-code-429|429|Too Many Requests/i.test(text)) {
+            return '模型服务返回 429：额度、频率或当前资源池已耗尽。请稍后重试，或降低单次输出长度/切换模型。';
+        }
+        if (/API key required/i.test(text)) {
+            return '缺少 API Key，请先在 AI 服务里保存并连接模型。';
+        }
+        if (/fetch failed|Connect Timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/i.test(text)) {
+            return '网络连接失败。请检查网络代理设置，或点击“设置 - 网络代理 - 探测”。';
+        }
+        return text;
+    }
+
     async function removedNonStreamingApiCall(endpoint, userMessage, context, signal) {
         const config = { ...getConfig() };
         const presetName = window.editorState?.presetName || '__default__';
@@ -1021,7 +1063,7 @@ const ChatPanel = (function () {
             .filter(shouldSendMessageToModel)
             .map(m => ({
                 role: m.role,
-                content: String(m.rawContent || m.content || '').trim(),
+                content: getMessageModelContent(m),
                 currentTextSnapshot: m.currentTextSnapshot || '',
                 chapterTitle: m.chapterTitle || '',
                 roundNumber: m.roundNumber || 0,
@@ -1031,11 +1073,19 @@ const ChatPanel = (function () {
 
     function shouldSendMessageToModel(message) {
         if (!message || message.transient) return false;
+        if (message.draft) return false;
         if (!['user', 'assistant'].includes(message.role)) return false;
-        const content = String(message.rawContent || message.content || '').trim();
+        if (message.role === 'assistant' && message.mode === 'write' && !message.accepted && !message.memoryContent) {
+            return false;
+        }
+        const content = getMessageModelContent(message);
         if (!content) return false;
         if (message.role === 'assistant' && isAssistantErrorMessage(content)) return false;
         return true;
+    }
+
+    function getMessageModelContent(message = {}) {
+        return String(message.memoryContent || message.rawContent || message.content || '').trim();
     }
 
     function isAssistantErrorMessage(content) {
@@ -1124,7 +1174,19 @@ const ChatPanel = (function () {
             window.DomAnimator.fadeIn(el);
         }
 
-        const msg = { id, role, content, rawContent: content, mode, transient: Boolean(options.transient) };
+        const msg = {
+            id,
+            role,
+            content,
+            rawContent: content,
+            mode,
+            transient: Boolean(options.transient),
+            draft: options.draft !== undefined
+                ? Boolean(options.draft)
+                : (role === 'assistant' && mode === 'write' && !options.transient),
+        };
+        if (options.memoryContent) msg.memoryContent = options.memoryContent;
+        if (options.accepted) msg.accepted = true;
         if (options.currentTextSnapshot) msg.currentTextSnapshot = options.currentTextSnapshot;
         if (options.chapterTitle) msg.chapterTitle = options.chapterTitle;
         if (options.roundNumber) msg.roundNumber = options.roundNumber;
@@ -1338,7 +1400,7 @@ const ChatPanel = (function () {
     }
 
     // ==================== Review Buttons (Write mode) ====================
-    function addReviewButtons(msg, text, userPrompt) {
+    function addReviewButtons(msg, text, userPrompt, revisionChain = null) {
         if (!msg) return;
         const bar = showFloatBar(`
             <div class="action-float-title">生成完成</div>
@@ -1351,6 +1413,7 @@ const ChatPanel = (function () {
 
         bar.querySelector('#review-accept').addEventListener('click', () => {
             insertToEditor(text);
+            markDraftAccepted(msg, text, revisionChain);
             bar.innerHTML = '<div class="action-float-result success">已写入编辑器</div>';
             setFloatBarHtml(bar, bar.innerHTML);
             setTimeout(() => bar.remove(), 1500);
@@ -1361,14 +1424,20 @@ const ChatPanel = (function () {
             const i = messages.findIndex(m => m.id === msg.id);
             if (i >= 0) messages.splice(i, 1);
             bar.remove();
-            sendMessage(userPrompt);
+            sendMessage(userPrompt, {
+                displayText: userPrompt,
+                modelText: msg.modelRequest || userPrompt,
+                reviewPrompt: userPrompt,
+                revisionChain,
+                excludeFromModelHistory: Boolean(revisionChain),
+            });
         });
         bar.querySelector('#review-revise').addEventListener('click', () => {
-            showReviseInput(msg.id, text, userPrompt, bar);
+            showReviseInput(msg.id, text, userPrompt, bar, revisionChain);
         });
     }
 
-    function showReviseInput(msgId, originalText, userPrompt, oldBar) {
+    function showReviseInput(msgId, originalText, userPrompt, oldBar, revisionChain = null) {
         if (oldBar) oldBar.remove();
         const bar = showFloatBar(`
             <div class="action-float-title">修改意见</div>
@@ -1387,15 +1456,107 @@ const ChatPanel = (function () {
             const i = messages.findIndex(m => m.id === msgId);
             if (i >= 0) messages.splice(i, 1);
             bar.remove();
-            sendMessage(`${userPrompt}\n\n【修改意见】${inst}`);
+            const nextChain = buildRevisionChain(revisionChain, userPrompt, originalText, inst);
+            const displayText = `${getRevisionOriginalPrompt(nextChain)}\n\n【修改意见】${inst}`;
+            sendMessage(displayText, {
+                displayText,
+                modelText: buildRevisionRequest(nextChain),
+                reviewPrompt: getRevisionOriginalPrompt(nextChain),
+                revisionChain: nextChain,
+                excludeFromModelHistory: true,
+            });
         };
         bar.querySelector('#revise-go').addEventListener('click', doRevise);
         bar.querySelector('#revise-cancel').addEventListener('click', () => {
             bar.remove();
-            addReviewButtons({ id: msgId }, originalText, userPrompt);
+            addReviewButtons({ id: msgId }, originalText, userPrompt, revisionChain);
         });
         input.addEventListener('keydown', e => { if (e.key === 'Enter') doRevise(); });
         setTimeout(() => input.focus(), 100);
+    }
+
+    function markDraftAccepted(message, acceptedText = '', revisionChain = null) {
+        if (!message) return;
+        const target = messages.find(m => m.id === message.id) || message;
+        target.draft = false;
+        target.accepted = true;
+        target.memoryContent = buildAcceptedRevisionMemory(revisionChain);
+        if (!target.rawContent && acceptedText) target.rawContent = acceptedText;
+        if (!target.content && acceptedText) target.content = acceptedText;
+        if (target.revisionChain) delete target.revisionChain;
+        if (target.modelRequest) delete target.modelRequest;
+        window.saveActiveChatSession?.();
+    }
+
+    function buildRevisionChain(existingChain, originalPrompt, previousDraft, instruction) {
+        const base = existingChain && typeof existingChain === 'object'
+            ? existingChain
+            : { originalPrompt, revisions: [] };
+        return {
+            originalPrompt: String(base.originalPrompt || originalPrompt || '').trim(),
+            revisions: [
+                ...(Array.isArray(base.revisions) ? base.revisions : []),
+                {
+                    instruction: String(instruction || '').trim(),
+                    draft: cleanDraftForRevision(previousDraft),
+                },
+            ],
+        };
+    }
+
+    function buildRevisionRequest(chain = {}) {
+        const revisions = Array.isArray(chain.revisions) ? chain.revisions : [];
+        const last = revisions[revisions.length - 1] || {};
+        const path = revisions
+            .map((item, index) => `${index + 1}. ${item.instruction || '(无修改意见)'}`)
+            .join('\n');
+        return [
+            '这是一次“基于上一版草稿修改”的请求。',
+            '',
+            '【原始作者要求】',
+            getRevisionOriginalPrompt(chain) || '(无)',
+            '',
+            '【当前未确认修订链】',
+            path || '(暂无)',
+            '',
+            '【上一版 AI 草稿，仅供本轮修改参考】',
+            '注意：这不是正式记忆，也不是已经确认的正文。用户认可的部分可以保留，用户要求修改或否定的部分必须重写。',
+            last.draft || '(上一版草稿为空)',
+            '',
+            '【本轮修改意见】',
+            last.instruction || '(无)',
+            '',
+            '【输出要求】',
+            '请输出修改后的完整正文结果。不要解释修改过程，不要把“上一版草稿”当成既定事实，不要输出清单或说明。'
+        ].join('\n');
+    }
+
+    function getRevisionOriginalPrompt(chain = {}) {
+        return String(chain.originalPrompt || '').trim();
+    }
+
+    function buildAcceptedRevisionMemory(chain = null) {
+        const revisions = Array.isArray(chain?.revisions) ? chain.revisions : [];
+        if (!revisions.length) return '用户已接受上一版正文生成结果，内容已写入当前正文。';
+        const path = revisions
+            .map((item, index) => `${index + 1}. ${item.instruction || '(无修改意见)'}`)
+            .join('；');
+        return trimForMemory(
+            `用户已接受一次正文修订。原始要求：${getRevisionOriginalPrompt(chain) || '未记录'}。修改路径：${path}。结果已写入当前正文。`,
+            420
+        );
+    }
+
+    function trimForMemory(text = '', max = 420) {
+        const value = String(text || '').replace(/\s+/g, ' ').trim();
+        return value.length > max ? value.slice(0, max - 1) + '…' : value;
+    }
+
+    function cleanDraftForRevision(text = '') {
+        return extractContentOnly(String(text || ''))
+            .replace(/\[REASONING\][\s\S]*?\[\/REASONING\]/gi, '')
+            .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+            .trim();
     }
 
     function insertToEditor(text) {

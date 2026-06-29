@@ -99,7 +99,7 @@
         updatePresetSelect();
         updateStatusBar();
         console.log('📖 催更姬 v1.0 — Ready (状态已恢复)');
-        setStatus('就绪 - 开始创作吧!', 'info');
+        setStatus('就绪 — 开始创作吧', 'info');
     }
 
     function persistAppSignature() {
@@ -610,13 +610,131 @@
     }
 
     function exportWorldBook() {
-        if (!Object.keys(state.worldBook?.entries || {}).length) return setStatus('\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u4e16\u754c\u4e66', 'warn');
-        downloadJson(state.worldBook, `${state.currentNovel?.title || 'worldbook'}-worldbook.json`);
+        const entries = Object.entries(state.worldBook?.entries || {});
+        if (!entries.length) return setStatus('\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u4e16\u754c\u4e66', 'warn');
+        showExportSelectionDialog({
+            title: '导出世界书',
+            subtitle: '选择要导出的世界书条目。',
+            items: entries.map(([uid, entry]) => ({
+                id: uid,
+                title: entry.comment || entry.key?.[0] || `条目 ${uid}`,
+                meta: getWorldBookFolder(entry) || entry.group || '未分组',
+                checked: true,
+            })),
+            onConfirm: selectedIds => {
+                const selected = new Set(selectedIds);
+                const data = buildSelectedWorldBookExport(selected);
+                if (!Object.keys(data.entries || {}).length) return setStatus('请选择至少一个世界书条目', 'warn');
+                downloadJson(data, `${state.currentNovel?.title || 'worldbook'}-worldbook.json`);
+                setStatus(`已导出 ${Object.keys(data.entries).length} 条世界书`, 'success');
+            },
+        });
     }
 
     function exportCharacters() {
         if (!state.characters.length) return setStatus('\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u89d2\u8272', 'warn');
-        downloadJson(state.characters, `${state.currentNovel?.title || 'characters'}-characters.json`);
+        showExportSelectionDialog({
+            title: '导出角色卡',
+            subtitle: '选择要导出的角色。单个角色会导出标准角色卡 JSON，多个角色会导出催更姬角色合集。',
+            items: state.characters.map((character, index) => ({
+                id: String(index),
+                title: character.data?.name || character.name || `角色 ${index + 1}`,
+                meta: character.data?.group || character.group || character._source || '未分组',
+                checked: true,
+            })),
+            onConfirm: selectedIds => {
+                const selected = selectedIds
+                    .map(id => Number(id))
+                    .filter(index => Number.isInteger(index) && state.characters[index]);
+                if (!selected.length) return setStatus('请选择至少一个角色', 'warn');
+                const characters = selected.map(index => state.characters[index]);
+                if (characters.length === 1) {
+                    const name = characters[0].data?.name || characters[0].name || 'character';
+                    downloadJson(characters[0], `${safeFilename(name)}.json`);
+                } else {
+                    downloadJson({
+                        spec: 'cuigengji_character_bundle_v1',
+                        exportedAt: Date.now(),
+                        characters,
+                    }, `${state.currentNovel?.title || 'characters'}-characters.json`);
+                }
+                setStatus(`已导出 ${characters.length} 个角色`, 'success');
+            },
+        });
+    }
+
+    function buildSelectedWorldBookExport(selectedIds) {
+        const source = state.worldBook || {};
+        const entries = {};
+        const folders = new Set();
+        for (const [uid, entry] of Object.entries(source.entries || {})) {
+            if (!selectedIds.has(String(uid))) continue;
+            entries[uid] = { ...entry };
+            const folder = getWorldBookFolder(entry);
+            if (folder) folders.add(folder);
+        }
+        return {
+            ...source,
+            entries,
+            folders: [...folders].sort((a, b) => a.localeCompare(b, 'zh-CN')),
+            sources: source.sources || {},
+        };
+    }
+
+    function showExportSelectionDialog({ title, subtitle, items, onConfirm }) {
+        document.getElementById('export-selection-overlay')?.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'export-selection-overlay';
+        overlay.className = 'plot-modal-overlay';
+        overlay.innerHTML = `
+            <div class="plot-modal export-selection-modal">
+                <div class="plot-modal-header">
+                    <div>
+                        <h3>${escHtml(title)}</h3>
+                        <p class="settings-subtitle">${escHtml(subtitle || '')}</p>
+                    </div>
+                    <button class="plot-modal-close" aria-label="关闭">×</button>
+                </div>
+                <div class="plot-modal-body" style="display:flex;flex-direction:column;gap:10px;">
+                    <div style="display:flex;gap:8px;justify-content:center;">
+                        <button type="button" class="export-select-all" style="width:auto;min-height:auto;padding:5px 16px;font-size:11px;border-radius:var(--radius);border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;">全选</button>
+                        <button type="button" class="export-select-none" style="width:auto;min-height:auto;padding:5px 16px;font-size:11px;border-radius:var(--radius);border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;">全不选</button>
+                    </div>
+                    <div class="export-selection-list" style="display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;">
+                        ${items.map(item => `
+                            <label class="extract-check-row" style="align-items:center;">
+                                <input type="checkbox" class="export-selection-check" value="${escAttr(item.id)}" ${item.checked ? 'checked' : ''}>
+                                <span><b>${escHtml(item.title)}</b>${item.meta ? `<em>${escHtml(item.meta)}</em>` : ''}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="plot-modal-footer">
+                    <button type="button" class="ai-btn-secondary export-selection-cancel">取消</button>
+                    <button type="button" class="ai-btn-primary export-selection-confirm">导出选中</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const close = () => overlay.remove();
+        overlay.querySelector('.plot-modal-close')?.addEventListener('click', close);
+        overlay.querySelector('.export-selection-cancel')?.addEventListener('click', close);
+        overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+        overlay.querySelector('.export-select-all')?.addEventListener('click', () => {
+            overlay.querySelectorAll('.export-selection-check').forEach(input => { input.checked = true; });
+        });
+        overlay.querySelector('.export-select-none')?.addEventListener('click', () => {
+            overlay.querySelectorAll('.export-selection-check').forEach(input => { input.checked = false; });
+        });
+        overlay.querySelector('.export-selection-confirm')?.addEventListener('click', () => {
+            const selectedIds = [...overlay.querySelectorAll('.export-selection-check:checked')].map(input => input.value);
+            onConfirm?.(selectedIds);
+            close();
+        });
+        requestAnimationFrame(() => overlay.classList.add('active'));
+    }
+
+    function safeFilename(value = 'export') {
+        return String(value || 'export').replace(/[\\/:*?"<>|]/g, '_').trim() || 'export';
     }
 
     function exportPreset() {
@@ -695,14 +813,120 @@
             || /^<[^>]+>/.test(line);
     }
 
+    function renderNetworkProxySettings(slot) {
+        const mode = state.aiConfig.networkProxyMode || 'auto';
+        const url = state.aiConfig.networkProxyUrl || '';
+        slot.innerHTML = `
+            <div class="settings-group">
+                <h5>代理模式</h5>
+                <label class="settings-row">
+                    <span><strong>自动检测</strong><span>使用系统环境变量或常见 VPN 代理地址。</span></span>
+                    <input type="radio" name="network-proxy-mode" value="auto" ${mode === 'auto' ? 'checked' : ''}>
+                </label>
+                <label class="settings-row">
+                    <span><strong>手动指定</strong><span>输入代理地址，例如 http://127.0.0.1:7890。</span></span>
+                    <input type="radio" name="network-proxy-mode" value="manual" ${mode === 'manual' ? 'checked' : ''}>
+                </label>
+                <label class="settings-row">
+                    <span><strong>不使用代理</strong><span>直连模型服务，适合无需代理的网络环境。</span></span>
+                    <input type="radio" name="network-proxy-mode" value="off" ${mode === 'off' ? 'checked' : ''}>
+                </label>
+            </div>
+            <div class="settings-group" id="proxy-manual-group" style="${mode === 'manual' ? '' : 'display:none;'}">
+                <h5>代理地址</h5>
+                <label class="settings-row" for="setting-proxy-url">
+                    <span><strong>URL</strong><span>支持 http/https 代理。</span></span>
+                    <input type="text" id="setting-proxy-url" class="ai-input" value="${escAttr(url)}" placeholder="http://127.0.0.1:7890" style="width:260px;">
+                </label>
+            </div>
+            <div class="settings-group">
+                <div class="settings-actions">
+                    <button type="button" id="btn-detect-proxy" class="ai-btn-secondary">探测代理</button>
+                    <button type="button" id="btn-test-proxy" class="ai-btn-secondary" ${mode === 'off' ? 'disabled' : ''}>测试连接</button>
+                </div>
+                <div id="proxy-status" class="ai-key-status" style="margin-top:8px;"></div>
+            </div>`;
+
+        // 模式切换
+        slot.querySelectorAll('input[name="network-proxy-mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                state.aiConfig.networkProxyMode = radio.value;
+                const manualGroup = slot.querySelector('#proxy-manual-group');
+                if (manualGroup) manualGroup.style.display = radio.value === 'manual' ? '' : 'none';
+                const testBtn = slot.querySelector('#btn-test-proxy');
+                if (testBtn) testBtn.disabled = radio.value === 'off';
+                autoSave();
+            });
+        });
+
+        // 手动 URL 变更
+        const urlInput = slot.querySelector('#setting-proxy-url');
+        urlInput?.addEventListener('input', () => {
+            state.aiConfig.networkProxyUrl = urlInput.value.trim();
+            autoSave();
+        });
+
+        // 探测代理
+        slot.querySelector('#btn-detect-proxy')?.addEventListener('click', async () => {
+            const status = slot.querySelector('#proxy-status');
+            if (!status) return;
+            status.textContent = '正在探测本机代理...';
+            try {
+                const resp = await fetch('/api/ai/detect-network-proxy', { method: 'POST' });
+                const data = await resp.json().catch(() => ({}));
+                if (data.success && data.proxyUrl) {
+                    const radios = slot.querySelectorAll('input[name="network-proxy-mode"]');
+                    radios.forEach(r => { if (r.value === 'auto') r.checked = true; });
+                    state.aiConfig.networkProxyMode = 'auto';
+                    state.aiConfig.networkProxyUrl = '';
+                    const manualGroup = slot.querySelector('#proxy-manual-group');
+                    if (manualGroup) manualGroup.style.display = 'none';
+                    const testBtn = slot.querySelector('#btn-test-proxy');
+                    if (testBtn) testBtn.disabled = false;
+                    if (urlInput) urlInput.value = '';
+                    autoSave();
+                    status.textContent = `✅ 已检测到代理 ${data.proxyUrl}，已切换为自动模式。`;
+                } else {
+                    status.textContent = `⚠️ ${data.error || '未检测到可用代理'}`;
+                }
+            } catch (err) {
+                status.textContent = `❌ 探测失败: ${err.message}`;
+            }
+        });
+
+        // 测试连接
+        slot.querySelector('#btn-test-proxy')?.addEventListener('click', async () => {
+            const status = slot.querySelector('#proxy-status');
+            if (!status) return;
+            status.textContent = '正在测试代理连通性...';
+            try {
+                const resp = await fetch('/api/ai/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...state.aiConfig, silent: true }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok) {
+                    status.textContent = `✅ 连接成功 (${data.model || 'OK'})`;
+                } else {
+                    status.textContent = `❌ 连接失败: ${data.error || `HTTP ${resp.status}`}`;
+                }
+            } catch (err) {
+                status.textContent = `❌ 测试失败: ${err.message}`;
+            }
+        });
+    }
+
     function initSettingsDialog() {
         const serviceSlot = $('#settings-ai-service-slot');
         const generationSlot = $('#settings-generation-slot');
+        const proxySlot = $('#settings-network-proxy-slot');
         const connection = $('#ai-connection-section');
         const generation = $('#ai-generation-settings');
 
         if (serviceSlot && connection) serviceSlot.appendChild(connection);
         if (generationSlot && generation) generationSlot.appendChild(generation);
+        if (proxySlot) renderNetworkProxySettings(proxySlot);
 
         const overlay = $('#settings-overlay');
         const close = () => closeSettings();
@@ -1866,6 +2090,14 @@
         $('#ai-top-p').value = c.topP;
         updateReferenceInjectionModeUI();
         updateRangeLabels();
+        // 恢复提供商标识字段
+        if (c.vertexAuthMode && $('#ai-vertex-auth-mode')) $('#ai-vertex-auth-mode').value = c.vertexAuthMode;
+        if (c.vertexRegion && $('#ai-vertex-region')) $('#ai-vertex-region').value = c.vertexRegion;
+        if (c.vertexProjectId && $('#ai-vertex-project-id')) $('#ai-vertex-project-id').value = c.vertexProjectId;
+        if (c.vertexServiceAccountJson && $('#ai-vertex-service-account-json')) $('#ai-vertex-service-account-json').value = c.vertexServiceAccountJson;
+        if (c.siliconflowEndpoint && $('#ai-siliconflow-endpoint')) $('#ai-siliconflow-endpoint').value = c.siliconflowEndpoint;
+        if (c.minimaxEndpoint && $('#ai-minimax-endpoint')) $('#ai-minimax-endpoint').value = c.minimaxEndpoint;
+        if (c.zaiEndpoint && $('#ai-zai-endpoint')) $('#ai-zai-endpoint').value = c.zaiEndpoint;
         updateProviderUI();
     }
 
@@ -1986,6 +2218,32 @@
                 setReferenceInjectionMode(input.value);
             });
         });
+
+        // Provider-specific fields
+        const bindProviderField = (id, configKey, onChange) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', debounce(() => {
+                state.aiConfig[configKey] = el.value.trim();
+                saveConfig();
+                if (onChange) onChange(el.value);
+            }, 500));
+            el.addEventListener('change', () => {
+                state.aiConfig[configKey] = el.value.trim();
+                saveConfig();
+                if (onChange) onChange(el.value);
+            });
+        };
+        bindProviderField('ai-vertex-auth-mode', 'vertexAuthMode', (val) => {
+            const sa = $('#ai-vertex-service-account-field');
+            if (sa) sa.style.display = val === 'full' ? '' : 'none';
+        });
+        bindProviderField('ai-vertex-region', 'vertexRegion');
+        bindProviderField('ai-vertex-project-id', 'vertexProjectId');
+        bindProviderField('ai-vertex-service-account-json', 'vertexServiceAccountJson');
+        bindProviderField('ai-siliconflow-endpoint', 'siliconflowEndpoint');
+        bindProviderField('ai-minimax-endpoint', 'minimaxEndpoint');
+        bindProviderField('ai-zai-endpoint', 'zaiEndpoint');
 
         // Sidebar tabs
         $$('.sidebar-tab').forEach(tab => {
@@ -2330,9 +2588,9 @@
 
     function showExtractionLauncher() {
         const text = $('#chapter-editor').value;
-        const orders = state.chapters.map(ch => Number(ch.order || 0)).filter(Number.isFinite);
-        const minOrder = Math.max(1, Math.min(...orders, 1));
-        const maxOrder = Math.max(1, ...orders);
+        const textChapters = getOrderedTextChapters();
+        const minOrder = 1;
+        const maxOrder = Math.max(1, textChapters.length);
         document.getElementById('extract-launcher-overlay')?.remove();
         const overlay = document.createElement('div');
         overlay.id = 'extract-launcher-overlay';
@@ -2358,7 +2616,7 @@
                         <div class="extraction-range-fields">
                             <label>开始章节序号<input id="extract-project-start" class="ai-input" type="number" min="1" value="${minOrder}"></label>
                             <label>结束章节序号<input id="extract-project-end" class="ai-input" type="number" min="1" value="${maxOrder}"></label>
-                            <button type="button" class="ai-btn-secondary extract-project-btn extraction-action-btn"${state.chapters.length ? '' : ' disabled'}>逐章扫描</button>
+                            <button type="button" class="ai-btn-secondary extract-project-btn extraction-action-btn"${textChapters.length ? '' : ' disabled'}>逐章扫描</button>
                         </div>
                         <div id="extract-project-progress" class="extract-project-progress"></div>
                     </section>
@@ -2469,7 +2727,9 @@
                 type: 'current',
                 text: text.slice(-12000),
                 novelId: state.currentNovel?.id || '',
+                chapterId: state.currentChapter?.id || '',
                 chapterTitle: state.currentChapter?.title || '',
+                chapterOrder: state.currentChapter?.order ?? null,
             });
             launcherOverlay?.remove();
             trackExtractionJob(job);
@@ -2589,6 +2849,10 @@
         const isFinished = ['done', 'error'].includes(job.status);
         if (wasActive && isFinished && !extractionJobNotices.has(job.id)) {
             extractionJobNotices.add(job.id);
+            if (job.status === 'done') {
+                applyExtractionChapterSummary(job.result);
+                void refreshChaptersAfterExtraction(job.result);
+            }
             showToast(job.status === 'done' ? '设定提取完成，点击左下角查看结果。' : `设定提取失败：${job.error || '未知错误'}`, job.status === 'done' ? 'success' : 'error');
         }
     }
@@ -2687,9 +2951,61 @@
             handleExtractionJobUpdate(data.job);
             renderExtractionJobDock();
             if (!data.job?.result) throw new Error('任务还没有可查看的结果');
+            applyExtractionChapterSummary(data.job.result);
+            void refreshChaptersAfterExtraction(data.job.result);
             showExtractionResults(data.job.result);
         } catch (err) {
             setStatus(`查看提取结果失败: ${err.message}`, 'error');
+        }
+    }
+
+    function applyExtractionChapterSummary(result = {}) {
+        const brief = result.chapterSummary?.brief || result.chapterSummary || '';
+        if (!brief || result.mode !== 'current') return;
+        if (!state.currentChapter?.id || String(result.chapterId || '') !== String(state.currentChapter.id)) return;
+        state.currentChapter.summary = brief;
+        state.currentChapter.summaryGenerator = 'ai-v1';
+        state.currentChapter.summaryUpdatedAt = Date.now();
+        if (!state.currentChapter.aiSummary || typeof state.currentChapter.aiSummary !== 'object') {
+            state.currentChapter.aiSummary = {};
+        }
+        state.currentChapter.aiSummary.brief = brief;
+        const input = $('#chapter-summary-input');
+        if (input) input.value = brief;
+        const hint = $('#summary-hint');
+        if (hint) hint.textContent = 'AI 生成 · 设定提取';
+        updateStatusBar();
+    }
+
+    async function refreshChaptersAfterExtraction(result = {}) {
+        if (!['current', 'project'].includes(result.mode) || !state.currentNovel?.id) return;
+        try {
+            const data = await ApiClient.get(`/api/chapters?novelId=${encodeURIComponent(state.currentNovel.id)}`);
+            const nextChapters = Array.isArray(data.chapters) ? data.chapters : [];
+            if (!nextChapters.length) return;
+            state.chapters = nextChapters.map(chapter => {
+                if (chapter.id !== state.currentChapter?.id) return chapter;
+                return { ...state.currentChapter, ...chapter, content: state.currentChapter.content };
+            });
+            if (state.currentChapter?.id) {
+                const latestMeta = nextChapters.find(chapter => chapter.id === state.currentChapter.id);
+                const latest = await ApiClient.get(
+                    `/api/chapters/${encodeURIComponent(state.currentChapter.id)}?novelId=${encodeURIComponent(state.currentNovel.id)}`,
+                ).catch(() => latestMeta);
+                if (latest) {
+                    Object.assign(state.currentChapter, {
+                        summary: latest.summary || state.currentChapter.summary || '',
+                        aiSummary: latest.aiSummary || state.currentChapter.aiSummary,
+                        summaryGenerator: latest.summaryGenerator || state.currentChapter.summaryGenerator,
+                        summaryUpdatedAt: latest.summaryUpdatedAt || state.currentChapter.summaryUpdatedAt,
+                    });
+                    showChapterSummary(state.currentChapter);
+                }
+            }
+            refreshChapterTree();
+            updateStatusBar();
+        } catch (err) {
+            console.warn('[Extraction] Failed to refresh chapter summaries:', err.message);
         }
     }
 
@@ -3854,9 +4170,11 @@
         await ensureNovelExists();
 
         let successCount = 0;
+        let attemptedCount = 0;
         for (const file of files) {
             try {
                 if (file.name.endsWith('.png')) {
+                    attemptedCount++;
                     const form = new FormData();
                     form.append('file', file);
                     form.append('novelId', state.currentNovel.id);
@@ -3870,17 +4188,22 @@
                 } else if (file.name.endsWith('.json')) {
                     const text = await readFileAsText(file);
                     const data = JSON.parse(text);
-                    const resp = await fetch('/api/import/character-json', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ novelId: state.currentNovel.id, data }),
-                    });
-                    if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
-                    const result = await resp.json();
-                    const character = result.character || data;
-                    character._source = file.name.replace(/\.json$/i, '');
-                    state.characters.push(character);
-                    successCount++;
+                    const characters = normalizeImportedCharacterFile(data);
+                    if (!characters.length) throw new Error('未识别到角色卡数据');
+                    attemptedCount += characters.length;
+                    for (const item of characters) {
+                        const resp = await fetch('/api/import/character-json', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ novelId: state.currentNovel.id, data: item }),
+                        });
+                        if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
+                        const result = await resp.json();
+                        const character = result.character || item;
+                        character._source = file.name.replace(/\.json$/i, '');
+                        state.characters.push(character);
+                        successCount++;
+                    }
                 }
             } catch (err) {
                 setStatus(`导入 ${file.name} 失败: ${err.message}`, 'error');
@@ -3889,7 +4212,13 @@
 
         renderCharacterList();
         autoSave();
-        setStatus(`✅ 成功导入 ${successCount}/${files.length} 个角色`, 'success');
+        setStatus(`✅ 成功导入 ${successCount}/${attemptedCount || files.length} 个角色`, 'success');
+    }
+
+    function normalizeImportedCharacterFile(data) {
+        if (Array.isArray(data)) return data.filter(Boolean);
+        if (Array.isArray(data?.characters)) return data.characters.filter(Boolean);
+        return data ? [data] : [];
     }
 
     function renderCharacterList() {
@@ -4752,6 +5081,30 @@
         const provider = state.aiConfig.provider;
         const isOllama = provider === 'ollama';
         $('#ai-api-key-field').style.display = isOllama ? 'none' : '';
+
+        // Provider-specific fields
+        const isVertex = provider === 'google-vertex';
+        const vertexFields = $('#ai-vertex-fields');
+        if (vertexFields) vertexFields.style.display = isVertex ? '' : 'none';
+
+        const needsCompat = /^siliconflow|minimax|zai$/.test(provider);
+        const compatFields = $('#ai-compatible-extra-fields');
+        if (compatFields) compatFields.style.display = needsCompat ? '' : 'none';
+
+        if (needsCompat) {
+            const sf = $('#ai-siliconflow-endpoint-field');
+            if (sf) sf.style.display = provider === 'siliconflow' ? '' : 'none';
+            const mm = $('#ai-minimax-endpoint-field');
+            if (mm) mm.style.display = provider === 'minimax' ? '' : 'none';
+            const za = $('#ai-zai-endpoint-field');
+            if (za) za.style.display = provider === 'zai' ? '' : 'none';
+        }
+
+        if (isVertex) {
+            const authMode = $('#ai-vertex-auth-mode')?.value || state.aiConfig.vertexAuthMode || 'express';
+            const saField = $('#ai-vertex-service-account-field');
+            if (saField) saField.style.display = authMode === 'full' ? '' : 'none';
+        }
 
         // Auto-fill default model for each provider
         const defaultModels = {

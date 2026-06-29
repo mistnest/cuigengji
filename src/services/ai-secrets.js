@@ -7,6 +7,7 @@ import { getDataRoot } from '../config.js';
 
 const SECRETS_FILE = 'ai-secrets.json';
 const DEFAULT_PROFILE = '__default__';
+export const VERTEX_SERVICE_ACCOUNT_PROVIDER = 'google-vertex-service-account';
 
 function secretsPath() {
     return path.join(getDataRoot(), SECRETS_FILE);
@@ -51,9 +52,22 @@ export function readAiSecret(provider, profile) {
 }
 
 export function applyAiSecret(config = {}, profile) {
-    if (!config || config.apiKey || config.provider === 'ollama') return config;
-    const apiKey = readAiSecret(config.provider, profile || config.presetName);
-    return apiKey ? { ...config, apiKey } : config;
+    if (!config || config.provider === 'ollama') return config;
+    const profileName = profile || config.presetName;
+    const result = { ...config };
+    if (!result.apiKey) {
+        const apiKey = readAiSecret(result.provider, profileName);
+        if (apiKey) result.apiKey = apiKey;
+    }
+    if (
+        result.provider === 'google-vertex'
+        && String(result.vertexAuthMode || 'express') === 'full'
+        && !result.vertexServiceAccountJson
+    ) {
+        const serviceAccountJson = readAiSecret(VERTEX_SERVICE_ACCOUNT_PROVIDER, profileName);
+        if (serviceAccountJson) result.vertexServiceAccountJson = serviceAccountJson;
+    }
+    return result;
 }
 
 export function hasAiSecret(provider, profile) {

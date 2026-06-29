@@ -1,7 +1,6 @@
 /**
  * Chat Tool — Shared tool definitions for Plan & Assist modes
  */
-import path from 'node:path';
 import sanitize from 'sanitize-filename';
 import { ApiError } from '../lib/http.js';
 import { projectFile } from '../lib/project-paths.js';
@@ -29,7 +28,7 @@ export const ASSIST_TOOLS = [
                             { type: 'object' },
                             { type: 'array' },
                         ],
-                        description: '要导入的JSON数据。character需含name/description/personality; worldbook可为单条{comment,key,content}、数组或{entries}; preset需含name/provider/model等信息',
+                        description: '要导入的JSON数据。character需含name/summary/description/personality; worldbook可为单条{comment,key,summary,content}、数组或{entries}; summary用于正文写作注入，必须保留核心事实',
                     },
                 },
                 required: ['target', 'data'],
@@ -162,6 +161,7 @@ async function importPreset(novelId, data = {}) {
 
 function normalizeCharacterCard(data = {}, name) {
     const source = data.data || data;
+    const summary = cleanSummary(source.summary || data.summary || buildCharacterImportSummary(source), 80);
     return {
         ...data,
         spec: data.spec || 'chara_card_v3',
@@ -169,6 +169,7 @@ function normalizeCharacterCard(data = {}, name) {
         data: {
             ...source,
             name,
+            summary,
             description: source.description || '',
             personality: source.personality || '',
             scenario: source.scenario || '',
@@ -196,12 +197,15 @@ function normalizeWorldBookEntry(entry = {}, uid) {
             ? entry.keys
             : [entry.key].filter(Boolean);
     const disabled = entry.disable === true || entry.disabled === true || entry.enabled === false;
+    const content = entry.content || '';
+    const summary = cleanSummary(entry.summary || buildWorldBookImportSummary(entry), 80);
     return {
         ...entry,
         uid,
         key,
         keysecondary: Array.isArray(entry.keysecondary) ? entry.keysecondary : [],
-        content: entry.content || '',
+        summary,
+        content,
         comment: entry.comment || entry.name || key[0] || `条目${uid}`,
         folder: entry.folder || entry._folder || entry._source || 'AI设定工具',
         _folder: entry.folder || entry._folder || entry._source || 'AI设定工具',
@@ -218,6 +222,30 @@ function normalizeWorldBookEntry(entry = {}, uid) {
         depth: Number(entry.depth || entry.extensions?.depth || 4),
         _source: entry._source || 'AI设定工具',
     };
+}
+
+function buildCharacterImportSummary(source = {}) {
+    return [
+        source.name,
+        source.description,
+        source.personality,
+        source.scenario,
+    ].filter(Boolean).join('；');
+}
+
+function buildWorldBookImportSummary(entry = {}) {
+    return [
+        entry.comment || entry.name,
+        Array.isArray(entry.key) ? entry.key.join('、') : entry.key,
+        entry.content,
+    ].filter(Boolean).join('；');
+}
+
+function cleanSummary(text = '', max = 80) {
+    return String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max);
 }
 
 function normalizePosition(value) {
