@@ -1798,6 +1798,12 @@ button:focus-visible {
     text-overflow: ellipsis;
     line-height: 1.45;
 }
+.import-done-tag {
+    font-size: 12px;
+    color: var(--success);
+    font-weight: 600;
+    flex-shrink: 0;
+}
 .import-item-btns {
     display: flex;
     gap: 6px;

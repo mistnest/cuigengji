@@ -667,15 +667,30 @@ const ChatPanel = (function () {
     let _toolCallData = [];  // Accumulated tool call JSON for display
 
     function appendToolStatus(toolName, target, data) {
+        // 优先找 loading 元素，否则用 stream message（AI 可能先出文本再调 tool）
+        let body = null;
         const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
-        if (!loadingEl) return;
-        const body = loadingEl.querySelector('.chat-msg-body');
-        if (!body) return;
-        if (!_toolStatusEl) {
-            _toolStatusEl = document.createElement('div');
-            _toolStatusEl.className = 'chat-tool-status';
-            body.appendChild(_toolStatusEl);
+        if (loadingEl) {
+            body = loadingEl.querySelector('.chat-msg-body');
+        } else if (streamMsgId) {
+            const streamEl = document.getElementById(streamMsgId);
+            body = streamEl?.querySelector('.chat-msg-body');
         }
+        if (!body) return;
+
+        if (!_toolStatusEl) {
+            // 如果已有 toolStatusEl 但 parent 不是当前 body（之前从 loading 转移过来的），重新挂载
+            if (_toolStatusEl && _toolStatusEl.parentNode !== body) {
+                body.appendChild(_toolStatusEl);
+            } else if (!_toolStatusEl) {
+                _toolStatusEl = document.createElement('div');
+                _toolStatusEl.className = 'chat-tool-status';
+                const content = body.querySelector('.chat-msg-content');
+                if (content) body.insertBefore(_toolStatusEl, content);
+                else body.appendChild(_toolStatusEl);
+            }
+        }
+
         let label = '';
         if (target === 'character') label = `创建角色: ${data?.name || ''}`;
         else if (target === 'worldbook') label = `创建世界书: ${data?.entries?.length || 1} 条`;
@@ -690,9 +705,26 @@ const ChatPanel = (function () {
     }
 
     function updateToolStatus(toolName, result) {
-        if (!_toolStatusEl) return;
+        // 确保 tool status 容器存在 — 如果之前 appendToolStatus 没跑到，在这里补建
+        if (!_toolStatusEl) {
+            let body = null;
+            if (streamMsgId) {
+                const streamEl = document.getElementById(streamMsgId);
+                body = streamEl?.querySelector('.chat-msg-body');
+            }
+            if (!body) {
+                const loadingEl = document.querySelector('.chat-message[id^="loading_"]');
+                body = loadingEl?.querySelector('.chat-msg-body');
+            }
+            if (!body) return;
+            _toolStatusEl = document.createElement('div');
+            _toolStatusEl.className = 'chat-tool-status';
+            const content = body.querySelector('.chat-msg-content');
+            if (content) body.insertBefore(_toolStatusEl, content);
+            else body.appendChild(_toolStatusEl);
+        }
         const items = _toolStatusEl.querySelectorAll('.chat-tool-item');
-        const item = items[items.length - 1]; // Update the last pending item
+        const item = items[items.length - 1];
         if (!item) return;
         item.classList.remove('tool-pending');
         if (result?.success) {
@@ -709,7 +741,7 @@ const ChatPanel = (function () {
 
     function detectAndShowImport(msgId, rawText) {
         const el = document.getElementById(msgId);
-        if (!el) { console.log('[import-bar] msg element not found:', msgId); return; }
+        if (!el) { console.log('[import-bar] msg element not found:', msgId); return false; }
 
         const text = String(rawText || '');
 
@@ -742,7 +774,7 @@ const ChatPanel = (function () {
         }
 
         console.log('[import-bar] text length:', text.length, 'json blocks found:', jsonBlocks.length);
-        if (!jsonBlocks.length) return;
+        if (!jsonBlocks.length) return false;
 
         // Detect each block's type
         // Order matters: check worldbook first (most distinctive), then preset (technical fields),
@@ -841,6 +873,45 @@ const ChatPanel = (function () {
                 checkAllDecided();
             });
         });
+        return true;
+    }
+
+    // Show import bar from tool call data (no user interaction needed — already saved)
+    function showToolImportBar(msgId, toolCalls) {
+        const el = document.getElementById(msgId);
+        if (!el) return;
+        const panel = document.getElementById('panel-chat');
+        if (!panel) return;
+        const existing = panel.querySelector('.action-float-bar');
+        if (existing) existing.remove();
+
+        const items = [];
+        for (const tc of toolCalls) {
+            if (tc.name !== 'import_data') continue;
+            const t = tc.target || '';
+            if (t === 'worldbook') {
+                const count = tc.data?.entries?.length || 1;
+                items.push({ label: `世界书: ${count} 条`, done: true });
+            } else if (t === 'character') {
+                items.push({ label: `角色: ${tc.data?.name || ''}`, done: true });
+            } else if (t === 'preset') {
+                items.push({ label: `预设: ${tc.data?.name || ''}`, done: true });
+            }
+        }
+        if (!items.length) return;
+
+        const bar = document.createElement('div');
+        bar.className = 'action-float-bar';
+        const rowsHtml = items.map(imp => `
+            <div class="import-item-row">
+                <span class="import-item-label">${escHtml(imp.label)}</span>
+                <span class="import-done-tag">✓ 已导入</span>
+            </div>`).join('');
+        bar.innerHTML = `<div class="action-float-title">设定导入完成</div><div class="action-float-actions">${rowsHtml}</div>`;
+        bindActionFloatClose(bar);
+
+        const footer = panel.querySelector('.cc-input-area');
+        if (footer) footer.before(bar);
     }
 
     // Extract JSON candidates from bare text (no code fences).
@@ -983,12 +1054,20 @@ const ChatPanel = (function () {
         }
 
         // Auto-detect JSON for import (assist mode)
+        // Also collect tool-based import results as pseudo-imports for the bar
         if (mode === 'assist') {
-            setTimeout(() => detectAndShowImport(msgId, boundReply), 50);
+            setTimeout(() => {
+                const found = detectAndShowImport(msgId, boundReply);
+                // If no JSON imports detected but tools were called, show tool results in import bar
+                if (!found && _toolCallData.length) {
+                    showToolImportBar(msgId, _toolCallData);
+                }
+            }, 50);
         }
 
-        // Show tool call JSON data if any
-        if (_toolCallData.length && el) {
+        // Show tool call JSON data — only if no import bar was shown for them
+        // (showToolImportBar handles the display, skip the raw JSON dump)
+        if (_toolCallData.length && el && mode !== 'assist') {
             appendToolCallJson(el, _toolCallData);
         }
     }
