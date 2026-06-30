@@ -461,6 +461,49 @@
         loadRecentWorkspaces();
     }
 
+    function ensureBuiltinPreset() {
+        // 仅在没有任何预设和提示模板时注入内置预设（首次创建工作区）
+        if (Object.keys(state.presets).length > 0 || state.promptTemplates.length > 0) return;
+        if (!window.__CUIGENGJI_BUILTIN_PRESET__) return;
+
+        const data = window.__CUIGENGJI_BUILTIN_PRESET__;
+        state.importedPreset = data;
+
+        // 映射 prompt 模板（与 importPreset 逻辑一致）
+        const isConfigTemplate = (p) => {
+            const n = (p.name || '').toLowerCase();
+            const c = (p.content || '').toLowerCase();
+            return n.includes('spreset') || n.includes('regex') || n.includes('macro')
+                || c.includes('"chatsquash"') || c.includes('"regexbinding"')
+                || c.includes('"toolbindings"') || c.includes('"macronest"')
+                || c.includes('window.spresettempdata') || c.includes('window.sillytavern');
+        };
+        const isCgjImportMarker = p => /^cgj-import-(worldSetting|characterState|plotHistory|recentPlot)$/.test(String(p.identifier || ''));
+
+        if (Array.isArray(data.prompts)) {
+            state.promptTemplates = data.prompts
+                .filter(p => (p.content?.trim() || p.marker || isCgjImportMarker(p)) && !isConfigTemplate(p))
+                .map(p => ({
+                    identifier: p.identifier || '',
+                    name: p.name || p.identifier || '',
+                    role: p.role || 'system',
+                    content: p.content || '',
+                    isSystemPrompt: !!p.isSystemPrompt,
+                    isMarker: !!p.isMarker,
+                    markerId: p.markerId || '',
+                }));
+        }
+
+        if (Array.isArray(data.prompt_order)) {
+            state.promptOrder = data.prompt_order
+                .filter(o => state.promptTemplates.some(t => t.identifier === o.identifier))
+                .map(o => ({ identifier: o.identifier, enabled: o.enabled !== false }));
+        }
+
+        state.presetName = data.name || '催更姬_v1.0';
+        console.log('📦 已加载内置预设:', state.presetName);
+    }
+
     function resetWorkspaceState() {
         state.currentChapter = null;
         state.chapters = [];
@@ -540,6 +583,7 @@
             }
         }
         updatePresetNameDisplay(state.presetName);
+        ensureBuiltinPreset();
         updatePresetSelect();
         applyConfigToUI();
     }
