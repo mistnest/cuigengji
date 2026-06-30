@@ -657,7 +657,8 @@ const ChatPanel = (function () {
         }
         const div = details.querySelector('.chat-reasoning-content');
         if (div) div.textContent += text;
-        scrollBottom(msgList, { force: keepAtBottom });
+        // 不在此处改 scroll，避免每次 reasoning chunk 都强制滚到底
+        if (keepAtBottom) scrollBottom(msgList, { force: true });
     }
 
     // ==================== Tool Status Display ====================
@@ -1681,16 +1682,13 @@ const ChatPanel = (function () {
             return '';
         });
 
-        // Extract [REASONING] blocks — keep separate from content details
+        // Extract [REASONING] blocks — reuse existing streaming details if present,
+        // otherwise create new closed-by-default details element
         let reasoningHtml = '';
         text = text.replace(/\[REASONING\]\s*([\s\S]*?)\s*\[\/REASONING\]/g, (_, thinking) => {
-            reasoningHtml += '<details><summary>思考过程</summary><div>' + escHtml(String(thinking)) + '</div></details>';
+            reasoningHtml += '<details class="chat-reasoning"><summary>思考过程</summary><div>' + escHtml(String(thinking)) + '</div></details>';
             return '';
         });
-
-        reasoningHtml = reasoningHtml
-            .replace(/<details>/g, '<details class="chat-reasoning">')
-            .replace(/<summary>[\s\S]*?<\/summary>/g, '<summary>思考过程</summary>');
 
         // Strip orphaned %%REASONING_N%% markers from older sessions
         text = text.replace(/%%REASONING_\d+%%/g, '');
