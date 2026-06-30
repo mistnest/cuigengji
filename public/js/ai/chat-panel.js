@@ -421,6 +421,7 @@ const ChatPanel = (function () {
                         const body = msgEl?.querySelector('.chat-msg-body');
                         if (body) {
                             const statusClone = savedToolStatus.cloneNode(true);
+                            _toolStatusEl = statusClone;  // <-- fix: point to clone, not detached original
                             const content = body.querySelector('.chat-msg-content');
                             if (content) body.insertBefore(statusClone, content);
                             else body.appendChild(statusClone);
@@ -445,6 +446,7 @@ const ChatPanel = (function () {
                         const body = msgEl?.querySelector('.chat-msg-body');
                         if (body) {
                             const statusClone = savedToolStatus.cloneNode(true);
+                            _toolStatusEl = statusClone;  // <-- fix: point to clone
                             const content = body.querySelector('.chat-msg-content');
                             if (content) body.insertBefore(statusClone, content);
                             else body.appendChild(statusClone);
@@ -926,6 +928,8 @@ const ChatPanel = (function () {
             state.worldBook.entries = state.worldBook.entries || {};
             Object.assign(state.worldBook.entries, result.entries);
             window.renderWorldBookList?.();
+            // 确保世界书面板引用控件同步更新
+            if (typeof window.renderReferenceControls === 'function') window.renderReferenceControls();
         }
 
         if (result.target === 'preset' && result.preset) {
@@ -934,6 +938,8 @@ const ChatPanel = (function () {
             window.updatePresetSelect?.();
         }
 
+        // 标记脏状态，确保自动保存把导入结果写入磁盘
+        if (state.isDirty !== undefined) state.isDirty = true;
         window.saveActiveChatSession?.();
         window.autoSaveEditor?.();
     }
