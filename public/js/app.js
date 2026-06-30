@@ -18,7 +18,7 @@
         topP: 0.9,
         memoryBudget: 15,
         maxContext: 0,
-        referenceMode: 'sillytavern',
+        referenceMode: 'tool',
         compactReference: false,
         referenceTools: false,
         enableReferenceTools: false,
