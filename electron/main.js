@@ -36,12 +36,19 @@ function createWindow() {
         title: '催更姬',
         icon: path.join(__dirname, '..', 'public', 'avatar.png'),
         autoHideMenuBar: true,
+        backgroundColor: '#f5f5f7',  // 即刻显示底色，避免白屏
+        show: false,                  // 等 ready-to-show 再显示
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
         },
     });
     mainWindow.setMenuBarVisibility(false);
+
+    // 页面加载完成后显示窗口，避免白屏闪烁
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+    });
 
     const tpl = [
         {

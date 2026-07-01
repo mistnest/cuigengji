@@ -270,7 +270,7 @@
                 delBtn.title = '\u5220\u9664\u9879\u76ee';
                 delBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
-                    if (!confirm(`\u5220\u9664\u201c${novel.title || novel.id}\u201d\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
+                    if (!safeConfirm(`\u5220\u9664\u201c${novel.title || novel.id}\u201d\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
                     try {
                         await deleteWorkspace(novel.id);
                         delete accessed[novel.id];
@@ -305,7 +305,7 @@
                         const checked = list.querySelectorAll('.welcome-batch-check:checked');
                         if (!checked.length) { setStatus('\u8bf7\u5148\u52fe\u9009\u9879\u76ee', 'warn'); return; }
                         const ids = [...checked].map(cb => cb.dataset.novelId);
-                        if (!confirm(`\u5220\u9664\u9009\u4e2d\u7684 ${ids.length} \u4e2a\u9879\u76ee\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
+                        if (!safeConfirm(`\u5220\u9664\u9009\u4e2d\u7684 ${ids.length} \u4e2a\u9879\u76ee\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002`)) return;
                         const deleted = [];
                         for (const id of ids) {
                             try {
@@ -1493,12 +1493,14 @@
         const deleteBtn = overlay.querySelector('.character-edit-delete');
         if (deleteBtn) {
             deleteBtn.addEventListener('click', () => {
-                if (!confirm(`确定要删除角色「${name || '(未命名)'}」吗？此操作不可撤销。`)) return;
+                document.activeElement?.blur();
+                if (!safeConfirm(`确定要删除角色「${name || '(未命名)'}」吗？此操作不可撤销。`)) return;
                 state.characters.splice(charIndex, 1);
                 renderCharacterList();
                 autoSave();
                 close();
                 setStatus(`已删除角色: ${name}`, 'success');
+                refocusChat();
             });
         }
 
@@ -1725,7 +1727,7 @@
             .filter(([, selected]) => selected)
             .map(([id]) => id));
         if (!ids.size) return setStatus('请先勾选需要删除的模板', 'warn');
-        if (!confirm(`删除选中的 ${ids.size} 个模板？`)) return;
+        if (!safeConfirm(`删除选中的 ${ids.size} 个模板？`)) return;
         state.promptTemplates = state.promptTemplates.filter(template => !ids.has(template.identifier));
         ids.forEach(id => {
             delete state.enabledTemplates[id];
@@ -1840,7 +1842,7 @@
             if (!checked.length) { setStatus('请先勾选模板', 'warn'); return; }
             const ids = [...checked].map(cb => cb.dataset.id);
             if (action === 'delete') {
-                if (!confirm(`删除选中的 ${ids.length} 个模板？`)) return;
+                if (!safeConfirm(`删除选中的 ${ids.length} 个模板？`)) return;
                 state.promptTemplates = state.promptTemplates.filter(t => !ids.includes(t.identifier));
                 ids.forEach(id => { delete state.enabledTemplates[id]; delete state.selectedPromptTemplates[id]; });
             } else if (action === 'enable') {
@@ -2038,7 +2040,7 @@
         const idx = state.promptTemplates.findIndex(t => t.identifier === _promptEditorCurrentId);
         if (idx === -1) return;
         const tmpl = state.promptTemplates[idx];
-        if (!confirm('确认删除模板 "' + tmpl.name + '"？')) return;
+        if (!safeConfirm('确认删除模板 "' + tmpl.name + '"？')) return;
         state.promptTemplates.splice(idx, 1);
         delete state.enabledTemplates[_promptEditorCurrentId];
         _promptEditorCurrentId = null;
@@ -3835,7 +3837,7 @@
                 const row = btn.closest('.group-mgr-row');
                 const name = row?.dataset.group;
                 if (!name) return;
-                if (!confirm('删除分组 "' + name + '" 不会删除其中的条目，它们会变成无分组。确认？')) return;
+                if (!safeConfirm('删除分组 "' + name + '" 不会删除其中的条目，它们会变成无分组。确认？')) return;
                 const entries = state.worldBook?.entries || {};
                 for (const e of Object.values(entries)) {
                     if (getWorldBookFolder(e) === name) setWorldBookFolder(e, '');
@@ -4132,12 +4134,14 @@
         // Delete button
         overlay.querySelector('.wb-delete-btn').addEventListener('click', () => {
             const entryName = entry.comment || entry.key?.[0] || `条目${uid}`;
-            if (!confirm(`确定要删除「${entryName}」吗？此操作不可撤销。`)) return;
+            document.activeElement?.blur();
+            if (!safeConfirm(`确定要删除「${entryName}」吗？此操作不可撤销。`)) return;
             delete state.worldBook.entries[uid];
             renderWorldBookList();
             autoSave();
             close();
             setStatus(`已删除: ${entryName}`, 'success');
+            refocusChat();
         });
 
         // AI summarize button
@@ -4433,7 +4437,7 @@
         const panel = type === 'worldbook' ? $('#panel-worldbook') : $('#panel-characters');
         const selected = [...panel.querySelectorAll('.batch-check:checked')].map(checkbox => checkbox.dataset.id);
         if (!selected.length) return setStatus('请先选择条目', 'warn');
-        if (action === 'delete' && !confirm(`删除选中的 ${selected.length} 项？`)) return;
+        if (action === 'delete' && !safeConfirm(`删除选中的 ${selected.length} 项？`)) return;
 
         if (type === 'worldbook') {
             selected.forEach(uid => {
@@ -4924,7 +4928,7 @@
                 const id = btn.dataset.id;
                 const tmpl = state.promptTemplates.find(t => t.identifier === id);
                 if (!tmpl) return;
-                if (!confirm('确认删除模板 "' + tmpl.name + '"？')) return;
+                if (!safeConfirm('确认删除模板 "' + tmpl.name + '"？')) return;
                 state.promptTemplates = state.promptTemplates.filter(t => t.identifier !== id);
                 delete state.enabledTemplates[id];
                 renderPromptTemplates();
@@ -5625,8 +5629,22 @@
 
     // ==================== Toolbar Actions ====================
     async function onNewNovel() {
-        if (state.isDirty && !confirm('未保存的更改将丢失，确认新建？')) return;
+        if (state.isDirty && !safeConfirm('未保存的更改将丢失，确认新建？')) return;
         await createWorkspaceFromWelcome();
+    }
+
+    // ==================== Safe Confirm ====================
+    // Wrapper around native confirm() that prevents focus loss from breaking input
+    function safeConfirm(msg) {
+        if (document.activeElement) document.activeElement.blur();
+        return confirm(msg);
+    }
+
+    function refocusChat() {
+        setTimeout(() => {
+            const input = document.getElementById('chat-input');
+            if (input && document.activeElement !== input) input.focus();
+        }, 50);
     }
 
     // ==================== Keyboard ====================
