@@ -817,23 +817,22 @@ const ChatPanel = (function () {
                 </div>
             </div>`).join('');
 
-        bar.innerHTML = `
+        bar.innerHTML = actionFloatCloseButtonHtml() + `
             <div class="action-float-title">设定制作完成 — 是否导入？</div>
             <div class="action-float-actions">${rowsHtml}</div>`;
-
-        bar.insertAdjacentHTML('afterbegin', actionFloatCloseButtonHtml());
         bindActionFloatClose(bar);
 
         const footer = panel.querySelector('.cc-input-area');
         if (!footer) { console.log('[import-bar] .cc-input-area not found'); return; }
         footer.before(bar);
-        console.log('[import-bar] bar inserted before .cc-input-area');
 
-        // Track decisions; auto-remove bar when all decided
+        // Track decisions; auto-remove bar when all decided or after 30s
         const decisions = new Array(imports.length).fill(null);
+        const autoRemoveTimer = setTimeout(() => { if (bar.parentNode) bar.remove(); }, 30000);
 
         function checkAllDecided() {
             if (decisions.every(d => d !== null)) {
+                clearTimeout(autoRemoveTimer);
                 setTimeout(() => { if (bar.parentNode) bar.remove(); }, 1500);
             }
         }
@@ -907,11 +906,14 @@ const ChatPanel = (function () {
                 <span class="import-item-label">${escHtml(imp.label)}</span>
                 <span class="import-done-tag">✓ 已导入</span>
             </div>`).join('');
-        bar.innerHTML = `<div class="action-float-title">设定导入完成</div><div class="action-float-actions">${rowsHtml}</div>`;
-        bindActionFloatClose(bar);
+        const html = `<div class="action-float-title">设定导入完成</div><div class="action-float-actions">${rowsHtml}</div>`;
+        setFloatBarHtml(bar, html);
 
         const footer = panel.querySelector('.cc-input-area');
         if (footer) footer.before(bar);
+
+        // Auto-dismiss after 8 seconds
+        setTimeout(() => { if (bar.parentNode) bar.remove(); }, 8000);
     }
 
     // Extract JSON candidates from bare text (no code fences).
