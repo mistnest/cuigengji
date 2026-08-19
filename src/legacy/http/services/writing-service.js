@@ -425,7 +425,7 @@ function assistantText(config = {}, message = {}) {
     const content = message?.content || '';
     const reasoning = message?.reasoning_content || '';
     if (!content && reasoning) {
-        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n*(鎬濊€冭繃绋嬬粨鏉燂紝鏈敓鎴愭鏂囥€傝璋冮珮 MaxTokens)*';
+        return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n*(思考过程结束，未生成正文。请调高 MaxTokens)*';
     }
     if (reasoning && config.provider === 'deepseek') {
         return '[REASONING]\n' + reasoning + '\n[/REASONING]\n\n' + content;
