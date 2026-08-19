@@ -1,0 +1,7 @@
+{
+  "id": "exchange",
+  "entry": "./index.js",
+  "backend": { "group": "interchange", "module": "exchange" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

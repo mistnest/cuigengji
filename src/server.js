@@ -1,44 +1,29 @@
-#!/usr/bin/env node
 /**
- * 催更姬 - Server Entry Point
- * 精简版 Express 服务器，专为小说创作优化
+ * Electron Renderer 静态资源服务。
+ *
+ * 业务能力只通过 preload + IPC 暴露；这里不再承载 HTTP 业务 API。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'url';
 
-import cors from 'cors';
 import express from 'express';
-import bodyParser from 'body-parser';
-import yargs from 'yargs';
-import { hideBin } from 'yargs/helpers';
 
-import { PROJECT_ROOT } from './config.js';
-import { getPublicAppSignature, getSignatureHeaders } from './app-signature.js';
-import { serverEvents, EVENT_NAMES } from './server-events.js';
-import { errorHandler, notFoundHandler } from './lib/http.js';
+import {
+    getSignatureHeaders,
+    PROJECT_ROOT,
+} from './backend/foundation/platform/index.js';
 
-// ---- CLI Arguments ----
-const cliArgs = yargs(hideBin(process.argv))
-    .option('port', {
-        type: 'number',
-        default: 8765,
-        describe: 'Server port',
-    })
-    .option('host', {
-        type: 'string',
-        default: '127.0.0.1',
-        describe: 'Server host',
-    })
-    .option('dataRoot', {
-        type: 'string',
-        default: path.join(PROJECT_ROOT, 'data'),
-        describe: 'Data storage directory',
-    })
-    .parseSync();
-
-globalThis.DATA_ROOT = cliArgs.dataRoot;
+function defaultDataRoot() {
+    if (process.env.CUIGENGJI_DATA_ROOT) return path.resolve(process.env.CUIGENGJI_DATA_ROOT);
+    const packaged = PROJECT_ROOT.endsWith('.asar') || PROJECT_ROOT.includes(`${path.sep}app.asar`);
+    const platformDataRoot = process.env.APPDATA
+        || process.env.XDG_DATA_HOME
+        || process.env.LOCALAPPDATA
+        || process.env.HOME
+        || process.cwd();
+    return path.join(platformDataRoot, 'cuigengji', packaged ? 'data' : 'development-data');
+}
 
 // ---- Ensure Data Directories ----
 function ensureDataDirs() {
@@ -48,29 +33,13 @@ function ensureDataDirs() {
         if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
     }
 }
-ensureDataDirs();
-
 // ---- Initialize Express ----
 const app = express();
 
-// app.use(compression()); // Disabled: causes ERR_INVALID_CHUNKED_ENCODING on some browsers
-app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json({ limit: '25mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 app.use((_req, res, next) => {
     for (const [key, value] of Object.entries(getSignatureHeaders())) {
         res.setHeader(key, value);
     }
-    next();
-});
-app.use((req, res, next) => {
-    const startedAt = Date.now();
-    res.on('finish', () => {
-        const elapsed = Date.now() - startedAt;
-        if (elapsed >= 500) {
-            console.warn(`[Slow request] ${req.method} ${req.originalUrl} ${res.statusCode} ${elapsed}ms`);
-        }
-    });
     next();
 });
 
@@ -87,47 +56,15 @@ app.get('/', (_req, res) => {
     res.sendFile('index.html', { root: path.join(PROJECT_ROOT, 'public') });
 });
 
-// ---- Health Check ----
-app.get('/api/ping', (_req, res) => res.sendStatus(204));
-app.get('/api/version', (_req, res) => res.json(getPublicAppSignature()));
-
-// ---- Mount API Endpoints ----
-import { router as chaptersRouter } from './endpoints/chapters.js';
-import { router as outlineRouter } from './endpoints/outline.js';
-import { router as aiRouter } from './endpoints/ai.js';
-import { router as importRouter } from './endpoints/import.js';
-import { router as chatRouter } from './endpoints/chat.js';
-import { router as persistenceRouter } from './endpoints/persistence.js';
-import { router as novelsRouter } from './endpoints/novels.js';
-import { router as sessionsRouter } from './endpoints/sessions.js';
-import { router as debugRouter } from './endpoints/debug.js';
-import { router as aiSecretsRouter } from './endpoints/ai-secrets.js';
-import { router as updateRouter } from './endpoints/update.js';
-
-app.use('/api/chapters', chaptersRouter);
-app.use('/api/outline', outlineRouter);
-app.use('/api/ai', aiRouter);
-app.use('/api/import', importRouter);
-app.use('/api/chat', chatRouter);
-app.use('/api/save', persistenceRouter);
-app.use('/api/novels', novelsRouter);
-app.use('/api/sessions', sessionsRouter);
-app.use('/api/debug', debugRouter);
-app.use('/api/ai-secrets', aiSecretsRouter);
-app.use('/api/update', updateRouter);
-
 // ---- 404 ----
-app.use(notFoundHandler);
-app.use(errorHandler);
+app.use((_req, res) => res.sendStatus(404));
 
 // ---- Start Server ----
 async function startServer(options = {}) {
-    const port = options.port ?? cliArgs.port;
-    const host = options.host ?? cliArgs.host;
-    if (options.dataRoot) {
-        globalThis.DATA_ROOT = options.dataRoot;
-        ensureDataDirs();
-    }
+    const port = options.port ?? 0;
+    const host = options.host ?? '127.0.0.1';
+    globalThis.DATA_ROOT = path.resolve(options.dataRoot || defaultDataRoot());
+    ensureDataDirs();
     return new Promise((resolve) => {
         const server = app.listen(port, host, () => {
             const address = server.address();
@@ -136,22 +73,10 @@ async function startServer(options = {}) {
             console.log(`\n  📖 催更姬 v1.0`);
             console.log(`  🚀 Server running at ${url}\n`);
 
-            serverEvents.emit(EVENT_NAMES.SERVER_STARTED, {
-                url: new URL(url),
-                port: actualPort,
-                host,
-            });
-
             resolve({ server, url });
         });
     });
 }
 
-// If run directly (not imported by Electron)
-const isMainModule = process.argv[1] && fileURLToPath(import.meta.url).replace(/\\/g, '/') === process.argv[1].replace(/\\/g, '/');
-if (isMainModule) {
-    startServer();
-}
-
-export { app, startServer, cliArgs };
-export { PROJECT_ROOT } from './config.js';
+export { app, startServer };
+export { PROJECT_ROOT } from './backend/foundation/platform/index.js';

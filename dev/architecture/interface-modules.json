@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "phase": "P7",
+  "status": "active",
+  "core": {
+    "contractRoot": "shared/desktop-api/core",
+    "ipcRoot": "electron/ipc/core",
+    "businessModule": false
+  },
+  "preload": {
+    "runtimeEntry": "electron/preload.cjs",
+    "targetSourceRoot": "electron/preload-src",
+    "sandboxBundleRequired": true
+  },
+  "modules": [
+    {
+      "id": "app",
+      "backend": { "group": "foundation", "module": "platform" },
+      "target": {
+        "contractRoot": "shared/desktop-api/app",
+        "preloadSource": "electron/preload-src/app.cjs",
+        "ipcRoot": "electron/ipc/app"
+      }
+    },
+    {
+      "id": "project",
+      "backend": { "group": "domains", "module": "project" },
+      "target": {
+        "contractRoot": "shared/desktop-api/project",
+        "preloadSource": "electron/preload-src/project.cjs",
+        "ipcRoot": "electron/ipc/project"
+      }
+    },
+    {
+      "id": "knowledge",
+      "backend": { "group": "domains", "module": "knowledge" },
+      "target": {
+        "contractRoot": "shared/desktop-api/knowledge",
+        "preloadSource": "electron/preload-src/knowledge.cjs",
+        "ipcRoot": "electron/ipc/knowledge"
+      }
+    },
+    {
+      "id": "configuration",
+      "backend": { "group": "foundation", "module": "configuration" },
+      "target": {
+        "contractRoot": "shared/desktop-api/configuration",
+        "preloadSource": "electron/preload-src/configuration.cjs",
+        "ipcRoot": "electron/ipc/configuration"
+      }
+    },
+    {
+      "id": "models",
+      "backend": { "group": "intelligence", "module": "models" },
+      "target": {
+        "contractRoot": "shared/desktop-api/models",
+        "preloadSource": "electron/preload-src/models.cjs",
+        "ipcRoot": "electron/ipc/models"
+      }
+    },
+    {
+      "id": "agent",
+      "backend": { "group": "intelligence", "module": "agent" },
+      "target": {
+        "contractRoot": "shared/desktop-api/agent",
+        "preloadSource": "electron/preload-src/agent.cjs",
+        "ipcRoot": "electron/ipc/agent"
+      }
+    },
+    {
+      "id": "automation",
+      "backend": { "group": "intelligence", "module": "automation" },
+      "target": {
+        "contractRoot": "shared/desktop-api/automation",
+        "preloadSource": "electron/preload-src/automation.cjs",
+        "ipcRoot": "electron/ipc/automation"
+      }
+    },
+    {
+      "id": "exchange",
+      "backend": { "group": "interchange", "module": "exchange" },
+      "target": {
+        "contractRoot": "shared/desktop-api/exchange",
+        "preloadSource": "electron/preload-src/exchange.cjs",
+        "ipcRoot": "electron/ipc/exchange"
+      }
+    }
+  ]
+}

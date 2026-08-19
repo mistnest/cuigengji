@@ -6,6 +6,8 @@
 
 ![催更姬截图](public/screenshot.png)
 
+开发与交接请先阅读 [Electron 模块化重构说明](dev/docs/refactor-v2/README.md) 和 [当前模块目录](dev/docs/refactor-v2/09-module-directory-layout.md)。旧版结构文档不再作为代码事实来源。
+
 ## 为什么做催更姬？
 
 现在的大模型已经很会写，但直接用网页版聊天工具写长篇网文，往往会遇到几个问题：

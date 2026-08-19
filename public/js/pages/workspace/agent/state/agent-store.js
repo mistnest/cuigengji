@@ -1,0 +1,273 @@
+(function (root) {
+    'use strict';
+
+    function createAgentStore() {
+        const listeners = new Set();
+        const histories = new Map();
+        let state = initialState();
+
+        function initialState() {
+            return {
+                runtime: { state: 'idle', ready: false, hasCredential: false, message: '', generation: 0 },
+                project: {
+                    projectId: '', chapterId: '', contextState: 'idle', generatedAt: '', knowledgeEntries: 0,
+                },
+                sessions: [],
+                activeSessionId: '',
+                items: [],
+                running: false,
+                pendingPrompts: [],
+                composer: { text: '', mode: 'queue', submitting: false, error: '' },
+            };
+        }
+
+        function getState() { return state; }
+        function subscribe(listener) {
+            if (typeof listener !== 'function') throw new TypeError('listener must be a function');
+            listeners.add(listener);
+            listener(state);
+            return () => listeners.delete(listener);
+        }
+        function notify() { for (const listener of listeners) listener(state); }
+
+        function setProject(project) {
+            if (state.project.projectId && state.project.projectId !== project.projectId) histories.clear();
+            state = {
+                ...state,
+                runtime: { ...state.runtime, ...project.status },
+                project: {
+                    projectId: project.projectId,
+                    chapterId: project.context?.chapterId || '',
+                    contextState: 'synced',
+                    generatedAt: project.context?.generatedAt || '',
+                    knowledgeEntries: Number(project.context?.knowledgeEntries || 0),
+                },
+                activeSessionId: project.sessionId,
+            };
+            ensureHistory(project.sessionId);
+            reproject();
+        }
+
+        function setSessions(sessions) {
+            state = { ...state, sessions: Array.isArray(sessions) ? sessions : [] };
+            notify();
+        }
+        function setActiveSession(sessionId) {
+            state = { ...state, activeSessionId: sessionId };
+            ensureHistory(sessionId);
+            reproject();
+        }
+        function applyHistory(sessionId, events) {
+            const history = ensureHistory(sessionId);
+            for (const event of events || []) remember(history, event);
+            reproject();
+        }
+        function applyEvent(event) {
+            if (!event || event.schemaVersion !== 1) return;
+            if (event.type === 'runtime.state') {
+                if (event.generation < state.runtime.generation) return;
+                state = {
+                    ...state,
+                    runtime: { ...state.runtime, ...event.data, generation: event.generation },
+                };
+                notify();
+                return;
+            }
+            if (state.project.projectId && event.projectId !== state.project.projectId) return;
+            if (event.generation !== state.runtime.generation) return;
+            if (event.type === 'session.ready') {
+                ensureHistory(event.sessionId);
+                if (!state.activeSessionId) state = { ...state, activeSessionId: event.sessionId };
+                notify();
+                return;
+            }
+            if (!event.sessionId || !Number.isInteger(event.seq)) return;
+            const history = ensureHistory(event.sessionId);
+            if (!remember(history, event)) return;
+            reconcilePending(event);
+            if (event.sessionId === state.activeSessionId) reproject();
+        }
+
+        function addOptimistic(text, mode) {
+            const entry = {
+                id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                text, mode, status: 'sending',
+            };
+            state = {
+                ...state,
+                pendingPrompts: [...state.pendingPrompts, entry],
+                composer: { ...state.composer, text: '', error: '', submitting: true },
+            };
+            reproject();
+            return entry.id;
+        }
+        function acceptOptimistic(id) {
+            state = {
+                ...state,
+                pendingPrompts: state.pendingPrompts.map(item => (
+                    item.id === id ? { ...item, status: 'accepted' } : item
+                )),
+                composer: { ...state.composer, submitting: false },
+            };
+            reproject();
+        }
+        function rejectOptimistic(id, message) {
+            state = {
+                ...state,
+                pendingPrompts: state.pendingPrompts.map(item => (
+                    item.id === id ? { ...item, status: 'error', message } : item
+                )),
+                composer: { ...state.composer, submitting: false, error: message },
+            };
+            reproject();
+        }
+        function restorePending(id) {
+            const target = state.pendingPrompts.find(item => item.id === id);
+            if (!target) return;
+            state = {
+                ...state,
+                pendingPrompts: state.pendingPrompts.filter(item => item.id !== id),
+                composer: { ...state.composer, text: target.text, error: '' },
+            };
+            reproject();
+        }
+        function setComposer(patch) {
+            state = { ...state, composer: { ...state.composer, ...patch } };
+            notify();
+        }
+        function setContextState(contextState, patch = {}) {
+            state = { ...state, project: { ...state.project, contextState, ...patch } };
+            notify();
+        }
+        function clear() {
+            histories.clear();
+            state = initialState();
+            notify();
+        }
+        function ensureHistory(sessionId) {
+            if (!histories.has(sessionId)) histories.set(sessionId, { events: new Map() });
+            return histories.get(sessionId);
+        }
+        function remember(history, event) {
+            const key = `${event.generation}:${event.seq}`;
+            if (history.events.has(key)) return false;
+            history.events.set(key, event);
+            return true;
+        }
+        function reconcilePending(event) {
+            if (event.type !== 'message.user') return;
+            const index = state.pendingPrompts.findIndex(item => item.text.trim() === event.data.text.trim());
+            if (index < 0) return;
+            state = {
+                ...state,
+                pendingPrompts: state.pendingPrompts.filter((_item, itemIndex) => itemIndex !== index),
+            };
+        }
+
+        function reproject() {
+            const history = histories.get(state.activeSessionId);
+            const events = history
+                ? [...history.events.values()].sort((left, right) => left.seq - right.seq)
+                : [];
+            const items = [];
+            const assistants = new Map();
+            const tools = new Map();
+            let running = false;
+            for (const event of events) {
+                if (event.type === 'turn.started') running = true;
+                if (event.type === 'message.user' && event.data.source === 'user') {
+                    items.push({
+                        key: `user-${event.seq}`, kind: 'user', text: event.data.text,
+                        order: event.seq, status: 'complete',
+                    });
+                }
+                if (event.type === 'assistant.delta' || event.type === 'assistant.completed') {
+                    const key = `assistant-${event.data.turn}-${event.data.step}`;
+                    let item = assistants.get(key);
+                    if (!item && event.type === 'assistant.completed' && !event.data.text) continue;
+                    if (!item) {
+                        item = {
+                            key, kind: 'assistant', text: '', reasoning: '',
+                            order: event.seq, status: 'streaming',
+                        };
+                        assistants.set(key, item);
+                        items.push(item);
+                    }
+                    if (event.type === 'assistant.delta') {
+                        if (event.data.kind === 'reasoning') item.reasoning += event.data.text;
+                        else item.text += event.data.text;
+                    } else {
+                        if (event.data.text) item.text = event.data.text;
+                        item.status = 'complete';
+                        item.usage = event.data.usage;
+                    }
+                }
+                if (event.type === 'tool.started') {
+                    const item = {
+                        key: `tool-${event.data.callId || event.seq}`, kind: 'tool',
+                        callId: event.data.callId, label: event.data.label, summary: event.data.summary,
+                        order: event.seq, status: 'running',
+                    };
+                    tools.set(event.data.callId, item);
+                    items.push(item);
+                }
+                if (event.type === 'tool.completed') {
+                    let item = tools.get(event.data.callId);
+                    if (!item) {
+                        item = {
+                            key: `tool-${event.data.callId || event.seq}`, kind: 'tool',
+                            callId: event.data.callId, label: '项目资料工具', order: event.seq,
+                        };
+                        tools.set(event.data.callId, item);
+                        items.push(item);
+                    }
+                    item.status = event.data.status;
+                    item.summary = event.data.summary;
+                }
+                if (event.type === 'turn.completed' || event.type === 'turn.failed') running = false;
+                if (event.type === 'turn.failed') {
+                    const key = `turn-error-${event.data.turn}`;
+                    const existing = items.find(item => item.key === key);
+                    if (existing) {
+                        existing.text = event.data.message;
+                        existing.reason = event.data.reason;
+                    } else {
+                        items.push({
+                            key, kind: 'error', text: event.data.message,
+                            reason: event.data.reason, order: event.seq,
+                        });
+                    }
+                }
+            }
+            const pendingItems = state.pendingPrompts.map((item, index) => ({
+                key: item.id, kind: 'user', text: item.text, status: item.status,
+                error: item.message, pendingId: item.id,
+                order: Number.MAX_SAFE_INTEGER - state.pendingPrompts.length + index,
+            }));
+            state = {
+                ...state,
+                items: [...items, ...pendingItems].sort((left, right) => left.order - right.order),
+                running,
+            };
+            notify();
+        }
+
+        function debugSnapshot() {
+            return JSON.parse(JSON.stringify({
+                ...state,
+                histories: [...histories].map(([sessionId, history]) => ({
+                    sessionId,
+                    seqs: [...history.events.values()].map(event => event.seq).sort((a, b) => a - b),
+                })),
+            }));
+        }
+
+        return {
+            getState, subscribe, setProject, setSessions, setActiveSession,
+            applyHistory, applyEvent, addOptimistic, acceptOptimistic, rejectOptimistic,
+            restorePending, setComposer, setContextState, clear, debugSnapshot,
+        };
+    }
+
+    root.AgentStoreModule = Object.freeze({ createAgentStore });
+}(typeof window === 'undefined' ? globalThis : window));

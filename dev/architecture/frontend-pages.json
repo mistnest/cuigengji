@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "phase": "P7",
+  "status": "active",
+  "runtime": {
+    "entry": "public/js/app/bootstrap.js",
+    "context": "public/js/app/app-context.js",
+    "manifest": "dev/architecture/frontend-runtime-scripts.json"
+  },
+  "target": {
+    "appRoot": "public/js/app",
+    "dialogRoot": "public/js/dialogs",
+    "sharedRoot": "public/js/shared",
+    "pages": [
+      {
+        "id": "welcome",
+        "root": "public/js/pages/welcome",
+        "interfaceModules": ["app", "project", "exchange"]
+      },
+      {
+        "id": "workspace",
+        "root": "public/js/pages/workspace",
+        "interfaceModules": [
+          "project",
+          "knowledge",
+          "configuration",
+          "agent",
+          "automation",
+          "exchange"
+        ],
+        "areas": [
+          {
+            "id": "chapters",
+            "interfaceModules": ["project"]
+          },
+          {
+            "id": "editor",
+            "interfaceModules": ["project"]
+          },
+          {
+            "id": "outline",
+            "interfaceModules": ["project"]
+          },
+          {
+            "id": "worldbook",
+            "interfaceModules": ["knowledge", "exchange"]
+          },
+          {
+            "id": "characters",
+            "interfaceModules": ["knowledge", "exchange"]
+          },
+          {
+            "id": "agent",
+            "interfaceModules": ["agent"]
+          },
+          {
+            "id": "automation",
+            "interfaceModules": ["automation"]
+          },
+          {
+            "id": "status-bar",
+            "interfaceModules": []
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "root": "public/js/pages/settings",
+        "interfaceModules": ["app", "configuration", "models"]
+      }
+    ],
+    "dialogs": [
+      "import-export",
+      "prompt-editor",
+      "regex-editor",
+      "contact-author"
+    ],
+    "shared": ["desktop", "ui", "state", "formatting", "security"]
+  }
+}

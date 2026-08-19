@@ -1,0 +1,30 @@
+export const AUTOMATION_IPC_CHANNELS = Object.freeze({
+    debugLastPrompt: 'cgj:v1:automation:debug:last-prompt',
+    writingContinue: 'cgj:v1:automation:writing:continue',
+    writingInfill: 'cgj:v1:automation:writing:infill',
+    ideasPlotSuggestions: 'cgj:v1:automation:ideas:plot-suggestions',
+    ideasInspire: 'cgj:v1:automation:ideas:inspire',
+    extractionAnalyze: 'cgj:v1:automation:extraction:analyze',
+    extractionProject: 'cgj:v1:automation:extraction:project',
+    jobsCreate: 'cgj:v1:automation:jobs:create',
+    jobsList: 'cgj:v1:automation:jobs:list',
+    jobsGet: 'cgj:v1:automation:jobs:get',
+    jobsDelete: 'cgj:v1:automation:jobs:delete',
+    summaryGenerate: 'cgj:v1:automation:summary:generate',
+    cancel: 'cgj:v1:automation:cancel',
+});
+
+export const AUTOMATION_OPERATIONS = Object.freeze({
+    debugLastPrompt: 'debug.lastPrompt',
+    writingContinue: 'writing.continue',
+    writingInfill: 'writing.infill',
+    ideasPlotSuggestions: 'ideas.plotSuggestions',
+    ideasInspire: 'ideas.inspire',
+    extractionAnalyze: 'extraction.analyze',
+    extractionProject: 'extraction.project',
+    jobsCreate: 'extraction.jobs.create',
+    jobsList: 'extraction.jobs.list',
+    jobsGet: 'extraction.jobs.get',
+    jobsDelete: 'extraction.jobs.delete',
+    summaryGenerate: 'summary.generate',
+});

@@ -1,0 +1,7 @@
+{
+  "id": "models",
+  "entry": "./index.js",
+  "backend": { "group": "intelligence", "module": "models" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

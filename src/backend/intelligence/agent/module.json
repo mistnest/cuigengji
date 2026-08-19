@@ -1,0 +1,7 @@
+{
+  "id": "agent",
+  "group": "intelligence",
+  "entry": "./index.js",
+  "dependsOn": ["project", "knowledge", "models", "configuration", "platform"],
+  "dataOwnership": ["sessions/**", "agent-runtime/**"]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "agent",
+  "entry": "./index.js",
+  "backend": { "group": "intelligence", "module": "agent" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

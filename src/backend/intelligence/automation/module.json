@@ -1,0 +1,7 @@
+{
+  "id": "automation",
+  "group": "intelligence",
+  "entry": "./index.js",
+  "dependsOn": ["project", "knowledge", "agent", "models", "platform"],
+  "dataOwnership": ["jobs/**", "derived/**"]
+}

@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:* https://api.anthropic.com https://api.openai.com https://openrouter.ai http://localhost:*; img-src 'self' data: blob:; media-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none';">
     <meta name="application-name" content="催更姬">
     <meta name="cuigengji:repository" content="https://github.com/mistnest/cuigengji">
     <meta name="cuigengji:signature" content="cgj-mistnest-2026-community-source">
     <title>催更姬 — AI 写作助手</title>
     <link rel="stylesheet" href="css/editor.css">
+    <link rel="stylesheet" href="js/pages/workspace/agent/agent-sidebar.css">
 </head>
 <body data-cuigengji-app="mistnest-cuigengji">
     <div id="toast-container"></div>
@@ -164,71 +165,52 @@
 
             <aside id="right-sidebar" class="sidebar">
                 <div class="sidebar-tabs">
-                    <button class="sidebar-tab active" data-panel="chat">对话</button>
+                    <button class="sidebar-tab active" data-panel="chat">Agent</button>
                     <button class="sidebar-tab" data-panel="worldbook">世界书</button>
                     <button class="sidebar-tab" data-panel="characters">角色</button>
                     <button class="sidebar-tab" data-panel="ai-tools">AI</button>
                 </div>
 
                 <div id="panel-chat" class="sidebar-panel active">
-                    <div class="chat-header">
-                        <span class="chat-header-title" id="chat-header-title">聊天</span>
-                        <div class="chat-header-right">
-                            <div class="chat-history-popover" id="chat-history-popover">
-                                <button class="chat-header-btn" id="btn-history" title="历史会话">📋</button>
-                                <div class="chat-history-dropdown" id="chat-history-dropdown">
-                                    <div class="chat-history-search">
-                                        <input type="text" class="chat-history-search-input" id="session-search" placeholder="搜索会话...">
-                                    </div>
-                                    <div class="chat-history-list" id="session-list"></div>
-                                </div>
+                    <section id="agent-sidebar-root" class="agent-sidebar" aria-label="小说创作 Agent">
+                        <header class="agent-sidebar__header">
+                            <div class="agent-sidebar__identity">
+                                <span class="agent-runtime-status" data-state="idle">
+                                    <span class="agent-runtime-status__dot" aria-hidden="true"></span>
+                                    <span class="agent-runtime-status__text">未启动</span>
+                                </span>
+                                <strong>创作 Agent</strong>
                             </div>
-                            <button class="chat-header-btn" id="btn-new-chat" title="新建聊天">+</button>
-                        </div>
-                    </div>
-
-                    <div class="chat-messages" id="chat-messages">
-                        <div class="chat-welcome">
-                            <p>输入消息，按 Enter 发送。可通过下方标签切换「写正文 / 研讨情节 / 辅助设定」三种模式。</p>
-                        </div>
-                    </div>
-
-                    <div class="cc-input-area">
-                        <div class="cc-context-bar"><div class="cc-context-fill" id="context-fill"></div></div>
-                        <textarea class="cc-input" id="chat-input" rows="1" placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"></textarea>
-                        <div class="cc-input-footer">
-                            <div class="cc-ctx-circle" id="ctx-circle" title="上下文用量">
-                                <svg width="20" height="20">
-                                    <circle cx="10" cy="10" r="7" fill="none" stroke="var(--bg-tertiary)" stroke-width="3"></circle>
-                                    <circle cx="10" cy="10" r="7" fill="none" stroke="var(--success)" stroke-width="3" stroke-dasharray="44" stroke-dashoffset="44" transform="rotate(-90 10 10)" id="ctx-arc" stroke-linecap="round"></circle>
-                                </svg>
+                            <div class="agent-sidebar__actions">
+                                <button class="agent-icon-button agent-new-session" type="button" aria-label="新建 Agent 会话" title="新建会话">＋</button>
+                                <button class="agent-icon-button agent-session-menu-button" type="button" aria-label="查看 Agent 会话" title="会话记录">···</button>
                             </div>
-                            <span class="cc-ctx-text" id="ctx-text" style="font-size:10px;color:var(--text-muted);margin-right:4px;">0</span>
-                            <span style="flex:1;"></span>
-                            <span class="cc-mode-desc" id="mode-desc">正文模式 - AI 协作续写</span>
-                            <div class="cc-mode-popover" id="mode-popover">
-                                <button class="cc-mode-current" id="mode-current">正文</button>
-                                <div class="cc-mode-dropdown" id="mode-dropdown">
-                                    <div class="cc-dropdown-group">
-                                        <button class="cc-dropdown-item active" data-mode="write">
-                                            <span class="cd-title">正文模式</span>
-                                            <span class="cd-desc">AI 协作续写，生成后可接受、重试或修改</span>
-                                        </button>
-                                        <button class="cc-dropdown-item" data-mode="plan">
-                                            <span class="cd-title">情节研讨</span>
-                                            <span class="cd-desc">先讨论走向，再落到正文</span>
-                                        </button>
-                                        <button class="cc-dropdown-item" data-mode="assist">
-                                            <span class="cd-title">设定制作</span>
-                                            <span class="cd-desc">辅助创建角色卡和世界书</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            <button class="cc-send-btn" id="btn-send">▶</button>
-                            <button id="btn-stop" class="cc-send-btn" style="display:none">■</button>
+                            <div class="agent-session-menu" hidden></div>
+                        </header>
+                        <div class="agent-context-bar">
+                            <span class="agent-context-bar__chapter">未选择章节</span>
+                            <span class="agent-context-bar__sync">等待项目</span>
                         </div>
-                    </div>
+                        <div class="agent-conversation" role="log" aria-live="polite" aria-relevant="additions">
+                            <div class="agent-empty-state">
+                                <span class="agent-empty-state__mark" aria-hidden="true">✦</span>
+                                <strong>和故事一起往前走</strong>
+                                <p>讨论情节、核对设定，或让 Agent 根据当前章节给出写作建议。</p>
+                                <button class="agent-retry" type="button" hidden>重新连接</button>
+                            </div>
+                            <div class="agent-conversation__list"></div>
+                            <button class="agent-jump-bottom" type="button" hidden>回到底部</button>
+                        </div>
+                        <form class="agent-composer">
+                            <textarea class="agent-composer__input" rows="1" aria-label="发送给创作 Agent" placeholder="请先打开一个小说项目" disabled></textarea>
+                            <div class="agent-composer__footer">
+                                <button class="agent-composer__mode" type="button" aria-pressed="false" hidden>加入队列</button>
+                                <span class="agent-composer__hint">Enter 发送 · Shift+Enter 换行</span>
+                                <button class="agent-composer__cancel" type="button" hidden>停止</button>
+                                <button class="agent-composer__send" type="submit" disabled>发送</button>
+                            </div>
+                        </form>
+                    </section>
                 </div>
 
                 <div id="panel-worldbook" class="sidebar-panel">
@@ -750,19 +732,57 @@
         </div>
     </div>
 
-    <input type="file" id="file-input-worldbook" accept=".json" style="display:none">
-    <input type="file" id="file-input-character" accept=".png,.json" multiple style="display:none">
-    <input type="file" id="file-input-preset" accept=".json" style="display:none">
-    <input type="file" id="file-input-document" accept=".txt,.docx,.doc" style="display:none">
-    <input type="file" id="file-input-folder" webkitdirectory directory style="display:none">
+    <!-- Renderer dependencies -->
+    <script src="js/pages/settings/presets/builtin-preset.js"></script>
+    <script src="js/shared/desktop/app-signature.js"></script>
+    <script src="js/shared/desktop/desktop-bridge.js"></script>
+    <script src="js/shared/desktop/desktop-repositories.js"></script>
+    <script src="js/shared/state/preferences-store.js"></script>
+    <script src="js/pages/workspace/automation/automation-runtime.js"></script>
+    <script src="js/pages/workspace/chapters/chapter-tree.js"></script>
+    <script src="js/pages/workspace/resizable-panels.js"></script>
+    <script src="js/pages/workspace/agent/state/agent-store.js"></script>
+    <script src="js/pages/workspace/agent/conversation/agent-conversation.js"></script>
+    <script src="js/pages/workspace/agent/composer/agent-composer.js"></script>
+    <script src="js/pages/workspace/agent/workbench/agent-workbench.js"></script>
+    <script src="js/pages/workspace/automation/plot-candidates.js"></script>
 
-    <script src="js/builtin-preset.js"></script>
-    <script src="js/app-signature.js"></script>
-    <script src="js/core/api-client.js"></script>
-    <script src="js/editor/chapter-tree.js"></script>
-    <script src="js/editor/resizable-panels.js"></script>
-    <script src="js/ai/plot-candidates.js"></script>
-    <script src="js/ai/chat-panel.js"></script>
-    <script src="js/app.js"></script>
+    <!-- Shared application state and page-oriented owners -->
+    <script src="js/app/app-context.js"></script>
+    <script src="js/pages/settings/general-settings.js"></script>
+    <script src="js/shared/desktop/app-identity.js"></script>
+    <script src="js/pages/welcome/index.js"></script>
+    <script src="js/app/composition/open-project.js"></script>
+    <script src="js/pages/workspace/workspace-store.js"></script>
+    <script src="js/dialogs/import-export/index.js"></script>
+    <script src="js/pages/workspace/editor/formatting.js"></script>
+    <script src="js/pages/settings/model-settings.js"></script>
+    <script src="js/pages/settings/index.js"></script>
+    <script src="js/dialogs/contact-author/index.js"></script>
+    <script src="js/shared/ui/list-filter.js"></script>
+    <script src="js/pages/workspace/characters/editor.js"></script>
+    <script src="js/shared/formatting/debug-format.js"></script>
+    <script src="js/pages/workspace/automation/writing.js"></script>
+    <script src="js/shared/ui/tooltip.js"></script>
+    <script src="js/dialogs/prompt-editor/index.js"></script>
+    <script src="js/app/composition/app-event-coordinator.js"></script>
+    <script src="js/pages/workspace/automation/index.js"></script>
+    <script src="js/pages/workspace/chapters/index.js"></script>
+    <script src="js/pages/workspace/editor/index.js"></script>
+    <script src="js/pages/workspace/worldbook/index.js"></script>
+    <script src="js/pages/workspace/characters/index.js"></script>
+    <script src="js/pages/workspace/outline/index.js"></script>
+    <script src="js/pages/workspace/worldbook/reference-selection.js"></script>
+    <script src="js/pages/workspace/automation/extraction.js"></script>
+    <script src="js/pages/workspace/agent/index.js"></script>
+    <script src="js/pages/workspace/status-bar/index.js"></script>
+    <script src="js/pages/workspace/workspace-page.js"></script>
+    <script src="js/shared/ui/feedback.js"></script>
+    <script src="js/dialogs/regex-editor/index.js"></script>
+    <script src="js/shared/formatting/index.js"></script>
+    <script src="js/shared/security/dom-text.js"></script>
+    <script src="js/pages/settings/prompt-settings.js"></script>
+    <script src="js/app/composition/save-workspace.js"></script>
+    <script src="js/app/bootstrap.js"></script>
 </body>
 </html>

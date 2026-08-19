@@ -1,0 +1,7 @@
+{
+  "id": "project",
+  "entry": "./index.js",
+  "backend": { "group": "domains", "module": "project" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

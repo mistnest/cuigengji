@@ -1,0 +1,7 @@
+{
+  "id": "platform",
+  "group": "foundation",
+  "entry": "./index.js",
+  "dependsOn": [],
+  "dataOwnership": ["atomic storage", "backup", "diagnostics", "updates", "process lifecycle"]
+}

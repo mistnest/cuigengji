@@ -1,0 +1,1 @@
+export const AUTOMATION_DTO_VERSION = 1;

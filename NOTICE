@@ -13,3 +13,11 @@ See LICENSE for the exact permissions and restrictions.
 The project intentionally keeps a small set of public provenance identifiers in
 version metadata, API responses, client metadata, package metadata, and release
 artifacts. These identifiers are not telemetry and do not collect user data.
+
+Third-party component:
+
+DeepSeek Harness (@deepseek-ai/dsh 0.1.0-rc.7)
+Copyright (c) DeepSeek
+https://github.com/deepseek-ai/deepseek-harness
+Licensed under the MIT License. The dependency distribution retains its own
+license notices; DeepSeek Harness is an independent upstream project.

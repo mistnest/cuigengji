@@ -1,0 +1,7 @@
+{
+  "id": "configuration",
+  "entry": "./index.js",
+  "backend": { "group": "foundation", "module": "configuration" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

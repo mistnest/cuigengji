@@ -5,6 +5,7 @@ debug/
 .backups/
 .cache/
 .private/
+dev/local/
 playwright-report/
 test-results/
 coverage/
@@ -29,27 +30,24 @@ CLAUDE.md
 催更姬-项目技术文档.md
 
 # One-off local debugging/experiment scripts.
-scripts/*.mjs
-scripts/*.local.*
-scripts/cache-hit-*.mjs
-scripts/cgj-*-api-test.mjs
-scripts/existing-project-continuation-test.mjs
-scripts/st-trace.mjs
-scripts/test-*.mjs
-scripts/show-*.mjs
-scripts/*experiment*.mjs
-scripts/*full-log*.mjs
-scripts/*same-project*.mjs
-scripts/diagnose-*.js
-scripts/test-*.js
+dev/scripts/*.mjs
+!dev/scripts/check-real-dsh-flow.mjs
+dev/scripts/*.local.*
+dev/scripts/cache-hit-*.mjs
+dev/scripts/cgj-*-api-test.mjs
+dev/scripts/existing-project-continuation-test.mjs
+dev/scripts/st-trace.mjs
+dev/scripts/test-*.mjs
+dev/scripts/show-*.mjs
+dev/scripts/*experiment*.mjs
+dev/scripts/*full-log*.mjs
+dev/scripts/*same-project*.mjs
+dev/scripts/diagnose-*.js
+dev/scripts/test-*.js
 
-# Tests — developer-only, not shipped to end users.
-tests/
-
-# Build & CI — not shipped to end users.
-playwright.config.ts
-.github/
-scripts/build-win.js
-scripts/package-win.js
-scripts/create-fingerprint-manifest.js
-scripts/release-upload.js
+# Tests and their runner configuration are tracked as the refactor safety net.
+# They remain excluded from packaged applications by the electron-builder files list.
+dev/scripts/build-win.js
+dev/scripts/package-win.js
+dev/scripts/create-fingerprint-manifest.js
+dev/scripts/release-upload.js

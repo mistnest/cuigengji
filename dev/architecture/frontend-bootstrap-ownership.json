@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "phase": "P7",
+  "status": "migrated",
+  "legacySource": "public/js/app/bootstrap.js",
+  "runtimeManifest": "dev/architecture/frontend-runtime-scripts.json",
+  "baselineFunctionCount": 228,
+  "baselineFunctionNamesSha256": "91f01d07ab11f6ffe989723fde621705ba2b68850b2e3df4d98c6719a03e6d03",
+  "ownershipRanges": [
+    {
+      "startLine": 81,
+      "endLine": 109,
+      "target": "public/js/app/bootstrap.js",
+      "responsibility": "application initialization"
+    },
+    {
+      "startLine": 110,
+      "endLine": 121,
+      "target": "public/js/pages/settings/general-settings.js",
+      "responsibility": "preference commands"
+    },
+    {
+      "startLine": 122,
+      "endLine": 132,
+      "target": "public/js/shared/desktop/app-identity.js",
+      "responsibility": "application provenance"
+    },
+    {
+      "startLine": 133,
+      "endLine": 370,
+      "target": "public/js/pages/welcome/index.js",
+      "responsibility": "welcome page and project list"
+    },
+    {
+      "startLine": 371,
+      "endLine": 446,
+      "target": "public/js/app/composition/open-project.js",
+      "responsibility": "open and leave project use cases"
+    },
+    {
+      "startLine": 447,
+      "endLine": 489,
+      "target": "public/js/pages/settings/prompt-settings.js",
+      "responsibility": "builtin preset initialization"
+    },
+    {
+      "startLine": 490,
+      "endLine": 580,
+      "target": "public/js/pages/workspace/workspace-store.js",
+      "responsibility": "workspace state projection"
+    },
+    {
+      "startLine": 581,
+      "endLine": 747,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "import and export dialogs"
+    },
+    {
+      "startLine": 748,
+      "endLine": 814,
+      "target": "public/js/pages/workspace/editor/formatting.js",
+      "responsibility": "editor text formatting"
+    },
+    {
+      "startLine": 815,
+      "endLine": 915,
+      "target": "public/js/pages/settings/model-settings.js",
+      "responsibility": "network proxy settings"
+    },
+    {
+      "startLine": 916,
+      "endLine": 967,
+      "target": "public/js/pages/settings/index.js",
+      "responsibility": "settings page lifecycle"
+    },
+    {
+      "startLine": 968,
+      "endLine": 998,
+      "target": "public/js/dialogs/contact-author/index.js",
+      "responsibility": "contact dialog"
+    },
+    {
+      "startLine": 999,
+      "endLine": 1158,
+      "target": "public/js/pages/settings/index.js",
+      "responsibility": "settings state and restoration"
+    },
+    {
+      "startLine": 1159,
+      "endLine": 1206,
+      "target": "public/js/shared/ui/list-filter.js",
+      "responsibility": "shared list search"
+    },
+    {
+      "startLine": 1207,
+      "endLine": 1458,
+      "target": "public/js/pages/workspace/characters/editor.js",
+      "responsibility": "character editor"
+    },
+    {
+      "startLine": 1459,
+      "endLine": 1464,
+      "target": "public/js/shared/formatting/debug-format.js",
+      "responsibility": "bounded diagnostic formatting"
+    },
+    {
+      "startLine": 1465,
+      "endLine": 1580,
+      "target": "public/js/pages/workspace/automation/writing.js",
+      "responsibility": "debug prompt and infill automation"
+    },
+    {
+      "startLine": 1581,
+      "endLine": 1654,
+      "target": "public/js/pages/settings/model-settings.js",
+      "responsibility": "model catalog controls"
+    },
+    {
+      "startLine": 1655,
+      "endLine": 1676,
+      "target": "public/js/pages/settings/prompt-settings.js",
+      "responsibility": "prompt template commands"
+    },
+    {
+      "startLine": 1677,
+      "endLine": 1706,
+      "target": "public/js/shared/ui/tooltip.js",
+      "responsibility": "global tooltip"
+    },
+    {
+      "startLine": 1707,
+      "endLine": 2034,
+      "target": "public/js/dialogs/prompt-editor/index.js",
+      "responsibility": "prompt editor dialog"
+    },
+    {
+      "startLine": 2035,
+      "endLine": 2044,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "folder import"
+    },
+    {
+      "startLine": 2045,
+      "endLine": 2085,
+      "target": "public/js/pages/settings/index.js",
+      "responsibility": "settings persistence and projection"
+    },
+    {
+      "startLine": 2086,
+      "endLine": 2363,
+      "target": "public/js/app/composition/app-event-coordinator.js",
+      "responsibility": "legacy global event registration"
+    },
+    {
+      "startLine": 2364,
+      "endLine": 3095,
+      "target": "public/js/pages/workspace/automation/index.js",
+      "responsibility": "writing, ideas, extraction and job UI"
+    },
+    {
+      "startLine": 3096,
+      "endLine": 3134,
+      "target": "public/js/pages/settings/model-settings.js",
+      "responsibility": "provider connection test"
+    },
+    {
+      "startLine": 3135,
+      "endLine": 3180,
+      "target": "public/js/pages/workspace/chapters/index.js",
+      "responsibility": "chapter and volume creation"
+    },
+    {
+      "startLine": 3181,
+      "endLine": 3375,
+      "target": "public/js/pages/workspace/editor/index.js",
+      "responsibility": "chapter loading, summary and save"
+    },
+    {
+      "startLine": 3376,
+      "endLine": 3502,
+      "target": "public/js/pages/workspace/chapters/index.js",
+      "responsibility": "chapter navigation and ordering"
+    },
+    {
+      "startLine": 3503,
+      "endLine": 3518,
+      "target": "public/js/app/composition/open-project.js",
+      "responsibility": "project existence compatibility"
+    },
+    {
+      "startLine": 3519,
+      "endLine": 3550,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "worldbook import"
+    },
+    {
+      "startLine": 3551,
+      "endLine": 4040,
+      "target": "public/js/pages/workspace/worldbook/index.js",
+      "responsibility": "worldbook UI"
+    },
+    {
+      "startLine": 4041,
+      "endLine": 4057,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "character import"
+    },
+    {
+      "startLine": 4058,
+      "endLine": 4456,
+      "target": "public/js/pages/workspace/characters/index.js",
+      "responsibility": "character UI"
+    },
+    {
+      "startLine": 4457,
+      "endLine": 4614,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "preset import"
+    },
+    {
+      "startLine": 4615,
+      "endLine": 4768,
+      "target": "public/js/pages/settings/prompt-settings.js",
+      "responsibility": "preset and prompt projection"
+    },
+    {
+      "startLine": 4769,
+      "endLine": 4827,
+      "target": "public/js/pages/workspace/outline/index.js",
+      "responsibility": "outline UI"
+    },
+    {
+      "startLine": 4828,
+      "endLine": 4879,
+      "target": "public/js/pages/workspace/worldbook/reference-selection.js",
+      "responsibility": "writing reference selection"
+    },
+    {
+      "startLine": 4881,
+      "endLine": 5141,
+      "target": "public/js/pages/settings/model-settings.js",
+      "responsibility": "provider, secret and model parameter UI"
+    },
+    {
+      "startLine": 5142,
+      "endLine": 5200,
+      "target": "public/js/pages/settings/prompt-settings.js",
+      "responsibility": "reference injection settings"
+    },
+    {
+      "startLine": 5201,
+      "endLine": 5252,
+      "target": "public/js/pages/settings/model-settings.js",
+      "responsibility": "context information projection"
+    },
+    {
+      "startLine": 5253,
+      "endLine": 5295,
+      "target": "public/js/pages/workspace/automation/extraction.js",
+      "responsibility": "extraction result projection"
+    },
+    {
+      "startLine": 5296,
+      "endLine": 5328,
+      "target": "public/js/pages/workspace/editor/index.js",
+      "responsibility": "editor input and workspace interactivity"
+    },
+    {
+      "startLine": 5329,
+      "endLine": 5351,
+      "target": "public/js/pages/workspace/agent/index.js",
+      "responsibility": "Agent page binding"
+    },
+    {
+      "startLine": 5352,
+      "endLine": 5363,
+      "target": "public/js/pages/workspace/editor/index.js",
+      "responsibility": "editor reset"
+    },
+    {
+      "startLine": 5364,
+      "endLine": 5373,
+      "target": "public/js/pages/workspace/status-bar/index.js",
+      "responsibility": "word count"
+    },
+    {
+      "startLine": 5374,
+      "endLine": 5404,
+      "target": "public/js/dialogs/import-export/index.js",
+      "responsibility": "import menu"
+    },
+    {
+      "startLine": 5405,
+      "endLine": 5426,
+      "target": "public/js/pages/workspace/workspace-page.js",
+      "responsibility": "workspace tab selection"
+    },
+    {
+      "startLine": 5427,
+      "endLine": 5433,
+      "target": "public/js/app/composition/open-project.js",
+      "responsibility": "new project flow"
+    },
+    {
+      "startLine": 5434,
+      "endLine": 5468,
+      "target": "public/js/shared/ui/feedback.js",
+      "responsibility": "confirm, focus and toast UI"
+    },
+    {
+      "startLine": 5469,
+      "endLine": 5557,
+      "target": "public/js/pages/workspace/status-bar/index.js",
+      "responsibility": "workspace status projection"
+    },
+    {
+      "startLine": 5558,
+      "endLine": 5686,
+      "target": "public/js/dialogs/regex-editor/index.js",
+      "responsibility": "regex editor dialog"
+    },
+    {
+      "startLine": 5687,
+      "endLine": 5720,
+      "target": "public/js/shared/formatting/index.js",
+      "responsibility": "debounce and time formatting"
+    },
+    {
+      "startLine": 5721,
+      "endLine": 5731,
+      "target": "public/js/shared/security/dom-text.js",
+      "responsibility": "legacy HTML escaping pending safe DOM migration"
+    },
+    {
+      "startLine": 5732,
+      "endLine": 5742,
+      "target": "public/js/pages/workspace/automation/extraction.js",
+      "responsibility": "summary automation"
+    },
+    {
+      "startLine": 5743,
+      "endLine": 5848,
+      "target": "public/js/pages/settings/prompt-settings.js",
+      "responsibility": "preset save and selection"
+    },
+    {
+      "startLine": 5849,
+      "endLine": 5923,
+      "target": "public/js/app/composition/save-workspace.js",
+      "responsibility": "workspace serialization and persistence"
+    },
+    {
+      "startLine": 5924,
+      "endLine": 99999,
+      "target": "public/js/app/bootstrap.js",
+      "responsibility": "application unload lifecycle"
+    }
+  ]
+}

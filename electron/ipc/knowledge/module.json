@@ -1,0 +1,7 @@
+{
+  "id": "knowledge",
+  "entry": "./index.js",
+  "backend": { "group": "domains", "module": "knowledge" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

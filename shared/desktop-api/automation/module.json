@@ -1,0 +1,7 @@
+{
+  "id": "automation",
+  "entry": "./index.js",
+  "backend": { "group": "intelligence", "module": "automation" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

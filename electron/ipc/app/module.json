@@ -1,0 +1,7 @@
+{
+  "id": "app",
+  "entry": "./index.js",
+  "backend": { "group": "foundation", "module": "platform" },
+  "migrationPhase": "P1",
+  "compatibilityRetiresIn": "P7"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "configuration",
+  "group": "foundation",
+  "entry": "./index.js",
+  "dependsOn": ["platform"],
+  "dataOwnership": ["app-preferences.json", "provider profiles", "preset JSON", "secret references"]
+}

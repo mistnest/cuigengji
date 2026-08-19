@@ -1,0 +1,7 @@
+{
+  "id": "exchange",
+  "group": "interchange",
+  "entry": "./index.js",
+  "dependsOn": ["project", "knowledge", "configuration", "platform"],
+  "dataOwnership": ["temporary-import-plans"]
+}

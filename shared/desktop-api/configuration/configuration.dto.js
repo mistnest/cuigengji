@@ -1,0 +1,1 @@
+export const CONFIGURATION_DTO_VERSION = 1;

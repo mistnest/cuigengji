@@ -1,15 +1,113 @@
-import { app, BrowserWindow, Menu, dialog } from 'electron';
-import fs from 'node:fs/promises';
+import {
+    app,
+    BrowserWindow,
+    Menu,
+    dialog,
+    ipcMain,
+    safeStorage,
+    shell,
+} from 'electron';
+import { spawn } from 'node:child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { startServer } from '../src/server.js';
+import { configureAiSecretProtection } from '../src/backend/foundation/configuration/index.js';
+import { APP_IPC_CHANNELS, APP_MENU_COMMANDS } from '../shared/desktop-api/app/index.js';
+import { createDshSupervisor } from './intelligence/agent/dsh/dsh-supervisor.js';
+import { createDshGateway } from './intelligence/agent/dsh/dsh-gateway.js';
+import {
+    registerChapterIpcHandlers,
+    registerOutlineIpcHandlers,
+    registerProjectIpcHandlers,
+    registerWorkspaceIpcHandlers,
+} from './ipc/project/index.js';
+import { registerReferenceIpcHandlers } from './ipc/knowledge/index.js';
+import { registerAgentIpcHandlers, registerSessionIpcHandlers } from './ipc/agent/index.js';
+import { registerAiIpcHandlers } from './ipc/models/index.js';
+import { registerExportIpcHandlers, registerImportIpcHandlers } from './ipc/exchange/index.js';
+import { registerPresetIpcHandlers, registerSettingsIpcHandlers } from './ipc/configuration/index.js';
+import { registerAppIpcHandlers } from './ipc/app/index.js';
+import { registerAutomationIpcHandlers } from './ipc/automation/index.js';
+import { createSafeStorageAdapter } from './security/safe-storage-adapter.js';
+import { configureWindowSecurity } from './window/security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow;
 let embeddedServer;
 let currentAppUrl = '';
+let shutdownPromise = null;
+let shutdownComplete = false;
+
+const dshSupervisor = createDshSupervisor({
+    electronApp: app,
+    spawnProcess: spawn,
+});
+const dshGateway = createDshGateway({ supervisor: dshSupervisor });
+
+const unregisterAppIpcHandlers = registerAppIpcHandlers({
+    ipcMain,
+    electronApp: app,
+    electronShell: shell,
+    getMainWindow: () => mainWindow,
+});
+const unregisterProjectIpcHandlers = registerProjectIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterChapterIpcHandlers = registerChapterIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterOutlineIpcHandlers = registerOutlineIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterSessionIpcHandlers = registerSessionIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterWorkspaceIpcHandlers = registerWorkspaceIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterReferenceIpcHandlers = registerReferenceIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterPresetIpcHandlers = registerPresetIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterImportIpcHandlers = registerImportIpcHandlers({
+    ipcMain,
+    dialog,
+    getMainWindow: () => mainWindow,
+});
+const unregisterExportIpcHandlers = registerExportIpcHandlers({
+    ipcMain,
+    dialog,
+    getMainWindow: () => mainWindow,
+});
+const unregisterSettingsIpcHandlers = registerSettingsIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    onSecretChanged: () => dshSupervisor.invalidateCredentials(),
+});
+const unregisterAiIpcHandlers = registerAiIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
+const unregisterAgentIpcHandlers = registerAgentIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    gateway: dshGateway,
+});
+const unregisterAutomationIpcHandlers = registerAutomationIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+});
 
 const startupStartedAt = Date.now();
 
@@ -17,70 +115,11 @@ function logStartup(label) {
     console.log(`[Startup +${Date.now() - startupStartedAt}ms] ${label}`);
 }
 
-async function pathExists(target) {
-    try {
-        await fs.access(target);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function mergeNewerFiles(sourceRoot, targetRoot, backupRoot, relative = '') {
-    const sourceDir = path.join(sourceRoot, relative);
-    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-    for (const entry of entries) {
-        const nextRelative = path.join(relative, entry.name);
-        const source = path.join(sourceRoot, nextRelative);
-        const target = path.join(targetRoot, nextRelative);
-        if (entry.isDirectory()) {
-            await fs.mkdir(target, { recursive: true });
-            await mergeNewerFiles(sourceRoot, targetRoot, backupRoot, nextRelative);
-            continue;
-        }
-        if (!entry.isFile()) continue;
-
-        const targetExists = await pathExists(target);
-        if (targetExists) {
-            const [sourceStat, targetStat] = await Promise.all([fs.stat(source), fs.stat(target)]);
-            if (sourceStat.mtimeMs <= targetStat.mtimeMs) continue;
-            const backup = path.join(backupRoot, nextRelative);
-            await fs.mkdir(path.dirname(backup), { recursive: true });
-            await fs.copyFile(target, backup);
-        }
-        await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.copyFile(source, target);
-    }
-}
-
-async function prepareDevelopmentDataRoot() {
-    const projectDataRoot = path.join(__dirname, '..', 'data');
-    const electronDataRoot = path.join(app.getPath('userData'), 'data');
-    const marker = path.join(projectDataRoot, '.migrations', 'electron-user-data-v1.json');
-    if (await pathExists(marker) || !await pathExists(electronDataRoot)) return projectDataRoot;
-
-    logStartup('Migrating Electron user data into project data root');
-    const migratedAt = Date.now();
-    const backupRoot = path.join(projectDataRoot, 'backups', `electron-data-migration-${migratedAt}`);
-    await fs.mkdir(projectDataRoot, { recursive: true });
-    await mergeNewerFiles(electronDataRoot, projectDataRoot, backupRoot);
-    await fs.mkdir(path.dirname(marker), { recursive: true });
-    await fs.writeFile(marker, JSON.stringify({
-        migratedAt,
-        source: electronDataRoot,
-        target: projectDataRoot,
-        backup: backupRoot,
-    }, null, 2), 'utf8');
-    return projectDataRoot;
-}
-
 async function ensureServer() {
     logStartup('Starting embedded server');
     const dataRoot = process.env.CUIGENGJI_DATA_ROOT
         ? path.resolve(process.env.CUIGENGJI_DATA_ROOT)
-        : app.isPackaged
-            ? path.join(app.getPath('userData'), 'data')
-            : await prepareDevelopmentDataRoot();
+        : path.join(app.getPath('userData'), app.isPackaged ? 'data' : 'development-data');
     const started = await startServer({
         port: 0,
         dataRoot,
@@ -150,6 +189,27 @@ function loadingPage() {
 </html>`);
 }
 
+function startupFailurePage() {
+    return 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>催更姬启动失败</title></head>
+<body style="font-family:system-ui,sans-serif;padding:32px">
+  <h1>启动失败</h1>
+  <p>本地服务未能启动。请重新打开应用；如果问题持续，请查看主进程日志。</p>
+</body>
+</html>`);
+}
+
+function closeEmbeddedServer() {
+    const server = embeddedServer;
+    embeddedServer = null;
+    if (!server) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        server.closeIdleConnections?.();
+        server.close(error => (error ? reject(error) : resolve()));
+    });
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
@@ -162,6 +222,17 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: true,
+            preload: path.join(__dirname, 'preload.cjs'),
+        },
+    });
+    configureWindowSecurity(mainWindow, {
+        getAllowedOrigin: () => {
+            try {
+                return currentAppUrl ? new URL(currentAppUrl).origin : '';
+            } catch {
+                return '';
+            }
         },
     });
     mainWindow.setMenuBarVisibility(false);
@@ -173,8 +244,9 @@ function createWindow() {
                 {
                     label: '保存',
                     accelerator: 'CmdOrCtrl+S',
-                    click: () => mainWindow.webContents.executeJavaScript(
-                        "document.querySelector('#btn-save')?.click()",
+                    click: () => mainWindow?.webContents.send(
+                        APP_IPC_CHANNELS.menuCommand,
+                        APP_MENU_COMMANDS.save,
                     ),
                 },
                 { type: 'separator' },
@@ -217,11 +289,14 @@ function createWindow() {
 
     Menu.setApplicationMenu(Menu.buildFromTemplate(tpl));
     mainWindow.loadURL(currentAppUrl || loadingPage());
-    mainWindow.on('closed', () => { mainWindow = null; });
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 }
 
 app.whenReady().then(async () => {
     logStartup('Electron ready');
+    configureAiSecretProtection(createSafeStorageAdapter(safeStorage));
     createWindow();
     ensureServer()
         .then(appUrl => {
@@ -233,7 +308,7 @@ app.whenReady().then(async () => {
         .catch(error => {
             console.error('[Startup] Failed to start embedded server', error);
             if (mainWindow) {
-                mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<h1>启动失败</h1><pre>${String(error?.stack || error)}</pre>`));
+                mainWindow.loadURL(startupFailurePage());
             }
         });
     app.on('activate', () => {
@@ -241,9 +316,37 @@ app.whenReady().then(async () => {
     });
 });
 
-app.on('before-quit', () => {
-    embeddedServer?.close();
+app.on('before-quit', event => {
+    if (shutdownComplete) return;
+    event.preventDefault();
+    if (shutdownPromise) return;
+    shutdownPromise = Promise.allSettled([
+        closeEmbeddedServer(),
+        dshGateway.stop(),
+    ]).then(results => {
+        for (const result of results) {
+            if (result.status === 'rejected') console.error('[Shutdown] Cleanup failed', result.reason);
+        }
+    }).finally(() => {
+        shutdownComplete = true;
+        app.quit();
+    });
 });
+
+app.on('will-quit', unregisterAppIpcHandlers);
+app.on('will-quit', unregisterProjectIpcHandlers);
+app.on('will-quit', unregisterChapterIpcHandlers);
+app.on('will-quit', unregisterOutlineIpcHandlers);
+app.on('will-quit', unregisterSessionIpcHandlers);
+app.on('will-quit', unregisterWorkspaceIpcHandlers);
+app.on('will-quit', unregisterReferenceIpcHandlers);
+app.on('will-quit', unregisterPresetIpcHandlers);
+app.on('will-quit', unregisterImportIpcHandlers);
+app.on('will-quit', unregisterExportIpcHandlers);
+app.on('will-quit', unregisterSettingsIpcHandlers);
+app.on('will-quit', unregisterAiIpcHandlers);
+app.on('will-quit', unregisterAgentIpcHandlers);
+app.on('will-quit', unregisterAutomationIpcHandlers);
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

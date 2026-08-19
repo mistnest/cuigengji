@@ -1,0 +1,7 @@
+{
+  "id": "models",
+  "group": "intelligence",
+  "entry": "./index.js",
+  "dependsOn": ["configuration", "platform"],
+  "dataOwnership": ["normalized-provider-events"]
+}

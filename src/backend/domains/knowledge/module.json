@@ -1,0 +1,7 @@
+{
+  "id": "knowledge",
+  "group": "domains",
+  "entry": "./index.js",
+  "dependsOn": ["platform"],
+  "dataOwnership": ["assets/worldbooks/**", "assets/characters/**", "references/selection.json"]
+}

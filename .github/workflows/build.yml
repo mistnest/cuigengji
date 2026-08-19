@@ -18,9 +18,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - run: npm ci
+
+      - name: Verify generated preload and architecture
+        run: npm run preload:check && npm run lint && npm run architecture:check
+
+      - name: Run Windows regression suite
+        if: runner.os == 'Windows'
+        run: npm test -- --reporter=list
+
+      - name: Generate sandbox preload for packaging
+        run: npm run build:preload
 
       - name: Build Linux
         if: runner.os == 'Linux'
@@ -44,4 +54,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-build
-          path: dist/催更姬-*
+          path: ../cuigengji-build/dist/催更姬-*

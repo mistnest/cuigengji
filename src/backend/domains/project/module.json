@@ -1,0 +1,7 @@
+{
+  "id": "project",
+  "group": "domains",
+  "entry": "./index.js",
+  "dependsOn": ["knowledge", "configuration", "platform"],
+  "dataOwnership": ["project.json", "novel.json", "chapters/**", "outline.json", "workspace.json"]
+}
