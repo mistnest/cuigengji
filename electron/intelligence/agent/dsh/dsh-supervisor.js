@@ -19,13 +19,18 @@ import {
     readBundledDshSkillSources,
 } from './dsh-plugin-bundle.js';
 import { resolveDshProviderConfig } from './dsh-provider-config.js';
+import {
+    assertDshRuntimeCompatibility,
+    normalizeDshReadyUrl,
+    readInstalledDshVersion,
+} from './dsh-runtime-contract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const DSH_VERSION = '0.1.0-rc.7';
+const DSH_VERSION = readInstalledDshVersion();
 const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 3_000;
-const READY_PATTERN = /dsh web: (http:\/\/127\.0\.0\.1:\d+)/u;
+const READY_PATTERN = /dsh web: (http:\/\/127\.0\.0\.1:\d+[^\s)]*)/u;
 export function createDshSupervisor({
     electronApp,
     spawnProcess,
@@ -154,9 +159,20 @@ export function createDshSupervisor({
 
             const finish = (error, url) => {
                 if (settled) return;
+                let normalizedUrl = '';
+                if (!error) {
+                    try {
+                        normalizedUrl = normalizeDshReadyUrl(url);
+                    } catch (cause) {
+                        error = cause;
+                    }
+                }
                 settled = true;
                 clearTimeout(timeout);
                 if (error) {
+                    const processToKill = child;
+                    child = null;
+                    processToKill?.kill();
                     state = 'failed';
                     lastError = 'DSH 启动失败，请重试或查看主进程日志。';
                     if (stderrBuffer) console.error('[DSH]', redact(stderrBuffer, launch.secret));
@@ -170,7 +186,7 @@ export function createDshSupervisor({
                     }));
                     return;
                 }
-                runtimeUrl = url;
+                runtimeUrl = normalizedUrl;
                 activeConfigSignature = launch.configSignature;
                 state = 'ready';
                 resolve(publicStatus());
@@ -190,6 +206,7 @@ export function createDshSupervisor({
                     'web',
                     '--patch', launch.patchFile,
                     '--port', '0',
+                    '--no-open',
                 ], {
                     cwd: launch.runtimeRoot,
                     env: {
@@ -486,6 +503,7 @@ export async function refreshDshProjectContext({ userDataRoot, projectId, chapte
 }
 
 function resolveDshBin() {
+    assertDshRuntimeCompatibility();
     return path.join(path.dirname(resolveModuleFile('@deepseek-ai/dsh/package.json')), 'lib', 'bin.js');
 }
 
@@ -558,7 +576,10 @@ function writePrivateJson(file, value) {
 }
 
 function redact(value, secret) {
-    const text = String(value || '');
+    const text = String(value || '').replace(
+        /(http:\/\/127\.0\.0\.1:\d+\/?)\?[^\s)]*/gu,
+        '$1?[REDACTED]',
+    );
     return secret ? text.split(secret).join('[REDACTED]') : text;
 }
 

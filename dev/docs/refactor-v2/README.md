@@ -43,6 +43,7 @@
 - [11-repository-runtime-development-layout.md](./11-repository-runtime-development-layout.md)：运行层、开发层、本地资料和外部构建目录的最终划分。
 - [13-collaboration-and-typescript-checkpoint.md](./13-collaboration-and-typescript-checkpoint.md)：协作 revision/CAS 内核与 TypeScript 增量迁移 checkpoint。
 - [14-iterative-writing-quality-research.md](./14-iterative-writing-quality-research.md)：基于预设的生成—审阅—改写循环、DSH subagent 插件边界与朱雀观测实验。
+- [15-dsh-0.1.1-rc.2-migration.md](./15-dsh-0.1.1-rc.2-migration.md)：DSH rc.7 → rc.2 的破坏点、依赖门禁、协议边界和 alpha 后续迁移清单。
 - [native-dsh-sidebar/README.md](./native-dsh-sidebar/README.md)：Phase 0–6 的逐阶段详细任务、接口、测试、验收与回退文档。
 
 ## 当前停止点

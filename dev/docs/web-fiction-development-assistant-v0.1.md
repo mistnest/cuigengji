@@ -3,7 +3,7 @@
 > 状态：Phase 0–6 与多供应商桥接已实现，交付前体验测试与 `dist` 打包验收通过；真实长会话与官方 Web Search 人工验收待进行
 > 基线日期：2026-08-19
 > 适用代码基线：`195f636`（包含此前问题修复与 checkpoint）
-> DSH 基线：`@deepseek-ai/dsh@0.1.0-rc.7`
+> DSH 基线：已发布且可安装的统一版本波次 `@deepseek-ai/dsh@0.1.1-rc.2`；源码版 `0.1.2-alpha.1` 尚未接入
 > 原始讨论稿：`D:\novel\reference-materials\web-fiction-development-assistant-v0.1.md`
 
 本文是当前 v0.1 的实施依据。原始讨论稿用于保留思考过程；当两者冲突时，以本文为准。
@@ -18,7 +18,7 @@
 | Phase 3 | 官方 DeepSeek 条件式 `web_search`、轻量回执和安全 HTTPS 来源链接已接入 |
 | Phase 4 | `safe_web_fetch` 已通过 URL、DNS、IP 固定、重定向、响应上限和凭证隔离测试 |
 | Phase 5 | 大纲提案卡片、revision 校验、删除确认和领域层原子 patch 已接通 |
-| Phase 6 | lint、架构门禁、preload、93 项全量测试、真实窗口设置与 Agent 用户旅程、真实 DeepSeek 对话、真实公网 Safe Web Fetch、Windows `dist` 目录包及 packaged E2E 均已通过；真实长会话和官方 Web Search 仍需人工验收 |
+| Phase 6 | lint、架构门禁、preload、95 项全量测试、真实窗口设置与 Agent 用户旅程、真实 DeepSeek 对话、真实公网 Safe Web Fetch、Windows `dist` 目录包及 packaged E2E 均已通过；真实长会话和官方 Web Search 仍需人工验收 |
 
 实现没有新增第二套 Agent UI、跨 session 长期记忆或 Agent 写权限。提案仍在现有侧栏中展示，只有用户点击应用后才通过 Project Outline 领域命令修改项目。
 
@@ -315,8 +315,8 @@ Ollama 是本地无密钥配置；适配层仅在 DSH 子进程内提供兼容�
 在 `package.json` 中加入与 DSH 相同的精确版本直接依赖：
 
 ```text
-@deepseek-ai/dsh-skill-filesystem@0.1.0-rc.7
-@deepseek-ai/dsh-tool-skill@0.1.0-rc.7
+@deepseek-ai/dsh-skill-filesystem@0.1.1-rc.2
+@deepseek-ai/dsh-tool-skill@0.1.1-rc.2
 ```
 
 #### 主要文件
@@ -377,7 +377,7 @@ rc.7 的 DeepSeek Search Provider 使用 DeepSeek Anthropic-compatible Messages 
 增加精确版本直接依赖，确保打包依赖闭包稳定：
 
 ```text
-@deepseek-ai/dsh-tool-web@0.1.0-rc.7
+@deepseek-ai/dsh-tool-web@0.1.1-rc.2
 ```
 
 #### 主要文件

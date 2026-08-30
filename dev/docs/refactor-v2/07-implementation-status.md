@@ -30,7 +30,7 @@
 
 ## 最终验证
 
-- `npm test -- --reporter=line`：93/93 通过。
+- `npm test -- --reporter=line`：95/95 通过。
 - `npm run typecheck`、`npm run ts:check-generated`、`npm run build:preload`、`npm run architecture:check` 和 `npm run lint -- --quiet` 均通过；TypeScript 当前采用可回滚的增量迁移。
 - 项目/工作区/章节/大纲/世界书/角色卡写入统一携带 `revision`、`updatedAt`、`contentHash`，并通过 `DomainEventBus` 广播；DSH 运行会在外部变更后失效并刷新其项目快照。
 - Renderer 维护工作区级脏标记和稳定基线指纹，覆盖延迟自动保存及弹窗编辑；外部变更重载前会明确确认，并使旧保存回调失效。
@@ -51,7 +51,7 @@
 - 修复伪造工具结果可被误识别为大纲提案的问题；只有绑定到 `propose_outline_patch` 调用的结果才能生成提案卡。
 - 修复 Agent 使用后退出 Electron 可能长期等待内嵌 HTTP 连接的问题，并让两条桌面验收使用隔离的用户数据目录。
 - 使用产品自己的 Safe Web Fetch 完成一次真实公网访问，返回 HTML 标题和可读正文；未把单元测试代替公网链路。
-- 修复后全量 Playwright 为 93/93；其中新增统一上下文、插件目录、旧 preset 清理、协作版本/事件回放、上下文一致性、RPC 端点安全、多供应商 DSH 运行时、可靠取消回执和设置页到 Agent 的桌面链路覆盖；当前交付包 `dist` 的原生 Agent E2E 为 1/1。
+- 当前全量 Playwright 为 95/95；其中新增统一上下文、插件目录、旧 preset 清理、协作版本/事件回放、上下文一致性、RPC 端点安全、多供应商 DSH 运行时、rc.2 版本/协议门禁、可靠取消回执和设置页到 Agent 的桌面链路覆盖；当前交付包 `dist` 的原生 Agent E2E 为 1/1。
 
 ## 下一阶段
 

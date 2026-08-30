@@ -9,6 +9,12 @@ import {
     supportsOfficialDeepseekSearch,
 } from '../../../electron/intelligence/agent/dsh/dsh-supervisor.js';
 import {
+    assertDshRuntimeCompatibility,
+    DSH_PLUGIN_ABI_PACKAGES,
+    normalizeDshReadyUrl,
+    SUPPORTED_DSH_VERSION,
+} from '../../../electron/intelligence/agent/dsh/dsh-runtime-contract.js';
+import {
     DSH_GENERIC_API_KEY_ENV,
     resolveDshProviderConfig,
 } from '../../../electron/intelligence/agent/dsh/dsh-provider-config.js';
@@ -30,6 +36,27 @@ test('@interface DSH web search only accepts the official DeepSeek endpoint shap
     expect(supportsOfficialDeepseekSearch({
         provider: 'openai', endpoint: 'https://api.deepseek.com/v1',
     })).toBe(false);
+});
+
+test('@interface DSH runtime rejects mixed plugin waves and unpublished Remote transport URLs', () => {
+    const compatible = assertDshRuntimeCompatibility({
+        readVersion: () => SUPPORTED_DSH_VERSION,
+    });
+    expect(compatible).toMatchObject({
+        version: SUPPORTED_DSH_VERSION,
+        transport: 'legacy-apiproxy-v1',
+    });
+    expect(Object.keys(compatible.packages).sort()).toEqual([...DSH_PLUGIN_ABI_PACKAGES].sort());
+
+    expect(() => assertDshRuntimeCompatibility({
+        readVersion: packageName => (
+            packageName === '@deepseek-ai/dsh-llm' ? '0.1.2-alpha.1' : SUPPORTED_DSH_VERSION
+        ),
+    })).toThrow(/mixed DeepSeek Harness runtime/u);
+    expect(normalizeDshReadyUrl('http://127.0.0.1:43123')).toBe('http://127.0.0.1:43123');
+    expect(() => normalizeDshReadyUrl(
+        'http://127.0.0.1:43123/?token=unpublished-contract',
+    )).toThrow(/authenticated Remote transport/u);
 });
 
 test('@interface DSH provider bridge keeps secrets out of provider config', () => {
@@ -237,7 +264,7 @@ test('@interface DSH provider bridge rejects unsafe or unsupported selections', 
     }, 'secret')).toThrow(/Project ID/u);
 });
 
-function createFakeChild(port, exitDelayMs = 0) {
+function createFakeChild(port, exitDelayMs = 0, readySuffix = '') {
     const child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
@@ -253,7 +280,9 @@ function createFakeChild(port, exitDelayMs = 0) {
         }, exitDelayMs);
         return true;
     };
-    queueMicrotask(() => child.stdout.write(`dsh web: http://127.0.0.1:${port}\n`));
+    queueMicrotask(() => child.stdout.write(
+        `dsh web: http://127.0.0.1:${port}${readySuffix}\n`,
+    ));
     return child;
 }
 
@@ -263,10 +292,12 @@ function createHarness(options = {}) {
     let prepareCount = 0;
     let refreshCount = 0;
     const children = [];
+    const spawns = [];
     const supervisor = createDshSupervisor({
         electronApp: { getPath: () => 'C:\\fake-user-data' },
-        spawnProcess: () => {
-            const child = createFakeChild(nextPort, options.exitDelayMs);
+        spawnProcess: (command, args, spawnOptions) => {
+            spawns.push({ command, args, spawnOptions });
+            const child = createFakeChild(nextPort, options.exitDelayMs, options.readySuffix);
             nextPort += 1;
             children.push(child);
             return child;
@@ -293,6 +324,7 @@ function createHarness(options = {}) {
     return {
         supervisor,
         children,
+        spawns,
         setSignature(value) {
             signature = value;
         },
@@ -314,6 +346,7 @@ test('@interface DSH supervisor coalesces identical concurrent opens', async () 
     expect(firstResult).toMatchObject({ status: { state: 'ready', ready: true } });
     expect(secondResult).toMatchObject({ status: { state: 'ready', ready: true } });
     expect(harness.children).toHaveLength(1);
+    expect(harness.spawns[0].args).toEqual(expect.arrayContaining(['--no-open']));
     expect(harness.counts()).toEqual({
         prepareCount: 1,
         refreshCount: 0,
@@ -325,6 +358,29 @@ test('@interface DSH supervisor coalesces identical concurrent opens', async () 
         ready: false,
         hasCredential: false,
     });
+});
+
+test('@interface DSH supervisor fails closed without logging an alpha ready token', async () => {
+    const previousDiagnostics = process.env.CUIGENGJI_DSH_DIAGNOSTICS;
+    const originalConsoleError = console.error;
+    const logs = [];
+    process.env.CUIGENGJI_DSH_DIAGNOSTICS = '1';
+    console.error = (...args) => logs.push(args.join(' '));
+    try {
+        const harness = createHarness({ readySuffix: '/?token=one-use-token' });
+        await expect(harness.supervisor.openRuntime({
+            projectId: 'project-1',
+            chapterId: 'chapter-1',
+        })).rejects.toMatchObject({ code: 'AGENT_RUNTIME_START_FAILED' });
+        expect(harness.children[0].killedSignals).toContain('SIGTERM');
+        expect(logs.join('\n')).toContain('?[REDACTED]');
+        expect(logs.join('\n')).not.toContain('one-use-token');
+        await harness.supervisor.stop();
+    } finally {
+        console.error = originalConsoleError;
+        if (previousDiagnostics === undefined) delete process.env.CUIGENGJI_DSH_DIAGNOSTICS;
+        else process.env.CUIGENGJI_DSH_DIAGNOSTICS = previousDiagnostics;
+    }
 });
 
 test('@interface DSH supervisor serializes open and restart without overlapping children', async () => {

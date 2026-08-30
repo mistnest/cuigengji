@@ -74,19 +74,20 @@ DSH 自带的 session event log、重放、token meter 和 compaction 生命周�
 
 ## 6. 打包与升级约束
 
-- DSH 固定为 `@deepseek-ai/dsh@0.1.0-rc.7`，并锁定其直接插件依赖版本。
+- DSH 固定为已发布的 `@deepseek-ai/dsh@0.1.1-rc.2` 统一版本波次；所有直接插件和传递 peer 必须同版本，`npm run dsh:compat` 在架构检查、打包和启动前阻止混装。
+- 源码 tag `dsh-v0.1.2-alpha.1` 已改用带令牌的 Remote/cookie 协议，不兼容当前 API Proxy 网关；在完整迁移会话、RPC 和事件协议前，不得只修改依赖版本或绕过兼容性检查。
 - 生产代码保持 `asar: true`；`node_modules/**` 使用 `asarUnpack` 放在物理目录，避免 DSH 子进程和插件跨 `app.asar` 加载出错。
 - supervisor 的 `resolveModuleFile()` 确保 DSH bin 和自定义插件解析到同一份物理依赖实例，避免 `dsh-scope` 等单例身份不一致。
 - 打包环境的数据根目录使用平台用户数据目录下的 `cuigengji/data`，可用 `CUIGENGJI_DATA_ROOT` 显式覆盖；不能写入 `app.asar`。
-- 升级必须先在独立分支更新 lockfile，再依次通过 Wire、Gateway、接口测试和 packaged Electron E2E；失败时整体回退 DSH 版本和对应 lockfile。
+- 升级必须先在隔离目录审阅官方 tag 与已发布 npm 包，再整体更新版本波次和 lockfile，依次通过兼容门禁、Wire、Gateway、接口测试和 packaged Electron E2E；失败时整体回退 DSH 版本和对应 lockfile。当前迁移依据见 [15-dsh-0.1.1-rc.2-migration.md](./15-dsh-0.1.1-rc.2-migration.md)。
 
 ## 7. 当前验收状态
 
-- `npm test -- --reporter=line`：`93 passed`。
+- `npm test -- --reporter=line`：`95 passed`（含 rc.2 真实 runtime contract、混装/alpha fail-closed 与 ready token 脱敏契约）。
 - `npm.cmd run architecture:check`：架构门禁通过。
 - `npm.cmd run lint -- --quiet`：0 errors。
 - `npm.cmd run package:win`：打包成功。
-- 使用打包版 `催更姬.exe` 的原生 DSH E2E：`1 passed`，覆盖工具调用、推理/最终文本、取消、大纲提案、统一上下文文件、单窗口/单 Renderer 和无密钥泄漏。
+- 使用打包版 `催更姬.exe` 的原生 DSH E2E：`1 passed`；产物内 188 个 DSH 包均为 `0.1.1-rc.2`，覆盖工具调用、推理/最终文本、取消、大纲提案、统一上下文文件、单窗口/单 Renderer 和无密钥泄漏。
 - 仍待产品验收：至少一次 30 分钟真实写作会话，以及真实 API Key/网络中断场景。真实密钥未写入仓库、测试或日志。
 
 ## 8. 维护入口

@@ -36,3 +36,13 @@ The DSH bridge supports Google Vertex AI Express API keys through the native
 Project ID, and a Region (the verified default is `global`). Service-account
 JSON remains intentionally outside the DSH bridge until its credential lifecycle
 is implemented end to end.
+
+## DSH 版本契约
+
+当前只支持 npm 已发布的 `0.1.1-rc.2` 统一版本波次和旧版 API Proxy
+传输。`dsh-runtime-contract.js` 会在启动前检查自定义插件直接使用的 ABI 包，
+`npm run dsh:compat` 则检查 manifest、lockfile、传递 peer 和本机安装结果。
+
+`dsh-v0.1.2-alpha.1` 是尚未发布到 npm 的源码版本，并已切换到令牌、cookie、
+Remote RPC 与逐 session follow 协议。supervisor 会拒绝它输出的带 token URL；
+在网关、历史、prompt 和事件流一起迁移以前，不允许靠删掉该检查来做部分兼容。

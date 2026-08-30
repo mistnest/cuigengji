@@ -12,6 +12,7 @@
     "electron/intelligence/agent/dsh/dsh-plugin-bundle.js",
     "electron/intelligence/agent/dsh/dsh-provider-config.js",
     "electron/intelligence/agent/dsh/dsh-rpc-client.js",
+    "electron/intelligence/agent/dsh/dsh-runtime-contract.js",
     "electron/intelligence/agent/dsh/dsh-session-registry.js",
     "electron/intelligence/agent/dsh/dsh-supervisor.js",
     "electron/ipc/agent/agent.handlers.js",

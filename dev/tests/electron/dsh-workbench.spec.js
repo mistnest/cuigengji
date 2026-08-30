@@ -194,7 +194,7 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         const status = await main.evaluate(() => window.cuigengji.agent.status());
         expect(status).toMatchObject({
             kind: 'deepseek-harness',
-            version: '0.1.0-rc.7',
+            version: '0.1.1-rc.2',
             state: 'ready',
             ready: true,
             hasCredential: true,
