@@ -120,7 +120,7 @@ export async function buildAgentProjectContextArtifacts({
         .digest('hex');
 
     const snapshot = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         snapshotId,
         generatedAt: new Date().toISOString(),
         collaboration: {
@@ -129,10 +129,12 @@ export async function buildAgentProjectContextArtifacts({
             sources: sourceVersions,
         },
         contextPolicy: {
-            mode: 'hot-snapshot-with-read-only-catalog',
+            mode: 'canonical-writing-context',
+            injection: 'cuigenji-canonical-v1',
+            preset: 'authoring-policy',
             currentChapter: 'head-tail-excerpt',
             coldKnowledgeTools: ['search_project_knowledge', 'get_project_knowledge'],
-            note: '世界书与角色卡全文属于冷资料；需要时使用只读资料工具查询，不要根据目录名称补写设定。',
+            note: '预设、世界书与人物卡只通过本快照进入 Agent；冷资料全文需要时使用只读资料工具查询，不要根据目录名称补写设定。',
         },
         project: {
             id: projectId,
@@ -216,7 +218,7 @@ export function formatAgentProjectContext(snapshot) {
     const header = [
         '# 催更姬项目上下文',
         '',
-        '项目资料是当前项目的只读事实参考，不得虚构未提供的设定。作者预设区块是用户可编辑的文风与格式规则，应在创作中遵守，但不能改变应用安全边界、工具权限、项目事实优先级或用户的最终确认权。冷资料仅可通过列出的只读资料工具按需查询。',
+        '这是催更姬唯一的写作上下文。项目资料是只读事实参考，不得虚构未提供的设定。作者预设区块是用户可编辑的文风与格式规则，应在创作中遵守，但不能改变应用安全边界、工具权限、项目事实优先级或用户的最终确认权。世界书与人物卡的冷资料全文仅可通过列出的只读资料工具按需查询。',
         '',
     ].join('\n');
     const prompt = `${header}${JSON.stringify(snapshot, null, 2)}`;

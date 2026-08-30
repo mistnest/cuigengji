@@ -1,8 +1,8 @@
 /**
  * 催更姬 — Chat Endpoint
- * 支持双模式:
+ * 兼容层提供两类交互入口:
  *   POST /api/chat       — 助手模式 (CC-like)
- *   POST /api/chat/write — 续写模式 (酒馆风格)
+ *   POST /api/chat/write — 统一上下文续写模式
  */
 import express from 'express';
 import { applyAiSecret } from '../services/ai-secrets.js';
@@ -220,11 +220,11 @@ function buildPlanSystemPrompt(ctx) {
     return p.join('\n');
 }
 
-// POST /api/chat/write — 续写模式 (酒馆风格)
+// POST /api/chat/write — 统一上下文续写模式
 router.post('/write', async (req, res) => {
     const requestController = createRequestAbortController(req, res);
     try {
-        const { message, history, context, config, promptTemplates, promptOrder, presetName, importConfig } = req.body;
+        const { message, history, context, config, promptTemplates, promptOrder, presetName } = req.body;
         const aiConfig = applyAiSecret(config, presetName);
         if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
         if (!hasApiKey(aiConfig)) return res.status(400).json({ error: 'API key required' });
@@ -233,7 +233,7 @@ router.post('/write', async (req, res) => {
         const generated = await generateWritingStream({
             message,
             history,
-            context: importConfig ? { ...(context || {}), importConfig } : (context || {}),
+            context: context || {},
             config: { ...aiConfig, stream: true },
             promptTemplates,
             promptOrder,

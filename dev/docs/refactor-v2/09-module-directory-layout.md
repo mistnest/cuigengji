@@ -136,6 +136,7 @@ Obsidian
 - DSH 不读取项目 JSON 或 Obsidian Vault。
 - Obsidian 不依赖 Agent、模型或 DSH。
 - 更换任一适配器不得修改另一侧代码。
+- DSH supervisor 只管理生命周期；Agent 功能由 `electron/intelligence/agent/dsh/dsh-plugin-bundle.js` 组合，项目写作数据只能通过一个版本化上下文插件进入 Prompt。
 
 ## 7. 兼容区
 

@@ -29,8 +29,6 @@ function resetWorkspaceState() {
     state.promptOrder = [];
     state.enabledTemplates = {};
     state.selectedPromptTemplates = {};
-    state.specialPrompts = {};
-    state.formatStrings = {};
     state.writingReference = {
         worldbookMode: 'all',
         selectedWorldbookGroups: [],
@@ -122,26 +120,31 @@ function applyWorkspaceState(workspace = {}) {
     if (workspace.worldBook?.entries) state.worldBook = workspace.worldBook;
     if (Array.isArray(workspace.characters)) state.characters = workspace.characters;
     if (workspace.presets && typeof workspace.presets === 'object' && !Array.isArray(workspace.presets)) {
-        state.presets = workspace.presets;
+        state.presets = Object.fromEntries(Object.entries(workspace.presets)
+            .map(([name, preset]) => [name, canonicalizePresetForState(preset)]));
     }
     if (typeof workspace.presetName === 'string') state.presetName = workspace.presetName;
-    if (Array.isArray(workspace.promptTemplates)) state.promptTemplates = workspace.promptTemplates;
-    if (Array.isArray(workspace.promptOrder)) state.promptOrder = workspace.promptOrder;
+    if (Array.isArray(workspace.promptTemplates)) {
+        state.promptTemplates = canonicalPromptTemplates(workspace.promptTemplates);
+    }
+    if (Array.isArray(workspace.promptOrder)) {
+        const available = new Set(state.promptTemplates.map(template => template.identifier));
+        state.promptOrder = workspace.promptOrder.filter(item => {
+            const identifier = typeof item === 'string' ? item : item?.identifier;
+            return available.has(identifier);
+        });
+    }
     if (workspace.enabledTemplates && typeof workspace.enabledTemplates === 'object') {
-        state.enabledTemplates = workspace.enabledTemplates;
+        const available = new Set(state.promptTemplates.map(template => template.identifier));
+        state.enabledTemplates = Object.fromEntries(Object.entries(workspace.enabledTemplates)
+            .filter(([identifier]) => available.has(identifier)));
     } else if (Array.isArray(workspace.promptTemplates)) {
-        state.enabledTemplates = Object.fromEntries(workspace.promptTemplates
+        state.enabledTemplates = Object.fromEntries(state.promptTemplates
             .filter(template => template?.identifier)
             .map(template => [
                 template.identifier,
                 template.enabled !== false && template.disabled !== true,
             ]));
-    }
-    if (workspace.specialPrompts && typeof workspace.specialPrompts === 'object') {
-        state.specialPrompts = workspace.specialPrompts;
-    }
-    if (workspace.formatStrings && typeof workspace.formatStrings === 'object') {
-        state.formatStrings = workspace.formatStrings;
     }
     if (Array.isArray(workspace.regexBindings)) {
         state.regexBindings = workspace.regexBindings;
@@ -154,9 +157,16 @@ function applyWorkspaceState(workspace = {}) {
         };
     }
     if (workspace.aiConfig && typeof workspace.aiConfig === 'object') {
-        const legacyApiKey = workspace.aiConfig.apiKey;
-        const legacyVertexSecret = workspace.aiConfig.vertexServiceAccountJson;
-        Object.assign(state.aiConfig, workspace.aiConfig, {
+        const canonicalAiConfig = { ...workspace.aiConfig };
+        const legacyApiKey = canonicalAiConfig.apiKey;
+        const legacyVertexSecret = canonicalAiConfig.vertexServiceAccountJson;
+        delete canonicalAiConfig.apiKey;
+        delete canonicalAiConfig.vertexServiceAccountJson;
+        delete canonicalAiConfig.referenceMode;
+        delete canonicalAiConfig.compactReference;
+        delete canonicalAiConfig.referenceTools;
+        delete canonicalAiConfig.enableReferenceTools;
+        Object.assign(state.aiConfig, canonicalAiConfig, {
             apiKey: '',
             vertexServiceAccountJson: '',
         });
@@ -178,4 +188,40 @@ function applyWorkspaceState(workspace = {}) {
     updatePresetSelect();
     applyConfigToUI();
     window.CuigengjiWorkspacePersistence?.markBaseline?.();
+}
+
+function canonicalPromptTemplates(templates = []) {
+    const legacyMarkers = new Set([
+        'worldInfoBefore', 'worldInfoAfter', 'charDescription', 'charPersonality',
+        'scenario', 'personaDescription', 'dialogueExamples', 'chatHistory',
+        'cgj-import-worldSetting', 'cgj-import-characterState',
+        'cgj-import-plotHistory', 'cgj-import-recentPlot',
+    ]);
+    return (templates || []).filter(template => {
+        const identifier = String(template?.identifier || '');
+        return Boolean(template?.content?.trim())
+            && !template?.marker
+            && !template?.isMarker
+            && !legacyMarkers.has(identifier);
+    }).map(template => ({ ...template, isMarker: false, markerId: '' }));
+}
+
+function canonicalizePresetForState(preset = {}) {
+    if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return {};
+    const canonical = { ...preset };
+    for (const field of [
+        'referenceMode', 'compactReference', 'referenceTools', 'enableReferenceTools',
+        'specialPrompts', 'formatStrings', 'impersonation_prompt', 'new_chat_prompt',
+        'continue_nudge_prompt', 'wi_format', 'scenario_format', 'personality_format',
+    ]) delete canonical[field];
+    const templates = canonicalPromptTemplates(canonical.templates || canonical.prompts || []);
+    const available = new Set(templates.map(template => template.identifier));
+    const order = canonical.promptOrder || canonical.prompt_order || [];
+    return {
+        ...canonical,
+        templates,
+        promptOrder: Array.isArray(order)
+            ? order.filter(item => available.has(typeof item === 'string' ? item : item?.identifier))
+            : [],
+    };
 }

@@ -341,17 +341,16 @@ async function importPreset() {
                     || c.includes('"toolbindings"') || c.includes('"macronest"')
                     || c.includes('window.spresettempdata') || c.includes('window.sillytavern');
             };
-            const isCgjImportMarker = p => /^cgj-import-(worldSetting|characterState|plotHistory|recentPlot)$/.test(String(p.identifier || ''));
             state.promptTemplates = data.prompts
-                .filter(p => (p.content?.trim() || p.marker || isCgjImportMarker(p)) && !isConfigTemplate(p))
+                .filter(p => p.content?.trim() && !p.marker && !p.isMarker && !isConfigTemplate(p))
                 .map(p => ({
                     identifier: p.identifier || '',
                     name: p.name || p.identifier || '',
                     role: p.role || 'system',
                     content: p.content || '',
                     isSystemPrompt: !!p.system_prompt,
-                    isMarker: !!p.marker || isCgjImportMarker(p),
-                    markerId: p.markerId || (isCgjImportMarker(p) ? p.identifier : ''),
+                    isMarker: false,
+                    markerId: '',
                     enabled: p.enabled !== false && p.disabled !== true,
                     disabled: p.disabled === true || p.enabled === false,
                 }));
@@ -362,23 +361,12 @@ async function importPreset() {
         if (data.prompt_order) state.promptOrder = data.prompt_order;
         state.enabledTemplates = buildPresetEnabledTemplates(data, state.promptTemplates || []);
 
-        // === 6. Special prompts ===
-        if (!state.specialPrompts) state.specialPrompts = {};
-        if (data.impersonation_prompt) state.specialPrompts.impersonation = data.impersonation_prompt;
-        if (data.new_chat_prompt) state.specialPrompts.newChat = data.new_chat_prompt;
-        if (data.continue_nudge_prompt) state.specialPrompts.continueNudge = data.continue_nudge_prompt;
+        // 酒馆专用插槽/格式串不再进入运行态；导入仅保留普通作者预设模板。
 
-        // === 7. Format strings ===
-        if (!state.formatStrings) state.formatStrings = {};
-        if (data.wi_format) state.formatStrings.worldInfo = data.wi_format;
-        if (data.scenario_format) state.formatStrings.scenario = data.scenario_format;
-        if (data.personality_format) state.formatStrings.personality = data.personality_format;
-
-        // === 8. Other ===
+        // === 6. Other ===
         if (data.assistant_prefill) state.aiConfig.prefill = data.assistant_prefill;
-        applyPresetReferenceSettings(data);
 
-        // === 9. RegexBinding — extract from SPreset模板 content or top-level ===
+        // === 7. RegexBinding — extract from SPreset模板 content or top-level ===
         const extractRegexFrom = (src) => {
             if (!src?.regexes) return [];
             return src.regexes
@@ -427,10 +415,6 @@ async function importPreset() {
             presencePenalty: state.aiConfig.presencePenalty,
             stream: state.aiConfig.stream,
             prefill: state.aiConfig.prefill,
-            referenceMode: state.aiConfig.referenceMode,
-            compactReference: state.aiConfig.compactReference,
-            referenceTools: state.aiConfig.referenceTools,
-            enableReferenceTools: state.aiConfig.enableReferenceTools,
             savedAt: Date.now(),
             templates: state.promptTemplates || [],
             promptOrder: state.promptOrder || [],

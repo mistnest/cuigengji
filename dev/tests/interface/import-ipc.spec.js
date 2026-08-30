@@ -24,7 +24,21 @@ test('@interface Electron import dialogs keep source paths inside the trusted pr
             entries: { 0: { uid: 0, key: ['城'], content: '山城' } },
         }), 'utf8'),
         fs.writeFile(characterPath, JSON.stringify({ data: { name: '沈墨', description: '书生' } }), 'utf8'),
-        fs.writeFile(presetPath, JSON.stringify({ name: '测试预设', temperature: 0.7 }), 'utf8'),
+        fs.writeFile(presetPath, JSON.stringify({
+            name: '测试预设',
+            temperature: 0.7,
+            referenceMode: 'sillytavern',
+            impersonation_prompt: '旧角色扮演插槽',
+            wi_format: '旧世界书格式串',
+            prompts: [
+                { identifier: 'writing-rule', content: '用短句推进冲突。' },
+                { identifier: 'worldInfoBefore', marker: true, content: '旧注入 marker' },
+            ],
+            prompt_order: [
+                { identifier: 'worldInfoBefore', enabled: true },
+                { identifier: 'writing-rule', enabled: true },
+            ],
+        }), 'utf8'),
         fs.writeFile(documentPath, '第一章 起点\n晨光落在窗前。\n\n第二章 出发\n马车驶出城门。', 'utf8'),
     ]);
 
@@ -61,7 +75,20 @@ test('@interface Electron import dialogs keep source paths inside the trusted pr
         const preset = await handlers.get(IMPORT_IPC_CHANNELS.selectPreset)(event, {
             projectId: '导入契约',
         });
-        expect(preset).toMatchObject({ ok: true, data: { data: { temperature: 0.7 } } });
+        expect(preset).toMatchObject({
+            ok: true,
+            data: {
+                data: {
+                    temperature: 0.7,
+                    contextPolicy: 'cuigenji-canonical-v1',
+                    prompts: [{ identifier: 'writing-rule', content: '用短句推进冲突。' }],
+                    prompt_order: [{ identifier: 'writing-rule', enabled: true }],
+                },
+            },
+        });
+        expect(preset.data.data).not.toHaveProperty('referenceMode');
+        expect(preset.data.data).not.toHaveProperty('impersonation_prompt');
+        expect(preset.data.data).not.toHaveProperty('wi_format');
 
         const document = await handlers.get(IMPORT_IPC_CHANNELS.selectDocument)(event, {
             projectId: '导入契约', autoSplit: true,

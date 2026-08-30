@@ -64,4 +64,4 @@ npm run architecture:check
 npm test -- --reporter=line
 ```
 
-新增的协作契约测试覆盖：原子版本冲突、事件顺序与回放、断线 stream 重置、IPC 到 Renderer 的 changed 通知、上下文脱敏/一致性、大纲图校验、Google AI Studio provider 桥接、区域端点映射和 loopback RPC 校验。当前全量回归为 89/89。
+新增的协作契约测试覆盖：原子版本冲突、事件顺序与回放、断线 stream 重置、IPC 到 Renderer 的 changed 通知、上下文脱敏/一致性、大纲图校验、Google AI Studio provider 桥接、区域端点映射和 loopback RPC 校验。加上统一注入、插件目录、导入清理和取消回执测试后，当前全量回归为 93/93。

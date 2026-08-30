@@ -4,6 +4,10 @@ import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
+import {
+    buildDshAgentPluginEntries,
+    LOCAL_DSH_PLUGIN_FILES,
+} from '../../../electron/intelligence/agent/dsh/dsh-plugin-bundle.js';
 import CuigenjiNovelCompaction from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-novel-compaction.mjs';
 import {
     apply as applyOutlineProposal,
@@ -12,6 +16,51 @@ import {
 } from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-outline-proposal.mjs';
 import { apply as applyKnowledgeTools } from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-project-knowledge.mjs';
 import { applyToolPolicy } from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-tool-policy.mjs';
+import {
+    buildWritingContextPrompt,
+} from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-writing-context.mjs';
+
+test('@interface DSH Agent has one canonical writing-context plugin boundary', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cuigenji-dsh-context-plugin-'));
+    const contextFile = path.join(root, 'context.json');
+    const previous = process.env.CUIGENGJI_DSH_CONTEXT_FILE;
+    await fs.writeFile(contextFile, JSON.stringify({
+        schemaVersion: 3,
+        contextPolicy: {
+            mode: 'canonical-writing-context',
+            injection: 'cuigenji-canonical-v1',
+        },
+        promptText: '# 催更姬项目上下文\n作者预设、世界书和人物卡已归一化。',
+    }), 'utf8');
+    process.env.CUIGENGJI_DSH_CONTEXT_FILE = contextFile;
+    try {
+        const prompt = buildWritingContextPrompt({ webSearchMode: 'official-deepseek' });
+        expect(prompt).toContain('# 催更姬小说创作 Agent');
+        expect(prompt).toContain('# 催更姬项目上下文');
+        expect(prompt).toContain('作者预设、世界书和人物卡已归一化');
+        expect(prompt).toContain('可使用 web_search');
+        expect(prompt.match(/# 催更姬项目上下文/gu)).toHaveLength(1);
+
+        const entries = buildDshAgentPluginEntries({
+            skillRoot: 'C:\\skills',
+            webSearchEnabled: true,
+            allowedToolNames: ['skill', 'web_search'],
+        });
+        expect(entries[0]).toMatchObject({
+            id: 'cuigenji-writing-context',
+            name: './cuigenji-writing-context.mjs',
+            config: { webSearchMode: 'official-deepseek' },
+        });
+        expect(entries.some(entry => entry.id === 'persona')).toBe(false);
+        expect(entries.some(entry => entry.id === 'tool-web')).toBe(true);
+        expect(LOCAL_DSH_PLUGIN_FILES).toContain('cuigenji-writing-context.mjs');
+        expect(LOCAL_DSH_PLUGIN_FILES).not.toContain('cuigenji-project-context.mjs');
+    } finally {
+        if (previous === undefined) delete process.env.CUIGENGJI_DSH_CONTEXT_FILE;
+        else process.env.CUIGENGJI_DSH_CONTEXT_FILE = previous;
+        await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
 
 test('@interface DSH writing preset exposes only guarded read-only knowledge tools', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cuigenji-dsh-tools-'));

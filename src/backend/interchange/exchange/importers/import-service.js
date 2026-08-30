@@ -98,13 +98,60 @@ export async function importPresetData(projectId, name, data, options = {}) {
         ...data,
         provider,
     }, safeName);
-    const sanitized = sanitizePresetSecrets(data);
+    const sanitized = normalizePresetForCanonicalContext(sanitizePresetSecrets(data));
     await savePreset(projectId, safeName, sanitized, {
         expectedRevision: options.expectedRevision,
         expectedContentHash: options.expectedContentHash,
         actor: options.actor,
     });
     return { success: true, name: `${safeName}.json`, data: sanitized };
+}
+
+function normalizePresetForCanonicalContext(preset = {}) {
+    const sourceTemplates = preset.prompts || preset.templates || [];
+    const sourceOrder = preset.prompt_order || preset.promptOrder || [];
+    const canonical = { ...preset };
+    for (const field of [
+        'referenceMode', 'compactReference', 'referenceTools', 'enableReferenceTools',
+        'specialPrompts', 'formatStrings', 'impersonation_prompt', 'new_chat_prompt',
+        'continue_nudge_prompt', 'wi_format', 'scenario_format', 'personality_format',
+        'templates', 'promptOrder',
+    ]) delete canonical[field];
+    const prompts = canonicalPresetTemplates(sourceTemplates);
+    const available = new Set(prompts.map(item => String(item.identifier || item.id || item.name || '')));
+    const promptOrder = Array.isArray(sourceOrder)
+        ? sourceOrder.filter(item => available.has(String(
+            typeof item === 'string' ? item : item?.identifier || item?.id || item?.name || '',
+        )))
+        : [];
+    return {
+        ...canonical,
+        contextPolicy: 'cuigenji-canonical-v1',
+        prompts,
+        prompt_order: promptOrder,
+    };
+}
+
+function canonicalPresetTemplates(templates = []) {
+    const structuralIds = new Set([
+        'worldInfoBefore', 'worldInfoAfter', 'charDescription', 'charPersonality',
+        'scenario', 'personaDescription', 'dialogueExamples', 'chatHistory',
+        'cgj-import-worldSetting', 'cgj-import-characterState',
+        'cgj-import-plotHistory', 'cgj-import-recentPlot',
+    ]);
+    return (Array.isArray(templates) ? templates : []).filter(template => {
+        if (!template || typeof template !== 'object' || Array.isArray(template)) return false;
+        const identifier = String(template.identifier || template.id || template.name || '');
+        return Boolean(String(template.content || template.prompt || '').trim())
+            && !template.marker
+            && !template.isMarker
+            && !structuralIds.has(identifier);
+    }).map(template => ({
+        ...template,
+        isMarker: false,
+        marker: false,
+        markerId: '',
+    }));
 }
 
 function providerFromImportedPreset(source) {

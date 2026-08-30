@@ -35,6 +35,7 @@ Renderer: AgentWorkbenchFeature
 | 职责 | 文件 |
 | --- | --- |
 | DSH 进程、版本、workspace、打包解析 | `electron/intelligence/agent/dsh/dsh-supervisor.js` |
+| Agent 插件目录与组合 | `electron/intelligence/agent/dsh/dsh-plugin-bundle.js` |
 | DSH RPC、事件流和结果映射 | `electron/intelligence/agent/dsh/dsh-rpc-client.js`、`dsh-event-stream.js`、`dsh-event-mapper.js` |
 | 催更姬 preset 与上下文/知识/权限插件 | `electron/intelligence/agent/dsh/plugins/*.mjs` |
 | Agent Gateway 与会话注册 | `electron/intelligence/agent/agent-gateway.js`、`session-registry.js` |
@@ -45,17 +46,19 @@ Renderer: AgentWorkbenchFeature
 
 ## 3. 上下文语义
 
-接管保留“当前项目 + 当前章节 + 项目资料”的语义，但不复用旧聊天 Prompt 拼装器。上下文分为热、冷两层：
+接管保留“当前项目 + 当前章节 + 项目资料”的语义，但不复用旧聊天 Prompt 拼装器。所有写作入口只接受 `cuigenji-canonical-v1`，不存在可切换的酒馆注入链。上下文分为热、冷两层：
 
 1. `buildAgentProjectContextArtifacts({ projectId, chapterId })` 从后端公开模块读取权威数据。
 2. 热上下文写入项目隔离的 `project-context.json`，包含项目元数据、当前章节摘录、邻近章节索引、大纲摘要及相关资料索引。
 3. 世界书与角色卡写入独立的 `project-knowledge.json`，不在每轮 system prompt 中整体注入。
-4. DSH preset 组装 system prompt 时读取热快照；需要冷资料时只使用 `search_project_knowledge` 和 `get_project_knowledge`。
+4. `cuigenji-writing-context` 是 DSH 唯一 Prompt 注入插件：作者预设提供写作规范，项目热快照提供事实索引；需要冷资料时只使用 `search_project_knowledge` 和 `get_project_knowledge`。
 5. 章节或工作区保存后，通过 `agent.refreshContext` 原子刷新两份快照，不重启 DSH，也不清空会话。
 
 上下文文件不得包含 API Key。密钥只由可信 Main 进程通过受控环境变量传给 DSH 子进程，Renderer 和日志均不接触明文密钥。
 
 DSH 自带的 session event log、重放、token meter 和 compaction 生命周期继续保留；催更姬只替换小说语义的 compaction 摘要模板。
+
+外部世界书、人物卡和预设仍可导入，但酒馆 marker、宏、前后置插槽及全文注入开关只被当作过期兼容字段丢弃，不能改变运行时顺序或重复注入数据。
 
 ## 4. 生命周期与错误边界
 
@@ -79,11 +82,11 @@ DSH 自带的 session event log、重放、token meter 和 compaction 生命周�
 
 ## 7. 当前验收状态
 
-- `npm test -- --reporter=list`：`56 passed`。
+- `npm test -- --reporter=line`：`93 passed`。
 - `npm.cmd run architecture:check`：架构门禁通过。
 - `npm.cmd run lint -- --quiet`：0 errors。
 - `npm.cmd run package:win`：打包成功。
-- 使用打包版 `催更姬.exe` 的首页与原生 DSH E2E：`2 passed`，覆盖八模块 facade、工具调用、推理/最终文本、取消、重启、上下文文件、单窗口/单 Renderer 和无密钥泄漏。
+- 使用打包版 `催更姬.exe` 的原生 DSH E2E：`1 passed`，覆盖工具调用、推理/最终文本、取消、大纲提案、统一上下文文件、单窗口/单 Renderer 和无密钥泄漏。
 - 仍待产品验收：至少一次 30 分钟真实写作会话，以及真实 API Key/网络中断场景。真实密钥未写入仓库、测试或日志。
 
 ## 8. 维护入口

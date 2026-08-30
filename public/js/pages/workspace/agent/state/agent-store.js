@@ -5,6 +5,7 @@
         const listeners = new Set();
         const histories = new Map();
         const proposalStates = new Map();
+        const cancellationReceipts = new Map();
         let state = initialState();
 
         function initialState() {
@@ -53,6 +54,7 @@
             if (projectChanged || runtimeChanged) {
                 histories.clear();
                 proposalStates.clear();
+                cancellationReceipts.clear();
             }
             state = {
                 ...state,
@@ -241,9 +243,26 @@
             proposalStates.set(proposalId, { applyState, message });
             reproject();
         }
+        function markCancelled(sessionId = state.activeSessionId) {
+            if (!sessionId) return;
+            const history = ensureHistory(sessionId);
+            const events = [...history.events.values()];
+            const afterSeq = Math.max(-1, ...events.map(event => Number(event.seq) || 0));
+            const activeTurn = events
+                .filter(event => event.type === 'turn.started')
+                .sort((left, right) => right.seq - left.seq)[0]?.data?.turn;
+            cancellationReceipts.set(sessionId, {
+                key: `cancelled-${state.runtime.generation}-${afterSeq}`,
+                generation: state.runtime.generation,
+                afterSeq,
+                turn: activeTurn,
+            });
+            if (sessionId === state.activeSessionId) reproject();
+        }
         function clear() {
             histories.clear();
             proposalStates.clear();
+            cancellationReceipts.clear();
             state = initialState();
             notify();
         }
@@ -362,6 +381,27 @@
                     }
                 }
             }
+            const cancellation = cancellationReceipts.get(state.activeSessionId);
+            if (cancellation?.generation === state.runtime.generation) {
+                const hasMappedAbort = events.some(event => (
+                    event.type === 'turn.failed'
+                    && event.data?.reason === 'aborted'
+                    && (cancellation.turn === undefined || event.data?.turn === cancellation.turn)
+                ));
+                if (!hasMappedAbort) {
+                    items.push({
+                        key: cancellation.key,
+                        kind: 'error',
+                        text: '已停止生成。',
+                        reason: 'aborted',
+                        order: Number.MAX_SAFE_INTEGER - 1,
+                    });
+                }
+                const newerTurnStarted = events.some(event => (
+                    event.type === 'turn.started' && event.seq > cancellation.afterSeq
+                ));
+                if (!newerTurnStarted) running = false;
+            }
             const pendingItems = state.pendingPrompts.map((item, index) => ({
                 key: item.id, kind: 'user', text: item.text, status: item.status,
                 error: item.message, pendingId: item.id,
@@ -390,6 +430,7 @@
             applyHistory, applyEvent, addOptimistic, acceptOptimistic, rejectOptimistic,
             restorePending, setComposer, setContextState, clear, debugSnapshot,
             setProposalApplyState,
+            markCancelled,
             setProjectChange,
         };
     }

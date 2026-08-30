@@ -98,7 +98,7 @@ function openCharacterEditor(existingChar, charIndex) {
                     <h4 style="margin:0;">摘要</h4>
                     <button type="button" class="ai-btn-secondary" id="char-summarize-btn">AI 提取</button>
                 </div>
-                <textarea class="wb-edit-textarea character-edit-short" id="character-edit-summary" placeholder="智能摘要模式下使用的简略描述。留空则该角色不会注入摘要。" style="width:100%;">${escHtml(isEdit ? (data.summary || '') : '')}</textarea>
+                <textarea class="wb-edit-textarea character-edit-short" id="character-edit-summary" placeholder="统一写作上下文使用的简略描述；可以自行填写或用 AI 提取。" style="width:100%;">${escHtml(isEdit ? (data.summary || '') : '')}</textarea>
             </div>
             <div class="character-edit-grid">
                 <div class="char-field">

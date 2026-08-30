@@ -691,7 +691,7 @@ button:focus-visible {
     display: none;
 }
 
-.wb-st-config {
+.wb-external-config {
     margin: 10px 0;
     padding: 0;
     border: 1px solid var(--border-color);
@@ -699,7 +699,7 @@ button:focus-visible {
     background: var(--bg-secondary);
 }
 
-.wb-st-config summary {
+.wb-external-config summary {
     cursor: pointer;
     padding: 8px 10px;
     color: var(--text-secondary);
@@ -708,15 +708,15 @@ button:focus-visible {
     user-select: none;
 }
 
-.wb-st-config .st-config-hint,
-.wb-st-config p {
+.wb-external-config .external-config-hint,
+.wb-external-config p {
     margin: 0 0 10px;
     color: var(--text-muted);
     font-size: 12px;
     line-height: 1.5;
 }
 
-.st-config-body {
+.external-config-body {
     padding: 0 10px 10px;
 }
 

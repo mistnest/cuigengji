@@ -17,8 +17,6 @@ function serializeWorkspace() {
         promptTemplates: state.promptTemplates || [],
         promptOrder: state.promptOrder || [],
         enabledTemplates: state.enabledTemplates || {},
-        specialPrompts: state.specialPrompts || {},
-        formatStrings: state.formatStrings || {},
         regexBindings: state.regexBindings || [],
         writingReference: state.writingReference || {},
         aiConfig: { ...safeAiConfig(), maxContext: 0 },

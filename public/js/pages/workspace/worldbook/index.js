@@ -337,21 +337,26 @@ function showWorldBookDetail(uid, entry) {
                 <input type="text" class="wb-edit-input" id="wb-edit-keysecondary" value="${escHtml((entry.keysecondary || []).join(', '))}" placeholder="次要触发词...">
             </div>
             <div class="char-field">
-                <h4>注入内容</h4>
-                <textarea class="wb-edit-textarea" id="wb-edit-content" placeholder="当关键词触发时，这段内容会被注入到 AI 的上下文中...">${escHtml(entry.content || '')}</textarea>
+                <h4>设定正文</h4>
+                <textarea class="wb-edit-textarea" id="wb-edit-content" placeholder="记录这条世界设定的完整内容；催更姬会在统一上下文中提供摘要，并允许 Agent 按需查询正文。">${escHtml(entry.content || '')}</textarea>
             </div>
             <div class="char-field">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                     <h4 style="margin:0;">摘要</h4>
                     <button type="button" class="ai-btn-secondary" id="wb-summarize-btn">AI 提取</button>
                 </div>
-                <textarea class="wb-edit-textarea character-edit-short" id="wb-edit-summary" placeholder="智能摘要模式下使用的简略描述。留空则该条目不会注入。" style="width:100%;">${escHtml(entry.summary || '')}</textarea>
+                <textarea class="wb-edit-textarea character-edit-short" id="wb-edit-summary" placeholder="统一写作上下文使用的简略描述；可以自行填写或用 AI 提取。" style="width:100%;">${escHtml(entry.summary || '')}</textarea>
             </div>
             <div class="wb-edit-row">
                 <div class="char-field" style="flex:1;">
                     <h4>排序</h4>
                     <input type="number" class="wb-edit-input" id="wb-edit-order" value="${entry.order ?? 100}" min="1" max="999">
                 </div>
+            </div>
+            <details class="wb-external-config">
+                <summary>外部世界书兼容字段</summary>
+                <p style="margin:6px 0 10px;color:var(--text-muted);font-size:12px;">这些字段只用于保留导入数据，不改变催更姬统一上下文的顺序或注入方式。日常分类请使用上方“文件夹”。</p>
+            <div class="wb-edit-row">
                 <div class="char-field" style="flex:1;">
                     <h4>扫描深度</h4>
                     <input type="number" class="wb-edit-input" id="wb-edit-depth" value="${entry.depth ?? 4}" min="0" max="100">
@@ -359,7 +364,7 @@ function showWorldBookDetail(uid, entry) {
             </div>
             <div class="wb-edit-row">
                 <div class="char-field" style="flex:1;">
-                    <h4>注入位置</h4>
+                    <h4>原格式位置</h4>
                     <select class="wb-edit-input" id="wb-edit-position">
                         ${posLabels.map((l, i) => `<option value="${i}" ${(entry.position ?? 0) === i ? 'selected' : ''}>${l}</option>`).join('')}
                     </select>
@@ -369,13 +374,10 @@ function showWorldBookDetail(uid, entry) {
                     <input type="number" class="wb-edit-input" id="wb-edit-probability" value="${entry.probability ?? 100}" min="0" max="100">
                 </div>
             </div>
-            <details class="wb-st-config">
-                <summary>ST 专用配置（兼容导入字段）</summary>
-                <p style="margin:6px 0 10px;color:var(--text-muted);font-size:12px;">这些字段主要用于保留酒馆世界书原始配置；日常分组请使用上方“文件夹”。</p>
             <div class="wb-edit-row">
                 <div class="char-field" style="flex:1;">
-                    <h4>📁 分组名</h4>
-                    <input type="text" class="wb-edit-input" id="wb-edit-source-group" value="${escHtml(entry.sourceGroup || entry.group || '')}" placeholder="酒馆世界书 group，可选" list="wb-group-list">
+                    <h4>原格式分组名</h4>
+                    <input type="text" class="wb-edit-input" id="wb-edit-source-group" value="${escHtml(entry.sourceGroup || entry.group || '')}" placeholder="外部格式 group，可选" list="wb-group-list">
                     <datalist id="wb-group-list">
                         <option value="角色">
                         <option value="地点">
@@ -388,16 +390,18 @@ function showWorldBookDetail(uid, entry) {
                     </datalist>
                 </div>
                 <div class="char-field" style="flex:1;">
-                    <h4>⚖️ 分组权重</h4>
+                    <h4>原格式分组权重</h4>
                     <input type="number" class="wb-edit-input" id="wb-edit-groupWeight" value="${entry.groupWeight ?? 100}" min="1" max="999">
                 </div>
             </div>
-            </details>
             <div class="wb-edit-checks">
                 <label class="wb-check-label"><input type="checkbox" id="wb-edit-constant" ${entry.constant ? 'checked' : ''}> 始终激活（忽略关键词匹配）</label>
-                <label class="wb-check-label"><input type="checkbox" id="wb-edit-disable" ${entry.disable ? 'checked' : ''}> 禁用此条目</label>
                 <label class="wb-check-label"><input type="checkbox" id="wb-edit-caseSensitive" ${entry.caseSensitive ? 'checked' : ''}> 大小写敏感</label>
                 <label class="wb-check-label"><input type="checkbox" id="wb-edit-matchWholeWords" ${entry.matchWholeWords ? 'checked' : ''}> 全词匹配</label>
+            </div>
+            </details>
+            <div class="wb-edit-checks">
+                <label class="wb-check-label"><input type="checkbox" id="wb-edit-disable" ${entry.disable ? 'checked' : ''}> 禁用此条目</label>
             </div>
         </div>
         <div class="plot-modal-footer">
@@ -433,7 +437,7 @@ function showWorldBookDetail(uid, entry) {
     overlay.querySelector('#wb-summarize-btn')?.addEventListener('click', async () => {
         const btn = overlay.querySelector('#wb-summarize-btn');
         const content = overlay.querySelector('#wb-edit-content').value.trim();
-        if (!content) { alert('请先填写注入内容。'); return; }
+        if (!content) { alert('请先填写设定正文。'); return; }
         btn.disabled = true; btn.textContent = '生成中...';
         try {
             const summary = await generateSummary(content, 'worldbook');

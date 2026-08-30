@@ -7,18 +7,18 @@ import {
 import { getModelContext } from './context-manager.js';
 import { loadProjectContext } from './project-data.js';
 import { getWorldBookEntrySummary } from '../../../backend/domains/knowledge/index.js';
-import { MEMORY_IMPORT_LABELS, buildPlatformWritePrompt, formatMemoryItem } from './memory-prompts.js';
+import { buildPlatformWritePrompt, formatMemoryItem } from './memory-prompts.js';
 import { getReferenceToolDefinitions } from './ai-tools/reference/index.js';
 import { shouldEnableReferenceTools } from './reference-tool-policy.js';
 import { ASSIST_TOOLS } from './chat-tools.js';
 
-// ── Native + ST track modules (renamed to avoid shadowing local functions) ──
+// The automation compatibility adapter now uses the same canonical context
+// policy as the DSH Agent.  Imported cards/books may still carry fields from
+// other applications, but those fields are normalized into these native
+// layers instead of selecting a second prompt-injection engine.
 import { buildWorldSettingLayer as _nativeWorldLayer } from './native/world-layer.js';
 import { buildCharacterStateLayer as _nativeCharLayer } from './native/character-layer.js';
 import { classifyWorldEntries as _classifyWb, classifyCharacters as _classifyCh } from './native/world-layer.js';
-import { buildStWorldInfo as _stWorldInfo, buildStCharField as _stCharField } from './st/formatters.js';
-
-const COMPACT_REFERENCE_MODES = new Set(['tool', 'tools', 'compact', 'reference_tools', 'novel_tools']);
 
 const DEFAULT_LAYER_PCT = {
     platform: 0.06,
@@ -40,8 +40,8 @@ export async function buildWritingContext({
     const modelContext = getModelContext(config.model);
     const totalInputBudget = Math.max(4096, modelContext.total - (config.maxTokens || modelContext.output || 4096) - 2048);
     const layerBudgets = buildLayerBudgets(totalInputBudget, config.memoryBudget);
-    const compactReference = shouldUseCompactReference(config, context);
-    const referenceTools = buildReferenceToolContext(config, context, compactReference);
+    const compactReference = shouldUseCompactReference();
+    const referenceTools = buildReferenceToolContext(config, compactReference);
 
     const reference = normalizeWritingReference(context.writingReference);
     const project = await loadProjectContext(context.novelId || 'default', context);
@@ -75,10 +75,7 @@ export async function buildWritingContext({
         plotMemory: project.plotMemory,
         projectSources: project.sources,
         compactReference,
-        referenceMode: config.referenceMode || context.referenceMode || '',
-        referenceTools: config.referenceTools ?? context.referenceTools,
-        enableReferenceTools: config.enableReferenceTools ?? context.enableReferenceTools,
-        nativeReference: compactReference || ['tool', 'tools', 'compact', 'reference_tools', 'novel_tools', 'native'].includes(String(config.referenceMode || context.referenceMode || '').toLowerCase()),
+        referenceMode: 'canonical',
         currentSceneText,
     };
 
@@ -109,54 +106,23 @@ export async function buildWritingContext({
     const recentFullChapters = resolveRecentChapters(project.chapters, chapterScope.recent, chapterScope.current);
     const recentPlot = buildRecentPlotLayer(fullContext, layerBudgets.recentPlot, recentFullChapters);
 
-    // ── ST-compatible imports ──
-    // Follow real SillyTavern: keyword-match world entries, split by position,
-    // inject raw content (no compactReference truncation, no prefix).
-    const stWorldInfo = _stWorldInfo(scopedWorldBook, retrievalText);
+    // One fixed context envelope.  World books and character cards remain
+    // first-class project data, but there are no preset-controlled insertion
+    // points and no alternate full-text/ST track.
     const imports = {
-        worldInfoBefore: {
-            label: MEMORY_IMPORT_LABELS.worldInfoBefore,
-            content: stWorldInfo.before,
-        },
-        worldInfoAfter: {
-            label: MEMORY_IMPORT_LABELS.worldInfoAfter,
-            content: stWorldInfo.after,
-        },
-        // Character fields — full content, ST format
-        charDescription: {
-            label: MEMORY_IMPORT_LABELS.charDescription,
-            content: _stCharField(scopedCharacters, 'description'),
-        },
-        charPersonality: {
-            label: MEMORY_IMPORT_LABELS.charPersonality,
-            content: _stCharField(scopedCharacters, 'personality'),
-        },
-        scenario: {
-            label: MEMORY_IMPORT_LABELS.scenario,
-            content: _stCharField(scopedCharacters, 'scenario'),
-        },
-        dialogueExamples: {
-            label: MEMORY_IMPORT_LABELS.dialogueExamples,
-            content: _stCharField(scopedCharacters, 'dialogue'),
-        },
         worldSetting: {
-            label: MEMORY_IMPORT_LABELS.worldSetting,
             content: worldSetting.content,
         },
         characterState: {
-            label: MEMORY_IMPORT_LABELS.characterState,
             content: characterState.content,
         },
         plotHistory: {
-            label: MEMORY_IMPORT_LABELS.plotHistory,
             content: plotHistory.content,
         },
         recentPlot: {
-            label: MEMORY_IMPORT_LABELS.recentPlot,
             content: recentPlot.content,
         },
         authorPreference: {
-            label: MEMORY_IMPORT_LABELS.authorPreference,
             content: authorContext,
         },
     };
@@ -227,23 +193,12 @@ export async function buildWritingContext({
     };
 }
 
-export function shouldUseCompactReference(config = {}, context = {}) {
-    if (config.compactReference === false || context.compactReference === false) return false;
-    if (config.referenceTools === true || config.enableReferenceTools === true) return true;
-    if (config.compactReference === true || context.compactReference === true) return true;
-    const mode = String(
-        config.referenceMode ||
-        config.contextMode ||
-        context.referenceMode ||
-        context.contextMode ||
-        context.writingReference?.mode ||
-        ''
-    ).toLowerCase();
-    return COMPACT_REFERENCE_MODES.has(mode);
+export function shouldUseCompactReference() {
+    return true;
 }
 
-function buildReferenceToolContext(config = {}, context = {}, compactReference = false) {
-    const enabled = shouldEnableReferenceTools(config, context, compactReference);
+function buildReferenceToolContext(config = {}, compactReference = true) {
+    const enabled = shouldEnableReferenceTools(config);
     const refDefs = enabled ? getReferenceToolDefinitions() : [];
     // Always include import_data so users can create characters/worldbooks from write mode
     const definitions = [...refDefs, ...ASSIST_TOOLS];

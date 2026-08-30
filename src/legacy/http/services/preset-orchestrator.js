@@ -1,37 +1,33 @@
 import {
-    NATIVE_IMPORT_MARKERS,
-    getNativeImportKey,
-    isNativeImportBeforePreset,
-    isNativeMarkerIdentifier,
-    isNativeReferenceMode,
-    sortNativeImportMessages,
-} from './context-chains/native-writing-chain.js';
-import {
-    ST_IMPORT_MARKERS,
-    getStImportKey,
-    isStMarkerIdentifier,
-    isStSpecialMarker,
-} from './context-chains/st-compatible-chain.js';
+    CANONICAL_IMPORT_ORDER,
+    isCanonicalImportBeforePreset,
+    sortCanonicalImportMessages,
+} from './context-chains/canonical-writing-chain.js';
 import { stripReasoningBlocks } from './writing-output-guard.js';
 
 const VALID_TEMPLATE_ROLES = new Set(['system', 'developer', 'user', 'assistant']);
 
 const IMPORT_META = {
-    worldInfoBefore: { name: 'world_info_before_import', label: '世界观小抄（前置版）' },
-    worldInfoAfter: { name: 'world_info_after_import', label: '世界观小抄（后置版）' },
-    charDescription: { name: 'char_description_import', label: '崽崽们的档案' },
-    charPersonality: { name: 'char_personality_import', label: '崽崽们的脾气' },
-    scenario: { name: 'scenario_import', label: '崽崽们现在在哪儿' },
-    dialogueExamples: { name: 'dialogue_examples_import', label: '崽崽们怎么说话' },
     worldSetting: { name: 'world_setting_import', label: '这个世界的规则书' },
     characterState: { name: 'character_state_import', label: '崽崽们的近况' },
     plotHistory: { name: 'plot_history_import', label: '很久很久以前（的前情提要）' },
     recentPlot: { name: 'recent_plot_import', label: '刚才发生了什么' },
-    authorPreference: { name: 'author_preference_import', label: '作者大人的小癖好' },
 };
 
-const VOLATILE_IMPORTS = new Set(['recentPlot']);
-// plotHistory（远期章节摘要）只在写新章后变化，同章内多次调用稳定 → 放入 stable 区利用缓存
+const LEGACY_CONTEXT_MARKERS = new Set([
+    'worldInfoBefore',
+    'worldInfoAfter',
+    'charDescription',
+    'charPersonality',
+    'scenario',
+    'personaDescription',
+    'dialogueExamples',
+    'chatHistory',
+    'cgj-import-worldSetting',
+    'cgj-import-characterState',
+    'cgj-import-plotHistory',
+    'cgj-import-recentPlot',
+]);
 
 export function normalizePresetTemplates(templates = [], promptOrder = []) {
     const normalized = (templates || [])
@@ -39,8 +35,8 @@ export function normalizePresetTemplates(templates = [], promptOrder = []) {
         .map((template, index) => {
             const identifier = String(template.identifier || template.name || `template_${index}`);
             const markerId = template.markerId || template.marker || (template.isMarker ? identifier : '');
-            const isNativeImportMarker = isNativeMarkerIdentifier(identifier);
-            const isStImportMarker = isStMarkerIdentifier(identifier);
+            const isStructuralMarker = Boolean(template.isMarker || template.marker || markerId)
+                || LEGACY_CONTEXT_MARKERS.has(identifier);
             return {
                 ...template,
                 identifier,
@@ -48,12 +44,15 @@ export function normalizePresetTemplates(templates = [], promptOrder = []) {
                 role: normalizeTemplateRole(template.role),
                 content: template.content || '',
                 isSystemPrompt: Boolean(template.isSystemPrompt || template.system_prompt),
-                isMarker: Boolean(template.isMarker || template.marker || isNativeImportMarker || isStImportMarker),
-                markerId: markerId || (isNativeImportMarker || isStImportMarker ? identifier : ''),
+                isMarker: isStructuralMarker,
+                markerId: markerId || (isStructuralMarker ? identifier : ''),
                 _sourceIndex: index,
             };
         })
-        .filter(template => template.content.trim() || template.isMarker);
+        // Marker records are import-format metadata, not writing policy.  They
+        // are intentionally discarded even if an imported preset attaches
+        // content to them; project data has one fixed injection envelope.
+        .filter(template => !template.isMarker && template.content.trim());
 
     const order = extractPromptOrder(promptOrder);
     if (!order.length) return normalized;
@@ -89,35 +88,12 @@ export function buildWritePromptFromPreset({
     const developerParts = [];
     const presetReferenceParts = [];
     const messages = [];
-    const stableImportMessages = [];
-    const volatileImportMessages = [];
-    const compactReference = Boolean(context.compactReference);
-    const nativeReference = isNativeReferenceMode(context);
-
-    // Build macro context for ST template compatibility
-    const macroCtx = {
-        firstCharName: (context.characters || [])[0]?.data?.name || (context.characters || [])[0]?.name || '',
-        charDescriptions: (context.characters || []).map(c => c.data?.description || c.description || '').filter(Boolean),
-        charPersonalities: (context.characters || []).map(c => c.data?.personality || c.personality || '').filter(Boolean),
-        charScenarios: (context.characters || []).map(c => c.data?.scenario || c.scenario || '').filter(Boolean),
-        dialogueExamples: (context.characters || []).flatMap(c => [c.data?.first_mes, c.data?.mes_example].filter(Boolean)),
-        authorPersona: authorContext || '',
-        modelName: context.currentModel || '',
-        charSystemPrompts: (context.characters || []).map(c => c.data?.system_prompt || '').filter(Boolean),
-        charPostHistory: (context.characters || []).map(c => c.data?.post_history_instructions || '').filter(Boolean),
-        charFirstMessages: (context.characters || []).map(c => c.data?.first_mes || '').filter(Boolean),
-        charVersions: (context.characters || []).map(c => c.data?.char_version || c.data?.spec_version || '').filter(Boolean),
-        charCreatorNotes: (context.characters || []).map(c => c.data?.creator_notes || '').filter(Boolean),
-        mesExamplesRaw: (context.characters || []).map(c => c.data?.mes_example || '').filter(Boolean),
-        _firstCall: true,
-    };
+    const importMessages = [];
     const importedSlots = [];
-    const importConfig = context.importConfig || null;
     const queueImport = (importKey) => {
-        const message = buildImportMessage(importKey, imports[importKey], importConfig);
+        const message = buildImportMessage(importKey, imports[importKey]);
         if (!message) return;
-        const target = VOLATILE_IMPORTS.has(importKey) ? volatileImportMessages : stableImportMessages;
-        target.push(message);
+        importMessages.push(message);
         importedSlots.push(importKey);
     };
 
@@ -135,39 +111,11 @@ export function buildWritePromptFromPreset({
                 systemParts,
                 developerParts,
                 presetReferenceParts,
-                macroCtx,
             });
-        }
-
-        if (template.isMarker) {
-            const markerId = template.markerId || template.identifier;
-            if (!nativeReference && isStSpecialMarker(markerId)) continue;
-            const importKey = nativeReference ? getNativeImportKey(markerId) : getStImportKey(markerId);
-            if (nativeReference && ST_IMPORT_MARKERS.has(importKey)) continue;
-            if (!nativeReference && NATIVE_IMPORT_MARKERS.has(importKey)) continue;
-            // Only inject each import once, even if multiple markers point to it
-            if (importKey && imports[importKey]?.content && !importedSlots.includes(importKey)) {
-                queueImport(importKey);
-            }
         }
     }
 
-    // Native fallback: official layers are injected even if the preset omitted native markers.
-    // ST compatibility deliberately does not fallback to native layers.
-    for (const importKey of nativeReference ? ['worldSetting', 'characterState', 'plotHistory', 'recentPlot'] : []) {
-        if (importedSlots.includes(importKey)) continue;
-        // If granular ST markers already injected parts of this layer, skip the full version.
-        // Native/reference-tool mode keeps the official 催更姬 layers separate from ST slots.
-        const coveredBy = nativeReference ? {} : compactReference
-            ? {
-                worldSetting: ['worldInfoBefore', 'worldInfoAfter'],
-                characterState: ['charDescription', 'charPersonality'],
-            }
-            : {
-                worldSetting: ['worldInfoBefore', 'worldInfoAfter'],
-                characterState: ['charDescription', 'charPersonality', 'dialogueExamples'],
-            };
-        if ((coveredBy[importKey] || []).some(k => importedSlots.includes(k) && hasUsefulImportContent(imports[k]?.content))) continue;
+    for (const importKey of CANONICAL_IMPORT_ORDER) {
         if (!imports[importKey]?.content) continue;
         queueImport(importKey);
     }
@@ -177,16 +125,10 @@ export function buildWritePromptFromPreset({
         content: section('预设参考', presetReferenceParts.join('\n\n')),
     } : null;
 
-    if (nativeReference) {
-        const nativeImportMessages = sortNativeImportMessages([...stableImportMessages, ...volatileImportMessages], IMPORT_META);
-        messages.push(...nativeImportMessages.filter(message => isNativeImportBeforePreset(message, IMPORT_META)));
-        if (presetReferenceMessage) messages.push(presetReferenceMessage);
-        messages.push(...nativeImportMessages.filter(message => !isNativeImportBeforePreset(message, IMPORT_META)));
-    } else {
-        messages.push(...stableImportMessages);
-        if (presetReferenceMessage) messages.push(presetReferenceMessage);
-        messages.push(...volatileImportMessages);
-    }
+    const canonicalImports = sortCanonicalImportMessages(importMessages, IMPORT_META);
+    messages.push(...canonicalImports.filter(message => isCanonicalImportBeforePreset(message, IMPORT_META)));
+    if (presetReferenceMessage) messages.push(presetReferenceMessage);
+    messages.push(...canonicalImports.filter(message => !isCanonicalImportBeforePreset(message, IMPORT_META)));
 
     messages.push(...buildConversationMessages(history, currentMessage, context));
 
@@ -200,6 +142,7 @@ export function buildWritePromptFromPreset({
         messages,
         debug: {
             templateCount: orderedTemplates.length,
+            injectionPolicy: 'cuigenji-canonical-v1',
             importedSlots,
             orderedTemplateIds: orderedTemplates.map(template => template.identifier),
             systemSections: systemParts.length,
@@ -220,8 +163,8 @@ export function buildFallbackWriteSystemPrompt() {
     return p.join('\n');
 }
 
-function addTemplateContent({ template, systemParts, developerParts, presetReferenceParts, macroCtx }) {
-    const content = replaceStMacros(template.content, macroCtx);
+function addTemplateContent({ template, systemParts, developerParts, presetReferenceParts }) {
+    const content = normalizePresetPolicyText(template.content);
     if (!content.trim()) return;
 
     // ST compatibility: only system_prompt templates go to system prompt (no headers)
@@ -244,27 +187,16 @@ function addTemplateContent({ template, systemParts, developerParts, presetRefer
     presetReferenceParts.push(section(template.name, content));
 }
 
-function buildImportMessage(importKey, payload, importConfig = null) {
+function buildImportMessage(importKey, payload) {
     const content = payload.content || '';
     if (!content.trim()) return null;
-    // 预设可自定义标签名和注入提示词，未配置则用默认
-    const cfg = importConfig || {};
-    const label = (cfg.labels && cfg.labels[importKey]) || IMPORT_META[importKey]?.label || `${importKey} import`;
-    const name = IMPORT_META[importKey]?.name || `${safeName(importKey)}_import`;
-    const header = pickImportHeader(importKey, cfg);
-    const body = [header, content].filter(Boolean).join('\n');
+    const label = IMPORT_META[importKey]?.label || `${importKey} import`;
+    const name = IMPORT_META[importKey]?.name || `${importKey}_import`;
     return {
         role: 'system',
-        content: section(`📋 ${label}`, body),
+        content: section(`📋 ${label}`, content),
         name,
     };
-}
-
-function pickImportHeader(importKey, cfg = {}) {
-    // 预设明确指定了该 key 的 header → 直接用（包括空字符串，表示不需要额外 header）
-    if (cfg.headers && importKey in cfg.headers) return cfg.headers[importKey];
-    if (cfg.header !== undefined) return cfg.header;
-    return '';
 }
 
 function buildConversationMessages(history = [], currentMsg = '', context = {}) {
@@ -381,15 +313,6 @@ function isAssistantErrorContent(content = '') {
         || text.includes('HTTP 5');
 }
 
-function hasUsefulImportContent(content = '') {
-    const text = String(content || '').trim();
-    if (!text) return false;
-    const compact = text.replace(/\s+/g, ' ');
-    if (/^(?:Name|姓名)[:：]\s*[^：:\s]+$/i.test(compact)) return false;
-    if (/^\[character:[^\]]+\]\s*[^：:]+[:：]\s*$/.test(compact)) return false;
-    return compact.length >= 24;
-}
-
 function normalizeTemplateRole(role) {
     const normalized = String(role || 'system').toLowerCase();
     return VALID_TEMPLATE_ROLES.has(normalized) ? normalized : 'system';
@@ -426,50 +349,19 @@ function extractPromptOrder(promptOrder) {
     return result;
 }
 
-function replaceStMacros(content, ctx = {}) {
-    const firstChar = ctx.firstCharName || 'AI作家';
-    const charDescs = (ctx.charDescriptions || []).join('\n');
-    const charPersonalities = (ctx.charPersonalities || []).join('\n');
-    const charScenarios = (ctx.charScenarios || []).join('\n');
-    const dialogueExamples = (ctx.dialogueExamples || []).join('\n\n');
-    const authorPersona = ctx.authorPersona || '';
-    const modelName = ctx.modelName || '';
-
-    let result = String(content || '')
-        .replace(/\{\{char\}\}/gi, firstChar)
-        .replace(/\{\{user\}\}/gi, '作者')
-        .replace(/\{\{description\}\}/gi, charDescs)
-        .replace(/\{\{personality\}\}/gi, charPersonalities)
-        .replace(/\{\{scenario\}\}/gi, charScenarios)
-        .replace(/\{\{mesExamples\}\}/gi, dialogueExamples)
-        .replace(/\{\{persona\}\}/gi, authorPersona)
-        .replace(/\{\{model\}\}/gi, modelName)
-        .replace(/\{\{original\}\}/gi, ctx._firstCall ? content : '')
-        .replace(/\{\{charPrompt\}\}/gi, (ctx.charSystemPrompts || []).join('\n'))
-        .replace(/\{\{charInstruction\}\}/gi, (ctx.charPostHistory || []).join('\n'))
-        .replace(/\{\{charFirstMessage\}\}/gi, (ctx.charFirstMessages || []).join('\n'))
-        .replace(/\{\{greeting\}\}/gi, (ctx.charFirstMessages || []).join('\n'))
-        .replace(/\{\{charVersion\}\}/gi, (ctx.charVersions || []).join('\n'))
-        .replace(/\{\{charCreatorNotes\}\}/gi, (ctx.charCreatorNotes || []).join('\n'))
-        .replace(/\{\{creatorNotes\}\}/gi, (ctx.charCreatorNotes || []).join('\n'))
-        .replace(/\{\{mesExamplesRaw\}\}/gi, (ctx.mesExamplesRaw || []).join('\n'));
-
-    // Mark that {{original}} has been consumed for this template
-    if (ctx._firstCall && content.includes('{{original}}')) {
-        ctx._firstCall = false;
-    }
-
-    return result;
+function normalizePresetPolicyText(content = '') {
+    const simpleLabels = {
+        user: '作者',
+        char: '当前角色',
+        model: '当前模型',
+    };
+    return String(content || '').replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/gu, (_match, key) => (
+        simpleLabels[key]
+        || (key === 'original' ? '' : `[${key} 由催更姬统一上下文提供]`)
+    ));
 }
 
 function section(title, content) {
     if (!content) return '';
     return `## ${title}\n${content}`;
-}
-
-function safeName(value) {
-    return String(value || 'setting_import')
-        .replace(/[^a-zA-Z0-9_-]+/g, '_')
-        .replace(/^_+|_+$/g, '')
-        || 'setting_import';
 }

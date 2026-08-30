@@ -1,10 +1,10 @@
 /**
- * 催更姬 — Native 路线 · 世界书注入层
+ * 催更姬 — 统一上下文 · 世界书摘要层
  *
  * 负责将用户启用的世界书条目展平为简略摘要注入 prompt，
  * 同时列出禁用条目供模型参考（但不使用）。
  *
- * 本模块仅在 Native/智能摘要路线下使用，ST 路线走 st/formatters.js。
+ * 这是当前唯一运行路线；外部格式先归一化，再进入本层。
  */
 
 import { getWorldBookEntrySummary } from '../../../../backend/domains/knowledge/index.js';
@@ -84,7 +84,7 @@ export function classifyCharacters(allCharacters = [], reference = {}) {
 // ==================== Prompt layer builder ====================
 
 /**
- * 构建 Native 路线的世界书注入内容。
+ * 构建统一上下文中的世界书摘要段。
  * 调用方（context-orchestrator）负责提供 fullContext，
  * 其中 worldBookEntries 和 disabledWorldBookEntries 已预先分类。
  */

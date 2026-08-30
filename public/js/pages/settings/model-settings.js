@@ -488,18 +488,6 @@ function formatTokenLimit(value) {
     return String(value);
 }
 
-function getReferenceInjectionMode() {
-    const config = state.aiConfig || {};
-    const mode = String(config.referenceMode || '').toLowerCase();
-    if (mode === 'tool' || mode === 'tools' || mode === 'compact' || mode === 'reference_tools' || mode === 'novel_tools') {
-        return 'tool';
-    }
-    if (config.compactReference === true || config.referenceTools === true || config.enableReferenceTools === true) {
-        return 'tool';
-    }
-    return 'sillytavern';
-}
-
 function updateContextInfo(ctx, memory, contextDebug) {
     // Update context circle
     const usagePct = contextDebug?.compression?.usagePct;

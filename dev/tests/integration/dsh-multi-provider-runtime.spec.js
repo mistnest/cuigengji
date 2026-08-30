@@ -89,7 +89,7 @@ test('@integration DSH Agent uses the selected OpenAI-compatible provider', asyn
             'search_project_knowledge',
             'skill',
         ]);
-        expect(JSON.stringify(request.body.messages)).toContain('当前 Agent 使用非 DeepSeek 模型');
+        expect(JSON.stringify(request.body.messages)).toContain('当前模型不提供官方 web_search');
     } finally {
         await mux?.close();
         await runtime?.stop();

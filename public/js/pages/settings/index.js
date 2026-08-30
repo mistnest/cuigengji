@@ -82,10 +82,6 @@ function loadLastSuccessfulAiConfig() {
             maxContext: saved.maxContext ?? state.aiConfig.maxContext,
             apiKey: '',
         });
-        if (saved.referenceMode !== undefined) state.aiConfig.referenceMode = saved.referenceMode;
-        if (saved.compactReference !== undefined) state.aiConfig.compactReference = saved.compactReference;
-        if (saved.referenceTools !== undefined) state.aiConfig.referenceTools = saved.referenceTools;
-        if (saved.enableReferenceTools !== undefined) state.aiConfig.enableReferenceTools = saved.enableReferenceTools;
     } catch {}
 }
 
@@ -103,10 +99,6 @@ function rememberLastSuccessfulAiConfig() {
         topK: c.topK,
         memoryBudget: c.memoryBudget,
         maxContext: c.maxContext,
-        referenceMode: c.referenceMode,
-        compactReference: c.compactReference,
-        referenceTools: c.referenceTools,
-        enableReferenceTools: c.enableReferenceTools,
         presetName: state.presetName || '__default__',
         connectedAt: Date.now(),
     };
@@ -238,7 +230,6 @@ function applyConfigToUI() {
     if (!pct) pct = 5;
     $('#ai-max-tokens').value = pct;
     $('#ai-top-p').value = c.topP;
-    updateReferenceInjectionModeUI();
     updateRangeLabels();
     // 恢复提供商标识字段
     if (c.vertexAuthMode && $('#ai-vertex-auth-mode')) $('#ai-vertex-auth-mode').value = c.vertexAuthMode;

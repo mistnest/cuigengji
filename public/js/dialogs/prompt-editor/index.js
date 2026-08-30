@@ -111,44 +111,21 @@ function openPromptEditor(preselectedId) {
 }
 
 function normalizeWorldBookEditorLayout(overlay) {
-    const st = overlay.querySelector('.wb-st-config');
-    if (!st || st.dataset.normalized === 'true') return;
-    st.dataset.normalized = 'true';
-    let body = st.querySelector('.st-config-body');
+    const details = overlay.querySelector('.wb-external-config');
+    if (!details || details.dataset.normalized === 'true') return;
+    details.dataset.normalized = 'true';
+    let body = details.querySelector('.external-config-body');
     if (!body) {
         body = document.createElement('div');
-        body.className = 'st-config-body';
-        while (st.children.length > 1) body.appendChild(st.children[1]);
-        st.appendChild(body);
+        body.className = 'external-config-body';
+        while (details.children.length > 1) body.appendChild(details.children[1]);
+        details.appendChild(body);
     }
 
-    const moveBefore = body.firstElementChild || null;
-    [
-        '#wb-edit-key',
-        '#wb-edit-keysecondary',
-        '#wb-edit-order',
-        '#wb-edit-position',
-    ].forEach(selector => {
-        const node = overlay.querySelector(selector)?.closest('.char-field, .wb-edit-row');
-        if (node && node.parentElement !== body) body.insertBefore(node, moveBefore);
-    });
-
-    const checks = overlay.querySelector('.wb-edit-checks');
-    if (checks) {
-        const disableLabel = overlay.querySelector('#wb-edit-disable')?.closest('label');
-        if (disableLabel) {
-            const nativeChecks = document.createElement('div');
-            nativeChecks.className = 'wb-edit-checks wb-native-checks';
-            nativeChecks.appendChild(disableLabel);
-            st.before(nativeChecks);
-        }
-        if (checks.children.length) body.appendChild(checks);
-        else checks.remove();
-    }
 }
 
 function normalizeCharacterEditorLayout(_overlay) {
-    // 角色卡所有字段按原始顺序排列，不再收进 ST 折叠区
+    // 角色卡所有字段按当前产品顺序排列，不收进外部格式兼容区。
 }
 
 function closePromptEditor() {
@@ -236,12 +213,10 @@ function loadPromptToForm(tmpl) {
     const roleSelect = document.getElementById('prompt-editor-role');
     const contentTextarea = document.getElementById('prompt-editor-content');
     const isSystem = document.getElementById('prompt-editor-is-system');
-    const isMarker = document.getElementById('prompt-editor-is-marker');
     if (nameInput) nameInput.value = tmpl.name || '';
     if (roleSelect) roleSelect.value = tmpl.role || 'user';
     if (contentTextarea) contentTextarea.value = tmpl.content || '';
     if (isSystem) isSystem.checked = !!tmpl.isSystemPrompt;
-    if (isMarker) isMarker.checked = !!tmpl.isMarker;
     document.getElementById('prompt-editor-note').textContent = '标识符: ' + (tmpl.identifier || '');
 }
 
@@ -253,7 +228,6 @@ function savePromptFromForm() {
     const roleSelect = document.getElementById('prompt-editor-role');
     const contentTextarea = document.getElementById('prompt-editor-content');
     const isSystem = document.getElementById('prompt-editor-is-system');
-    const isMarker = document.getElementById('prompt-editor-is-marker');
     if (!nameInput) return;
     const name = nameInput.value.trim();
     if (!name) { setStatus('请输入模板名称', 'warn'); nameInput.focus(); return; }
@@ -261,7 +235,8 @@ function savePromptFromForm() {
     state.promptTemplates[idx].role = roleSelect?.value || 'user';
     state.promptTemplates[idx].content = contentTextarea?.value || '';
     state.promptTemplates[idx].isSystemPrompt = isSystem?.checked || false;
-    state.promptTemplates[idx].isMarker = isMarker?.checked || false;
+    state.promptTemplates[idx].isMarker = false;
+    state.promptTemplates[idx].markerId = '';
     if (!state.enabledTemplates[_promptEditorCurrentId]) {
         state.enabledTemplates[_promptEditorCurrentId] = true;
     }

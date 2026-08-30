@@ -18,9 +18,11 @@
 | Phase 3 | 官方 DeepSeek 条件式 `web_search`、轻量回执和安全 HTTPS 来源链接已接入 |
 | Phase 4 | `safe_web_fetch` 已通过 URL、DNS、IP 固定、重定向、响应上限和凭证隔离测试 |
 | Phase 5 | 大纲提案卡片、revision 校验、删除确认和领域层原子 patch 已接通 |
-| Phase 6 | lint、架构门禁、preload、89 项全量测试、真实窗口设置与 Agent 用户旅程、真实 DeepSeek 对话、真实公网 Safe Web Fetch、Windows `dist` 目录包及 packaged E2E 均已通过；真实长会话和官方 Web Search 仍需人工验收 |
+| Phase 6 | lint、架构门禁、preload、93 项全量测试、真实窗口设置与 Agent 用户旅程、真实 DeepSeek 对话、真实公网 Safe Web Fetch、Windows `dist` 目录包及 packaged E2E 均已通过；真实长会话和官方 Web Search 仍需人工验收 |
 
 实现没有新增第二套 Agent UI、跨 session 长期记忆或 Agent 写权限。提案仍在现有侧栏中展示，只有用户点击应用后才通过 Project Outline 领域命令修改项目。
+
+2026-08-30 补充：Agent 能力已由 `dsh-plugin-bundle.js` 统一组合，`cuigenji-writing-context` 是唯一 Prompt 注入插件。外部世界书、人物卡与预设继续兼容导入，但酒馆 marker、宏插槽和注入顺序不进入运行态。生成—审阅—改写 subagent 仍属于后续研究，不在 v0.1 生产工具面中；见 [质量循环研究](./refactor-v2/14-iterative-writing-quality-research.md)。
 
 ---
 

@@ -41,6 +41,8 @@
 - [09-module-directory-layout.md](./09-module-directory-layout.md)：已经落地的前端、接口和后端物理目录及依赖规则。
 - [10-native-dsh-agent-sidebar-plan.md](./10-native-dsh-agent-sidebar-plan.md)：保留 DSH 后台能力、移除完整 Web UI 嵌入并重做原生侧栏的分阶段实施计划。
 - [11-repository-runtime-development-layout.md](./11-repository-runtime-development-layout.md)：运行层、开发层、本地资料和外部构建目录的最终划分。
+- [13-collaboration-and-typescript-checkpoint.md](./13-collaboration-and-typescript-checkpoint.md)：协作 revision/CAS 内核与 TypeScript 增量迁移 checkpoint。
+- [14-iterative-writing-quality-research.md](./14-iterative-writing-quality-research.md)：基于预设的生成—审阅—改写循环、DSH subagent 插件边界与朱雀观测实验。
 - [native-dsh-sidebar/README.md](./native-dsh-sidebar/README.md)：Phase 0–6 的逐阶段详细任务、接口、测试、验收与回退文档。
 
 ## 当前停止点

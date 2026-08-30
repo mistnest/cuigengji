@@ -1,8 +1,8 @@
 /**
- * 催更姬 — Native 路线 · 角色状态层
+ * 催更姬 — 统一上下文 · 角色状态层
  *
  * 根据文本出场推断和用户引用设置，注入角色状态摘要。
- * 本模块仅在 Native/智能摘要路线下使用。
+ * 这是当前唯一运行路线。
  */
 
 import { characterPromptDescription, trimToTokenBudget, layerDebug, safeReferenceName } from './utils.js';
@@ -10,7 +10,7 @@ import { characterPromptDescription, trimToTokenBudget, layerDebug, safeReferenc
 // ==================== Prompt layer builder ====================
 
 /**
- * 构建 Native 路线的角色状态注入内容。
+ * 构建统一上下文的角色状态摘要。
  * 调用方负责提供已通过 applyCharacterReference 筛选过的角色列表。
  */
 export function buildCharacterStateLayer(ctx = {}, budget = 0) {

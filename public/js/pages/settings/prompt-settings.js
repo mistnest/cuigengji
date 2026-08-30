@@ -12,7 +12,8 @@ function ensureBuiltinPreset() {
     const data = window.__CUIGENGJI_BUILTIN_PRESET__;
     state.importedPreset = data;
 
-    // 映射 prompt 模板（与 importPreset 逻辑一致）
+    // 预设只保留有实际内容的写作规则。外部格式的 marker 是结构元数据，
+    // 不进入催更姬唯一的上下文编排。
     const isConfigTemplate = (p) => {
         const n = (p.name || '').toLowerCase();
         const c = (p.content || '').toLowerCase();
@@ -21,19 +22,17 @@ function ensureBuiltinPreset() {
             || c.includes('"toolbindings"') || c.includes('"macronest"')
             || c.includes('window.spresettempdata') || c.includes('window.sillytavern');
     };
-    const isCgjImportMarker = p => /^cgj-import-(worldSetting|characterState|plotHistory|recentPlot)$/.test(String(p.identifier || ''));
-
     if (Array.isArray(data.prompts)) {
         state.promptTemplates = data.prompts
-            .filter(p => (p.content?.trim() || p.marker || isCgjImportMarker(p)) && !isConfigTemplate(p))
+            .filter(p => p.content?.trim() && !p.marker && !p.isMarker && !isConfigTemplate(p))
             .map(p => ({
                 identifier: p.identifier || '',
                 name: p.name || p.identifier || '',
                 role: p.role || 'system',
                 content: p.content || '',
                 isSystemPrompt: !!p.isSystemPrompt,
-                isMarker: !!p.isMarker,
-                markerId: p.markerId || '',
+                isMarker: false,
+                markerId: '',
                 enabled: p.enabled !== false && p.disabled !== true,
             }));
     }
@@ -138,7 +137,6 @@ function renderPromptTemplates() {
             <label class="prompt-toggle-label">
                 <input type="checkbox" class="prompt-toggle-check" data-id="${escHtml(t.identifier)}" ${enabled ? 'checked' : ''}>
                 <span class="prompt-toggle-name">${escHtml(t.name)}</span>
-                ${t.isMarker ? '<span class="prompt-toggle-badge marker">m</span>' : ''}
             </label>
             ${t.content ? `<div class="prompt-toggle-preview">${escHtml(t.content.substring(0, 80))}${t.content.length > 80 ? '…' : ''}</div>` : '<div class="prompt-toggle-preview" style="color:var(--text-muted);font-style:italic">占位标记</div>'}
             <button class="prompt-delete-btn" data-id="${escHtml(t.identifier)}" title="删除模板">×</button>
@@ -195,9 +193,8 @@ function showPresetPrompts(filename, templates) {
                 <span class="preset-prompt-name">${escHtml(t.name)}</span>
                 <span class="preset-prompt-badge">${escHtml(t.role)}</span>
                 ${t.isSystemPrompt ? '<span class="preset-prompt-badge sys">system</span>' : ''}
-                ${t.isMarker ? '<span class="preset-prompt-badge marker">marker</span>' : ''}
             </div>
-            ${t.content ? `<div class="preset-prompt-content">${escHtml(t.content.substring(0, 350))}${t.content.length > 350 ? '…' : ''}</div>` : '<div class="preset-prompt-content" style="color:var(--text-muted);font-style:italic">(占位标记，运行时自动替换)</div>'}
+            <div class="preset-prompt-content">${escHtml(t.content.substring(0, 350))}${t.content.length > 350 ? '…' : ''}</div>
         </div>
     `).join('');
 
@@ -211,7 +208,7 @@ function showPresetPrompts(filename, templates) {
         </div>
         <div class="plot-modal-body" style="display:block;max-height:55vh;overflow-y:auto;padding:16px;">
             <p style="margin-bottom:12px;color:var(--text-secondary);font-size:13px;">
-                这些 Prompt 模板来自 SillyTavern 预设，定义了 AI 的写作行为。
+                这些预设规则定义 AI 的写作文风、格式与验收要求；项目资料使用统一上下文提供。
                 在 <strong>AI 设置</strong> 中可以查看和修改。
             </p>
             ${items}
@@ -227,67 +224,6 @@ function showPresetPrompts(filename, templates) {
     overlay.querySelector('.preset-info-close').addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     requestAnimationFrame(() => overlay.classList.add('active'));
-}
-
-// ==================== Outline ====================
-
-function setReferenceInjectionMode(mode, options = {}) {
-    const selectedMode = mode === 'tool' ? 'tool' : 'sillytavern';
-    if (selectedMode === 'tool') {
-        state.aiConfig.referenceMode = 'tool';
-        state.aiConfig.compactReference = true;
-        state.aiConfig.referenceTools = true;
-        state.aiConfig.enableReferenceTools = true;
-    } else {
-        state.aiConfig.referenceMode = 'sillytavern';
-        state.aiConfig.compactReference = false;
-        state.aiConfig.referenceTools = false;
-        state.aiConfig.enableReferenceTools = false;
-    }
-    updateReferenceInjectionModeUI();
-    if (options.save !== false) {
-        saveConfig();
-        setStatus(
-            selectedMode === 'tool'
-                ? '已切换为智能摘要：世界书/角色卡将优先摘要注入，按需调用工具'
-                : '已切换为完整注入：世界书/角色卡将按完整内容注入',
-            'success',
-        );
-    }
-}
-
-function applyPresetReferenceSettings(preset = {}) {
-    const hasReferenceMode = [
-        'referenceMode',
-        'compactReference',
-        'referenceTools',
-        'enableReferenceTools',
-    ].some(key => preset[key] !== undefined);
-
-    if (!hasReferenceMode) {
-        setReferenceInjectionMode('sillytavern', { save: false });
-        return;
-    }
-
-    if (preset.referenceMode !== undefined) state.aiConfig.referenceMode = preset.referenceMode;
-    if (preset.compactReference !== undefined) state.aiConfig.compactReference = preset.compactReference;
-    if (preset.referenceTools !== undefined) state.aiConfig.referenceTools = preset.referenceTools;
-    if (preset.enableReferenceTools !== undefined) state.aiConfig.enableReferenceTools = preset.enableReferenceTools;
-    updateReferenceInjectionModeUI();
-}
-
-function updateReferenceInjectionModeUI() {
-    const mode = getReferenceInjectionMode();
-    document.querySelectorAll('input[name="reference-injection-mode"]').forEach(input => {
-        input.checked = input.value === mode;
-        input.closest('.reference-mode-option')?.classList.toggle('active', input.checked);
-    });
-    const summary = $('#reference-mode-summary');
-    if (summary) {
-        summary.textContent = mode === 'tool'
-            ? '智能摘要：摘要 + 工具查询'
-            : '完整注入：全文注入';
-    }
 }
 
 function saveCurrentAsPreset() {
@@ -352,10 +288,6 @@ function doSavePreset(name) {
         presencePenalty: state.aiConfig.presencePenalty,
         stream: state.aiConfig.stream,
         prefill: state.aiConfig.prefill,
-        referenceMode: state.aiConfig.referenceMode,
-        compactReference: state.aiConfig.compactReference,
-        referenceTools: state.aiConfig.referenceTools,
-        enableReferenceTools: state.aiConfig.enableReferenceTools,
         savedAt: Date.now(),
         templates: state.promptTemplates || [],
         promptOrder: state.promptOrder || [],

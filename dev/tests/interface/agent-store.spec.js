@@ -167,3 +167,25 @@ test('@interface Agent store restores rejected text without keeping duplicate pe
     expect(store.getState().composer.text).toBe('恢复这段文字');
     expect(store.getState().pendingPrompts).toHaveLength(0);
 });
+
+test('@interface Agent store acknowledges cancel even when the upstream terminal event is delayed', () => {
+    const store = readyStore();
+    store.applyHistory('session-1', [
+        event(1, 'turn.started', { turn: 1 }),
+        event(2, 'message.user', {
+            messageId: 'cancel-me', text: '慢速取消', source: 'user',
+        }),
+    ]);
+    expect(store.getState().running).toBe(true);
+
+    store.markCancelled('session-1');
+    expect(store.getState().running).toBe(false);
+    expect(store.getState().items).toContainEqual(expect.objectContaining({
+        kind: 'error', reason: 'aborted', text: '已停止生成。',
+    }));
+
+    store.applyEvent(event(3, 'turn.failed', {
+        turn: 1, reason: 'aborted', message: '已停止生成。',
+    }));
+    expect(store.getState().items.filter(item => item.kind === 'error')).toHaveLength(1);
+});

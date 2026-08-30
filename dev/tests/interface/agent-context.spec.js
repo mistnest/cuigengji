@@ -43,9 +43,17 @@ test('@interface Agent context injects the active preset and bounded references'
                     role: 'user',
                     content: '每段保持短句。',
                 },
+                {
+                    identifier: 'worldInfoBefore',
+                    role: 'system',
+                    isMarker: true,
+                    content: '旧 marker 不得控制项目资料位置。',
+                },
             ],
-            promptOrder: ['format', 'voice', 'disabled'],
-            enabledTemplates: { format: true, voice: true, disabled: false },
+            promptOrder: ['worldInfoBefore', 'format', 'voice', 'disabled'],
+            enabledTemplates: {
+                worldInfoBefore: true, format: true, voice: true, disabled: false,
+            },
             specialPrompts: { continueNudge: '继续推进冲突。' },
             formatStrings: { chapter: '章节正文' },
             aiConfig: { provider: 'openai', model: 'gpt-test', apiKey: 'should-not-leak' },
@@ -83,10 +91,19 @@ test('@interface Agent context injects the active preset and bounded references'
         expect(context.writingPreset).toMatchObject({
             name: '网文风格',
             promptOrder: ['format', 'voice', 'disabled'],
+            injectionPolicy: 'cuigenji-canonical-v1',
         });
-        expect(context.writingPreset.promptText).toContain('林冬');
+        expect(context.schemaVersion).toBe(3);
+        expect(context.contextPolicy).toMatchObject({
+            mode: 'canonical-writing-context',
+            injection: 'cuigenji-canonical-v1',
+        });
+        expect(context.writingPreset.promptText).toContain('当前角色');
+        expect(context.writingPreset.promptText).not.toContain('林冬');
         expect(context.writingPreset.promptText).toContain('每段保持短句');
         expect(context.writingPreset.promptText).not.toContain('不应进入活动规则');
+        expect(context.writingPreset.promptText).not.toContain('旧 marker');
+        expect(context.writingPreset.promptText).not.toContain('继续推进冲突');
         expect(context.writingPreset.promptText).not.toContain('should-not-leak');
         expect(context.relevantReferences.map(item => item.name)).toEqual(
             expect.arrayContaining(['星港规则', '林冬']),

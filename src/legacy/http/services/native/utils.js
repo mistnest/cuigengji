@@ -1,8 +1,7 @@
 /**
- * 催更姬 — Shared Setting Utilities
+ * 催更姬 — 统一上下文资料工具
  *
- * 世界书/角色卡相关的低层工具函数，供 Native 路线、ST 路线和 context-orchestrator 共同使用。
- * 单独抽出来是为了避免 native/ 和 st/ 与 context-orchestrator 产生循环 import。
+ * 世界书/角色卡相关的低层工具函数，供固定摘要层和 context-orchestrator 使用。
  */
 
 import { getCharacterSummary, getWorldBookEntrySummary } from '../../../../backend/domains/knowledge/index.js';
@@ -36,27 +35,6 @@ export function isCharacterDisabled(character = {}) {
         || data.enabled === false
         || data.extensions?.cuigengji?.disabled === true
         || data.extensions?.novel_ai_editor?.disabled === true;
-}
-
-// ==================== Position helpers ====================
-
-export function isWorldInfoBeforePosition(position) {
-    if (position === undefined || position === null || position === '') return true;
-    const normalized = String(position).toLowerCase();
-    return normalized === '0'
-        || normalized === 'before'
-        || normalized === 'before_char'
-        || normalized === 'beforechar'
-        || normalized === 'before_characters';
-}
-
-export function isWorldInfoAfterPosition(position) {
-    const normalized = String(position ?? '').toLowerCase();
-    return normalized === '1'
-        || normalized === 'after'
-        || normalized === 'after_char'
-        || normalized === 'afterchar'
-        || normalized === 'after_characters';
 }
 
 // ==================== World book formatting ====================

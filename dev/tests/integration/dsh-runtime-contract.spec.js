@@ -173,11 +173,11 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
             .map(message => messageText(message))
             .join('\n');
         expect(systemText).toContain('催更姬');
-        expect(systemText).toContain('每轮优先推进一个最关键的不确定性');
-        expect(systemText).toContain('默认给出两个真正有差异的方案');
+        expect(systemText).toContain('唯一项目上下文');
+        expect(systemText).toContain('默认给出两个真正不同的方案');
         expect(systemText).toContain('只服务于当前 DSH session');
-        expect(systemText).toContain('任何提案都不等于项目已经修改');
-        expect(systemText).toContain('当前会话可以使用 web_search');
+        expect(systemText).toContain('大纲修改只能形成提案');
+        expect(systemText).toContain('可使用 web_search');
         expect(systemText).not.toContain('coding agent');
         expect(systemText).not.toContain('DeepSeek Harness Web GUI');
         expect(systemText).not.toContain('implementation checkout');

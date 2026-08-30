@@ -413,26 +413,13 @@
 
                     <div class="ai-section" id="ai-memory-settings">
                         <div class="ai-section-title">
-                            <span>设定注入方式</span>
-                            <small id="reference-mode-summary">智能摘要：摘要注入 + 工具查询</small>
+                            <span>统一写作上下文</span>
+                            <small id="reference-mode-summary">预设规则 + 热资料摘要 + 按需只读查询</small>
                         </div>
-                        <div class="reference-mode-control" id="reference-injection-mode">
-                            <div class="reference-mode-options">
-                                <label class="reference-mode-option active">
-                                    <input type="radio" name="reference-injection-mode" value="tool" checked>
-                                    <span>
-                                        <strong>智能摘要</strong>
-                                        <em>注入简略摘要与信息，通过工具按需查询完整内容，上下文更稳定，缓存命中率较高</em>
-                                    </span>
-                                </label>
-                                <label class="reference-mode-option">
-                                    <input type="radio" name="reference-injection-mode" value="sillytavern">
-                                    <span>
-                                        <strong>完整注入</strong>
-                                        <em>按原文完整注入上下文，频繁更换内容，类似 ST 注入方式，缓存命中率较低</em>
-                                    </span>
-                                </label>
-                            </div>
+                        <div class="reference-mode-control">
+                            <p class="settings-subtitle" style="margin:0;">
+                                催更姬只使用这一套上下文编排。预设负责文风与验收规则；世界书、人物卡和章节资料先形成受限快照，完整冷资料由只读工具按需查询。
+                            </p>
                         </div>
                     </div>
 
@@ -717,7 +704,7 @@
                         <div class="prompt-editor-form" id="prompt-editor-form" style="display:none;">
                             <div class="settings-group"><label class="ai-field-label" for="prompt-editor-name">名称</label><input type="text" id="prompt-editor-name" class="ai-input" placeholder="模板名称"></div>
                             <div class="settings-group"><label class="ai-field-label" for="prompt-editor-role">优先级 <span class="info-tooltip"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">控制模板注入的先后顺序和重要程度。<br><br><b>高</b> — 全局规则，最先注入AI。适合写：世界观约束、禁止事项、文风底线。<br><br><b>中</b> — 用户指令，紧随其后。适合写：当前任务说明、输出格式要求。<br><br><b>低</b> — 写作示例，最后注入。适合写：对话示范、期望的文风样本。</span></span></label><select id="prompt-editor-role" class="ai-select"><option value="system">高 — 全局规则</option><option value="user">中 — 用户指令</option><option value="assistant">低 — 写作示例</option></select></div>
-                            <div class="settings-group"><label class="settings-check"><input type="checkbox" id="prompt-editor-is-system"> 设为系统提示词</label><label class="settings-check" style="border-bottom:none;"><input type="checkbox" id="prompt-editor-is-marker"> 占位标记（无实际内容）</label></div>
+                            <div class="settings-group"><label class="settings-check" style="border-bottom:none;"><input type="checkbox" id="prompt-editor-is-system"> 设为系统提示词</label></div>
                             <div class="settings-group"><label class="ai-field-label" for="prompt-editor-content">内容</label><textarea id="prompt-editor-content" class="prompt-editor-content" placeholder="Prompt 模板内容..."></textarea></div>
                         </div>
                     </div>

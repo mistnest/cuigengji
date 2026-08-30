@@ -225,6 +225,15 @@
                 projectId,
                 sessionId,
             });
+            if (actionToken !== sessionActionToken
+                || getContext()?.projectId !== projectId
+                || store.getState().project.projectId !== projectId
+                || store.getState().activeSessionId !== sessionId) return;
+            // A successful cancel RPC is already a user-visible terminal
+            // acknowledgement.  Do not leave the composer spinning if the
+            // upstream turn/end event is delayed or lost with the aborted
+            // transport; a later mapped event will replace this local receipt.
+            store.markCancelled(sessionId);
         } catch (error) {
             if (actionToken !== sessionActionToken
                 || getContext()?.projectId !== projectId

@@ -290,8 +290,11 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
             'utf8',
         ));
         expect(context).toMatchObject({
-            schemaVersion: 2,
-            contextPolicy: { mode: 'hot-snapshot-with-read-only-catalog' },
+            schemaVersion: 3,
+            contextPolicy: {
+                mode: 'canonical-writing-context',
+                injection: 'cuigenji-canonical-v1',
+            },
             currentChapter: { id: setup.chapterId },
         });
         expect(context.currentChapter.content).toContain('林冬在星港');

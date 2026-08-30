@@ -18,10 +18,9 @@ export function isReferenceToolProvider(provider = '') {
     return TOOL_CAPABLE_PROVIDERS.has(String(provider || '').toLowerCase());
 }
 
-export function shouldEnableReferenceTools(config = {}, _context = {}, compactReference = false) {
-    if (config.referenceTools === false || config.enableReferenceTools === false) return false;
-    if (!isReferenceToolProvider(config.provider)) return false;
-
-    const explicitlyEnabled = config.referenceTools === true || config.enableReferenceTools === true;
-    return explicitlyEnabled || Boolean(compactReference);
+export function shouldEnableReferenceTools(config = {}) {
+    // The context strategy is no longer user-selectable.  Tool-capable
+    // providers receive bounded read-only lookup tools; other providers use
+    // the same hot snapshot without tools.  Old preset flags are ignored.
+    return isReferenceToolProvider(config.provider);
 }

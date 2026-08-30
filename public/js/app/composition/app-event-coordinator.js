@@ -67,7 +67,7 @@ function bindEvents() {
     if (btnLoadPreset) btnLoadPreset.addEventListener('click', () => {
         const name = $('#ai-preset').value;
         if (!name) { setStatus('请先选择一个配置方案', 'warn'); return; }
-        const preset = state.presets[name];
+        const preset = canonicalizePresetForState(state.presets[name]);
         if (!preset) { setStatus('配置方案未找到', 'error'); return; }
 
         if (preset.provider) state.aiConfig.provider = preset.provider;
@@ -86,7 +86,6 @@ function bindEvents() {
         if (preset.memoryBudget !== undefined) state.aiConfig.memoryBudget = preset.memoryBudget;
         if (preset.maxContext !== undefined) state.aiConfig.maxContext = preset.maxContext;
         if (preset.prefill) state.aiConfig.prefill = preset.prefill;
-        applyPresetReferenceSettings(preset);
         if (preset.templates) state.promptTemplates = preset.templates;
         if (preset.promptOrder) state.promptOrder = preset.promptOrder;
         if (preset.enabledTemplates) state.enabledTemplates = preset.enabledTemplates;
@@ -114,13 +113,6 @@ function bindEvents() {
     $('#ai-temperature').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
     $('#ai-max-tokens').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
     $('#ai-top-p').addEventListener('input', () => { onConfigChange(); updateRangeLabels(); });
-    document.querySelectorAll('input[name="reference-injection-mode"]').forEach(input => {
-        input.addEventListener('change', () => {
-            if (!input.checked) return;
-            setReferenceInjectionMode(input.value);
-        });
-    });
-
     // Provider-specific fields
     const bindProviderField = (id, configKey, onChange) => {
         const el = document.getElementById(id);
