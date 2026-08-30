@@ -6,16 +6,26 @@ import { v4 as uuidv4 } from 'uuid';
 
 import {
     AppError,
+    assertExpectedRevision,
+    expectedContentHashFrom,
     enqueueFileWrite,
     getDataRoot,
+    getVersionStamp,
     projectFile,
+    publishDomainChange,
     readJson,
+    readRevision,
+    readUpdatedAt,
     removeFile,
     requireString,
     resolveInside,
+    withVersion,
     writeJson,
 } from '../../../foundation/platform/index.js';
-import { ensureChapterSummary } from '../../knowledge/index.js';
+import {
+    applyAiReferenceSummary,
+    ensureChapterSummary,
+} from '../../knowledge/index.js';
 
 const chapterPathIndexes = new Map();
 const VOLUME_METADATA_FILE = '.volume.json';
@@ -68,10 +78,24 @@ export async function createChapter(projectId, input = {}) {
                 order: await nextVolumeOrder(root),
                 created: now,
                 updated: now,
+                revision: 1,
             };
+            const versionedVolume = withVersion(volume, 1, now);
             await fs.mkdir(volumeDir, { recursive: false });
-            await writeJson(resolveInside(volumeDir, VOLUME_METADATA_FILE), volume);
-            return volume;
+            await writeJson(resolveInside(volumeDir, VOLUME_METADATA_FILE), versionedVolume);
+            publishDomainChange({
+                projectId: id,
+                entityType: 'volume',
+                entityId: versionedVolume.id,
+                operation: 'created',
+                beforeRevision: 0,
+                revision: versionedVolume.revision,
+                updatedAt: versionedVolume.updatedAt,
+                contentHash: versionedVolume.contentHash,
+                changedFields: Object.keys(versionedVolume),
+                actor: input.actor,
+            });
+            return versionedVolume;
         }
 
         const content = typeof input.content === 'string' ? input.content : '';
@@ -92,7 +116,7 @@ export async function createChapter(projectId, input = {}) {
             order: Number(input.order || 0),
             volumeId: normalizeVolumeId(input.volumeId),
         };
-        chapter = ensureChapterSummary(chapter).chapter;
+        chapter = withVersion(ensureChapterSummary(chapter).chapter, 1, now);
         const targetDir = chapterTargetDir(root, chapter.volumeId);
         await fs.mkdir(targetDir, { recursive: true });
         const existing = await listJsonNames(targetDir);
@@ -101,6 +125,18 @@ export async function createChapter(projectId, input = {}) {
         const filePath = resolveInside(targetDir, filename);
         await writeJson(filePath, chapter);
         setIndexedChapterPath(root, chapter.id, filePath);
+        publishDomainChange({
+            projectId: id,
+            entityType: 'chapter',
+            entityId: chapter.id,
+            operation: 'created',
+            beforeRevision: 0,
+            revision: chapter.revision,
+            updatedAt: chapter.updatedAt,
+            contentHash: chapter.contentHash,
+            changedFields: Object.keys(chapter),
+            actor: input.actor,
+        });
         return chapter;
     });
 }
@@ -113,15 +149,11 @@ export async function updateChapter(projectId, chapterId, patch = {}) {
         const found = await findChapterFile(root, targetId);
         if (!found) throw notFound();
 
-        const currentRevision = Number(found.data.revision || 0);
-        if (patch.expectedRevision !== undefined
-            && Number(patch.expectedRevision) !== currentRevision) {
-            throw new AppError('REVISION_CONFLICT', 'Chapter was changed by another operation', {
-                status: 409,
-                publicMessage: '章节已被其他操作修改，请刷新后重试。',
-                details: { expectedRevision: Number(patch.expectedRevision), currentRevision },
-            });
-        }
+        const currentRevision = readRevision(found.data);
+        assertExpectedRevision(found.data, patch.expectedRevision, `chapter:${id}/${targetId}`, {
+            expectedContentHash: expectedContentHashFrom(patch),
+            includeCurrent: true,
+        });
 
         const next = { ...found.data };
         if (patch.title !== undefined) next.title = String(patch.title);
@@ -135,8 +167,25 @@ export async function updateChapter(projectId, chapterId, patch = {}) {
             next.summaryGenerator = 'manual';
             next.summaryUpdatedAt = Date.now();
         }
-        next.updated = Date.now();
+        // AI-generated summaries travel through the same chapter CAS path as
+        // human edits.  Keeping the metadata update here prevents a long
+        // running extraction job from writing a stale JSON snapshot directly
+        // over a newer chapter revision.
+        if (patch.aiSummary !== undefined) {
+            const summarized = applyAiReferenceSummary('chapter', next, patch.aiSummary);
+            Object.assign(next, summarized.item);
+        }
+        const now = Date.now();
+        next.updated = now;
         next.revision = currentRevision + 1;
+        // CAS metadata belongs to the transport layer, never to the chapter
+        // document.  Removing every accepted control field here keeps a
+        // renderer payload from becoming durable manuscript data (and keeps
+        // later content hashes independent of the caller's stale token).
+        for (const key of [
+            'expectedRevision', 'baseRevision', 'expectedContentHash',
+            'baseContentHash', 'actor', 'version', 'contentHash', 'updatedAt',
+        ]) delete next[key];
 
         let targetPath = found.path;
         if (patch.volumeId !== undefined) {
@@ -146,10 +195,22 @@ export async function updateChapter(projectId, chapterId, patch = {}) {
             targetPath = await getUniquePath(resolveInside(targetDir, path.basename(found.path)), found.path);
         }
 
-        const summarized = ensureChapterSummary(next).chapter;
+        const summarized = withVersion(ensureChapterSummary(next).chapter, next.revision, now);
         await writeJson(targetPath, summarized);
         if (path.resolve(targetPath) !== path.resolve(found.path)) await removeFile(found.path);
         setIndexedChapterPath(root, summarized.id, targetPath);
+        publishDomainChange({
+            projectId: id,
+            entityType: 'chapter',
+            entityId: summarized.id,
+            operation: 'updated',
+            beforeRevision: currentRevision,
+            revision: summarized.revision,
+            updatedAt: summarized.updatedAt,
+            contentHash: summarized.contentHash,
+            changedFields: changedFields(found.data, summarized),
+            actor: patch.actor,
+        });
         return summarized;
     });
 }
@@ -163,36 +224,89 @@ export async function deleteChapter(projectId, chapterId, options = {}) {
     }
     const id = requireProjectId(projectId);
     const targetId = requireChapterId(chapterId);
+    const changeEvents = [];
+    let deletedRevision = 0;
     await withChapterLock(id, async () => {
         const root = chaptersDir(id);
         if (targetId.startsWith('vol_')) {
             const volumeId = normalizeVolumeId(targetId);
             const volumeDir = chapterTargetDir(root, volumeId);
             if (await exists(volumeDir)) {
+                const metadata = await readVolumeMetadata(volumeDir);
+                assertExpectedRevision(metadata || {}, options.expectedRevision, `volume:${id}/${targetId}`, {
+                    expectedContentHash: expectedContentHashFrom(options),
+                    includeCurrent: true,
+                });
                 for (const file of await listJsonNames(volumeDir)) {
                     const source = resolveInside(volumeDir, file);
                     const chapter = await readJson(source);
                     chapter.volumeId = '';
-                    chapter.updated = Date.now();
-                    chapter.revision = Number(chapter.revision || 0) + 1;
+                    const now = Date.now();
+                    const beforeRevision = readRevision(chapter);
+                    chapter.updated = now;
+                    chapter.revision = beforeRevision + 1;
                     const target = await getUniquePath(resolveInside(root, file), source);
-                    await writeJson(target, ensureChapterSummary(chapter).chapter);
+                    const moved = withVersion(ensureChapterSummary(chapter).chapter, chapter.revision, now);
+                    await writeJson(target, moved);
                     await removeFile(source);
+                    changeEvents.push({
+                        projectId: id,
+                        entityType: 'chapter',
+                        entityId: moved.id,
+                        operation: 'updated',
+                        beforeRevision,
+                        revision: moved.revision,
+                        updatedAt: moved.updatedAt,
+                        contentHash: moved.contentHash,
+                        changedFields: ['volumeId'],
+                        actor: options.actor,
+                    });
                 }
                 await fs.rm(volumeDir, { recursive: true, force: true });
+                deletedRevision = readRevision(metadata) + 1;
+                changeEvents.push({
+                    projectId: id,
+                    entityType: 'volume',
+                    entityId: targetId,
+                    operation: 'deleted',
+                    beforeRevision: readRevision(metadata),
+                    revision: deletedRevision,
+                    updatedAt: Date.now(),
+                    changedFields: [],
+                    actor: options.actor,
+                });
                 return;
             }
         }
 
         const found = await findChapterFile(root, targetId);
         if (!found) throw notFound();
+        const beforeRevision = readRevision(found.data);
+        assertExpectedRevision(found.data, options.expectedRevision, `chapter:${id}/${targetId}`, {
+            expectedContentHash: expectedContentHashFrom(options),
+            includeCurrent: true,
+        });
         const backupDir = path.join(getDataRoot(), 'backups');
         await fs.mkdir(backupDir, { recursive: true });
         await fs.copyFile(found.path, path.join(backupDir, `${targetId}_${Date.now()}.json`));
         await removeFile(found.path);
         deleteIndexedChapterPath(root, targetId);
+        deletedRevision = beforeRevision + 1;
+        changeEvents.push({
+            projectId: id,
+            entityType: 'chapter',
+            entityId: targetId,
+            operation: 'deleted',
+            beforeRevision,
+            revision: deletedRevision,
+            updatedAt: Date.now(),
+            contentHash: '',
+            changedFields: [],
+            actor: options.actor,
+        });
     });
-    return { success: true };
+    for (const event of changeEvents) publishDomainChange(event);
+    return { success: true, revision: deletedRevision };
 }
 
 function requireProjectId(value) {
@@ -228,6 +342,7 @@ async function listChapterItems(root, projectId) {
         if (entry.isDirectory()) {
             const volumeId = `vol_${entry.name}`;
             const metadata = await readVolumeMetadata(full);
+            const volumeVersion = getVersionStamp(metadata || {});
             const files = (await listJsonNames(full)).sort();
             const chapters = await Promise.all(files.map(async file => {
                 const filePath = resolveInside(full, file);
@@ -245,6 +360,9 @@ async function listChapterItems(root, projectId) {
                     order: Number(metadata?.order || 0),
                     created: metadata?.created,
                     updated: metadata?.updated,
+                    revision: volumeVersion.revision,
+                    updatedAt: volumeVersion.updatedAt,
+                    contentHash: volumeVersion.contentHash,
                 },
                 ...chapters.filter(Boolean),
             ];
@@ -253,7 +371,18 @@ async function listChapterItems(root, projectId) {
         const data = await tryReadChapter(full, { summarize: false });
         if (!data) return [];
         if (entry.name.startsWith('vol_') || data.type === 'volume') {
-            return [{ id: data.id, novelId: projectId, type: 'volume', title: data.title, volumeId: '', order: data.order || 0 }];
+            const version = getVersionStamp(data);
+            return [{
+                id: data.id,
+                novelId: projectId,
+                type: 'volume',
+                title: data.title,
+                volumeId: '',
+                order: data.order || 0,
+                revision: version.revision,
+                updatedAt: version.updatedAt,
+                contentHash: version.contentHash,
+            }];
         }
         if (data.id) setIndexedChapterPath(root, data.id, full);
         return [lightChapter(data, '')];
@@ -322,10 +451,12 @@ async function tryReadChapter(filePath, { summarize = true } = {}) {
 }
 
 function withRevision(chapter) {
-    return { ...ensureChapterSummary(chapter).chapter, revision: Number(chapter.revision || 0) };
+    const normalized = ensureChapterSummary(chapter).chapter;
+    return withVersion(normalized, readRevision(chapter), readUpdatedAt(chapter, Date.now()));
 }
 
 function lightChapter(chapter, volumeId) {
+    const version = getVersionStamp(chapter);
     return {
         id: chapter.id,
         novelId: chapter.novelId,
@@ -335,10 +466,19 @@ function lightChapter(chapter, volumeId) {
         wordCount: chapter.wordCount || 0,
         status: chapter.status || 'draft',
         order: chapter.order || 0,
-        revision: Number(chapter.revision || 0),
+        revision: version.revision,
         created: chapter.created,
         updated: chapter.updated,
+        updatedAt: version.updatedAt,
+        contentHash: version.contentHash,
     };
+}
+
+function changedFields(previous, next) {
+    const keys = new Set([...Object.keys(previous || {}), ...Object.keys(next || {})]);
+    return [...keys].filter(key => ![
+        'revision', 'updatedAt', 'updated', 'savedAt', 'contentHash',
+    ].includes(key) && JSON.stringify(previous?.[key]) !== JSON.stringify(next?.[key]));
 }
 
 function normalizeVolumeId(value) {

@@ -130,24 +130,20 @@ async function fetchModels() {
 }
 
 function populateModelSelect(models) {
-    const select = $('#ai-model');
-    if (!select) return;
-    select.replaceChildren();
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = '\u2014 \u9009\u62e9\u6a21\u578b \u2014';
-    select.appendChild(emptyOpt);
+    const input = $('#ai-model');
+    const options = $('#ai-model-options');
+    if (!input || !options) return;
+    const current = input.value.trim() || state.aiConfig.model || '';
+    options.replaceChildren();
     models.forEach(model => {
         const id = typeof model === 'string' ? model : model.id || model.name;
-        const limit = typeof model === 'object' ? Number(model.contextLimit || 0) : 0;
         if (!id) return;
         const opt = document.createElement('option');
         opt.value = id;
-        opt.textContent = id;
-        if (limit > 0) opt.dataset.contextLimit = limit;
-        if (id === state.aiConfig.model) opt.selected = true;
-        select.appendChild(opt);
+        if (typeof model === 'object' && model.name && model.name !== id) opt.label = model.name;
+        options.appendChild(opt);
     });
+    input.value = current;
 }
 
 function onModelSelectChange() {
@@ -169,8 +165,10 @@ function updateModelContextInfo(selModel) {
     const infoEl = document.getElementById('model-context-info');
     if (!infoEl) return;
     if (!selModel) { infoEl.style.display = 'none'; return; }
-    const opt = document.querySelector('#ai-model option:checked');
-    const limit = parseInt(opt?.dataset?.contextLimit || 0);
+    const found = (state._modelCache || []).find(model => (
+        (typeof model === 'string' ? model : model.id || model.name) === selModel
+    ));
+    const limit = typeof found === 'object' ? Number(found.contextLimit || 0) : 0;
     if (!limit) { infoEl.style.display = 'none'; return; }
     const ctxText = limit >= 1000000
         ? (limit / 1000000).toFixed(1) + 'M'
@@ -192,6 +190,14 @@ async function onTestConnection() {
             await saveAiSecret(apiKey);
             $('#ai-api-key').value = '';
         }
+        // Persist the exact provider/model selection before starting Agent.
+        // The normal config path is debounced for typing, but a fast
+        // connection response can otherwise launch DSH against the previous
+        // workspace snapshot and make the sidebar report the wrong runtime.
+        if (state.workspaceLoaded) {
+            const persisted = await window.saveWorkspaceState?.({ silent: true });
+            if (persisted === false) throw new Error('AI 配置尚未保存，已取消启动 Agent');
+        }
         const data = await Repositories.providers.testConnection(
             safeAiConfig(),
             state.presetName || '__default__',
@@ -201,6 +207,7 @@ async function onTestConnection() {
             setPreference('selectedProvider', state.aiConfig.provider);
             setPreference('connectedProvider', state.aiConfig.provider);
             rememberLastSuccessfulAiConfig();
+            await window.AgentWorkbenchFeature?.open({ force: true });
         } else if (Preferences.get('connectedProvider', '') === state.aiConfig.provider) {
             removePreference('connectedProvider');
         }
@@ -266,7 +273,19 @@ function updateProviderUI({ providerChanged = false } = {}) {
     const defaultModels = {
         anthropic: 'claude-sonnet-4-6',
         openai: 'gpt-4o',
+        google: 'gemini-2.5-flash',
+        'google-vertex': 'gemini-2.5-flash',
+        mistral: 'mistral-large-latest',
+        xai: 'grok-4.3',
+        groq: 'llama-3.3-70b-versatile',
         deepseek: 'deepseek-v4-flash',
+        qwen: 'qwen-plus',
+        doubao: 'doubao-pro-32k',
+        spark: 'lite',
+        zai: 'glm-5-turbo',
+        moonshot: 'kimi-k2.5',
+        siliconflow: 'deepseek-ai/DeepSeek-V3',
+        minimax: 'MiniMax-M2.7',
         openrouter: 'anthropic/claude-sonnet-4-6',
         ollama: 'llama3',
     };
@@ -280,6 +299,7 @@ function updateProviderUI({ providerChanged = false } = {}) {
         anthropic: 'https://api.anthropic.com',
         openai: 'https://api.openai.com/v1',
         google: 'https://generativelanguage.googleapis.com/v1beta',
+        'google-vertex': 'https://aiplatform.googleapis.com',
         mistral: 'https://api.mistral.ai/v1',
         xai: 'https://api.x.ai/v1',
         groq: 'https://api.groq.com/openai/v1',
@@ -289,7 +309,7 @@ function updateProviderUI({ providerChanged = false } = {}) {
         spark: 'https://spark-api-open.xf-yun.com/v1',
         zai: 'https://api.z.ai/api/paas/v4',
         moonshot: 'https://api.moonshot.cn/v1',
-        siliconflow: 'https://api.siliconflow.cn/v1',
+        siliconflow: 'https://api.siliconflow.com/v1',
         minimax: 'https://api.minimax.io/v1',
         openrouter: 'https://openrouter.ai/api/v1',
         ollama: 'http://localhost:11434',

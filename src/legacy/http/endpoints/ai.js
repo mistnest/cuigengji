@@ -20,9 +20,10 @@ import {
     listProviderModels,
     testProviderConnection,
 } from '../../../backend/intelligence/models/index.js';
-import { applyAiReferenceSummary, normalizeAiSummary } from '../../../backend/domains/knowledge/index.js';
+import { normalizeAiSummary } from '../../../backend/domains/knowledge/index.js';
+import { updateChapter } from '../../../backend/domains/project/index.js';
 import { capturePrompt } from './debug.js';
-import { projectFile, writeJson } from '../../../backend/foundation/platform/index.js';
+import { getVersionStamp, projectFile } from '../../../backend/foundation/platform/index.js';
 
 export const router = express.Router();
 
@@ -473,6 +474,7 @@ async function runCurrentExtractionJob(job, payload) {
     const result = {
         ...parsed,
         mode: 'current',
+        novelId: payload.novelId || '',
         chapterId: payload.chapterId || '',
         chapterTitle: payload.chapterTitle || '',
         chapterOrder: payload.chapterOrder ?? null,
@@ -562,6 +564,7 @@ async function runProjectExtractionJob(job, payload) {
         },
         result: {
             mode: 'project',
+            novelId: payload.novelId || '',
             range: {
                 startOrder: Number(payload.startOrder),
                 endOrder: Number(payload.endOrder),
@@ -748,6 +751,7 @@ router.post('/extract-project', async (req, res) => {
         const worldEntries = [...aggregate.worldEntries.values()].map(normalizeAggregatedWorldEntry);
         res.json({
             mode: 'project',
+            novelId,
             range: {
                 startOrder: Number(startOrder),
                 endOrder: Number(endOrder),
@@ -861,6 +865,7 @@ router.post('/extract-project-stream', async (req, res) => {
         sendSse(res, {
             type: 'done',
             mode: 'project',
+            novelId,
             range: {
                 startOrder: Number(startOrder),
                 endOrder: Number(endOrder),
@@ -966,13 +971,18 @@ async function loadExtractionChapters(novelId) {
             try {
                 const chapter = JSON.parse(await fs.readFile(full, 'utf8'));
                 if (!chapter || chapter.type === 'volume') continue;
+                const version = getVersionStamp(chapter);
                 chapters.push({
                     id: chapter.id || '',
+                    novelId,
                     title: chapter.title || entry.name.replace(/\.json$/i, ''),
                     order: Number(chapter.order || 0),
                     content: chapter.content || '',
                     summary: chapter.summary || '',
                     notes: chapter.notes || '',
+                    revision: version.revision,
+                    updatedAt: version.updatedAt,
+                    contentHash: version.contentHash,
                     filePath: full,
                 });
             } catch {}
@@ -1187,17 +1197,26 @@ function uniqueSources(sources = []) {
 
 async function persistChapterAiSummary(chapter, aiSummary) {
     const normalized = normalizeAiSummary(aiSummary);
-    if (!chapter?.filePath || !normalized.brief) return false;
+    if (!chapter?.novelId || !chapter?.id || !normalized.brief) return false;
     try {
-        const current = JSON.parse(await fs.readFile(chapter.filePath, 'utf8'));
-        const next = applyAiReferenceSummary('chapter', current, normalized);
-        if (!next.changed) return false;
-        await writeJson(chapter.filePath, next.item);
-        chapter.summary = next.item.summary || '';
-        chapter.aiSummary = next.item.aiSummary;
-        chapter.summaryGenerator = next.item.summaryGenerator;
+        const saved = await updateChapter(chapter.novelId, chapter.id, {
+            aiSummary: normalized,
+            expectedRevision: chapter.revision,
+            expectedContentHash: chapter.contentHash,
+            actor: { kind: 'agent', id: 'automation-extraction' },
+        });
+        chapter.revision = saved.revision;
+        chapter.updatedAt = saved.updatedAt;
+        chapter.contentHash = saved.contentHash;
+        chapter.summary = saved.summary || '';
+        chapter.aiSummary = saved.aiSummary;
+        chapter.summaryGenerator = saved.summaryGenerator;
         return true;
     } catch (err) {
+        if (err?.code === 'REVISION_CONFLICT') {
+            console.warn('[AI Project Extract] Chapter changed during extraction; summary skipped:', chapter.id);
+            return false;
+        }
         console.warn('[AI Project Extract] Failed to persist chapter summary:', err.message);
         return false;
     }

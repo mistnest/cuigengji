@@ -15,7 +15,15 @@ function bindAgentWorkbench() {
             if (state.isDirty && !await onSave({ silent: true })) {
                 throw new Error('当前章节保存失败，已停止打开工作台');
             }
-            await saveWorkspaceState({ silent: true });
+            const saved = await saveWorkspaceState({ silent: true });
+            if (!saved) throw new Error('工作区保存失败，已停止打开 Agent');
+        },
+        getOutlineRevision: () => Number(state.outlineRevision || 0),
+        onOutlinePatchApplied: async result => {
+            state.outline = Array.isArray(result.nodes) ? result.nodes : [];
+            state.outlineRevision = Number(result.revision || 0);
+            state.outlineContentHash = String(result.contentHash || state.outlineContentHash || '');
+            renderOutlineTree();
         },
         onStatus: detail => {
             setStatus(detail.message, detail.type);

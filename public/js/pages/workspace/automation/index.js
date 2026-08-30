@@ -61,6 +61,50 @@ async function readSseCompletion(response) {
     return { ...meta, reply };
 }
 
+function captureAutomationOperation(options = {}) {
+    const { trackRequest = true, ...contextOptions } = options;
+    const lifecycle = window.CuigengjiWorkspaceLifecycle;
+    const context = lifecycle?.capture
+        ? lifecycle.capture(contextOptions)
+        : {
+            projectId: String(state.currentNovel?.id || ''),
+            workspaceToken: Number(state.workspaceActionToken || 0),
+            chapterId: String(contextOptions.chapterId ?? state.currentChapter?.id ?? ''),
+            chapterToken: Number(state.chapterContextToken || 0),
+        };
+    const token = trackRequest
+        ? Number(state.automationRequestToken || 0) + 1
+        : Number(state.automationRequestToken || 0);
+    if (trackRequest) state.automationRequestToken = token;
+    return Object.freeze({ context, token });
+}
+
+function isCurrentAutomationOperation(operation, { chapter = false, requireLoaded = true } = {}) {
+    if (!operation || Number(state.automationRequestToken || 0) !== Number(operation.token || 0)) {
+        return false;
+    }
+    const lifecycle = window.CuigengjiWorkspaceLifecycle;
+    if (lifecycle?.isCurrent) return lifecycle.isCurrent(operation.context, { chapter, requireLoaded });
+    const context = operation.context || {};
+    return String(state.currentNovel?.id || '') === String(context.projectId || '')
+        && Number(state.workspaceActionToken || 0) === Number(context.workspaceToken || 0)
+        && (!requireLoaded || state.workspaceLoaded)
+        && (!chapter || (
+            String(state.currentChapter?.id || '') === String(context.chapterId || '')
+            && Number(state.chapterContextToken || 0) === Number(context.chapterToken || 0)
+        ));
+}
+
+function finishAutomationOperation(operation, buttonSelector, label) {
+    if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
+    state.isGenerating = false;
+    const button = buttonSelector ? $(buttonSelector) : null;
+    if (button) {
+        button.disabled = false;
+        if (label) button.textContent = label;
+    }
+}
+
 async function onContinue() {
     const text = $('#chapter-editor').value;
     if (!text.trim()) { setStatus('请先编写正文再续写', 'warn'); return; }
@@ -69,6 +113,7 @@ async function onContinue() {
     }
     if (state.isGenerating) return;
 
+    const operation = captureAutomationOperation({ chapterId: state.currentChapter?.id || '' });
     state.isGenerating = true;
     setStatus('AI 正在续写...', 'loading');
     const btnC = $('#btn-continue'); if (btnC) { btnC.disabled = true; btnC.textContent = '⏳ 生成中...'; }
@@ -90,6 +135,12 @@ async function onContinue() {
                     chapterId: state.currentChapter?.id || '',
                     chapterOrder: state.currentChapter?.order ?? null,
                     chapterWindowAnchor: ensureChapterWindowAnchor(),
+                    // The legacy writing tool can still import a character,
+                    // world-book entry or preset.  Carry the workspace
+                    // snapshot stamp so that path uses the same CAS contract
+                    // as the native Agent/Renderer writes.
+                    workspaceRevision: state.workspaceRevision,
+                    workspaceContentHash: state.workspaceContentHash,
                 },
                 presetName: state.presetName || '__default__',
                 promptTemplates: (state.promptTemplates || [])
@@ -98,6 +149,7 @@ async function onContinue() {
         });
 
         const data = await readSseCompletion(response);
+        if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
         if (!data.reply?.trim()) throw new Error('模型没有返回正文，请提高单次输出长度后重试');
         const editor = $('#chapter-editor');
         // Append generated content
@@ -110,8 +162,10 @@ async function onContinue() {
         updateContextInfo(data.context, data.memory, data.contextDebug);
         showToast('续写完成!', 'success');
     } catch (err) {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`续写失败: ${err.message}`, 'error');
     } finally {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         state.isGenerating = false;
         const btnC2 = $('#btn-continue'); if (btnC2) { btnC2.disabled = false; btnC2.textContent = '续写正文'; }
     }
@@ -125,6 +179,7 @@ async function onPlotSuggestions() {
     }
     if (state.isGenerating) return;
 
+    const operation = captureAutomationOperation();
     state.isGenerating = true;
     setStatus('正在生成情节候选...', 'loading');
     const ps = $('#btn-plot-suggestions'); if (ps) ps.disabled = true;
@@ -138,8 +193,10 @@ async function onPlotSuggestions() {
                 outline: getIncompleteOutline(),
                 presetName: state.presetName || '__default__',
         });
+        if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
         if (data.candidates?.length > 0) {
             PlotCandidates.show(data.candidates, (selected) => {
+                if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
                 // Insert selected direction as guidance
                 const editor = $('#chapter-editor');
                 const guidance = `// 情节方向: ${selected.direction}\n// 冲突: ${selected.conflict || '无'}\n\n`;
@@ -153,8 +210,10 @@ async function onPlotSuggestions() {
             setStatus('未能生成有效的情节候选，请重试', 'warn');
         }
     } catch (err) {
+        if (typeof operation !== 'undefined' && !isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`情节生成失败: ${err.message}`, 'error');
     } finally {
+        if (typeof operation !== 'undefined' && !isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         state.isGenerating = false;
         const ps2 = $('#btn-plot-suggestions'); if (ps2) ps2.disabled = false;
     }
@@ -167,6 +226,7 @@ async function onInspire() {
     }
     if (state.isGenerating) return;
 
+    const operation = captureAutomationOperation();
     state.isGenerating = true;
     setStatus('正在生成灵感...', 'loading');
     const bi = $('#btn-inspire'); if (bi) bi.disabled = true;
@@ -179,11 +239,14 @@ async function onInspire() {
                 characters: getReferencedCharacters(text),
                 presetName: state.presetName || '__default__',
         });
+        if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
         PlotCandidates.showInspiration(data);
         setStatus('灵感已生成', 'success');
     } catch (err) {
+        if (typeof operation !== 'undefined' && !isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`灵感生成失败: ${err.message}`, 'error');
     } finally {
+        if (typeof operation !== 'undefined' && !isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         state.isGenerating = false;
         const bi2 = $('#btn-inspire'); if (bi2) bi2.disabled = false;
     }
@@ -256,6 +319,7 @@ async function runCurrentExtraction(launcherOverlay) {
     const text = $('#chapter-editor').value;
     if (!text.trim()) { setStatus('请先编写正文再提取设定', 'warn'); return; }
     if (state.isGenerating) return;
+    const operation = captureAutomationOperation({ chapterId: state.currentChapter?.id || '' });
     state.isGenerating = true;
     $('#btn-extract-setting').disabled = true;
     setExtractionLauncherBusy(launcherOverlay, true, '正在分析当前章节...');
@@ -267,13 +331,16 @@ async function runCurrentExtraction(launcherOverlay) {
                 config: state.aiConfig,
                 presetName: state.presetName || '__default__',
         });
+        if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
         document.querySelectorAll('.toast-item').forEach(e => e.remove());
         launcherOverlay?.remove();
         showExtractionResults(data);
     } catch (err) {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         document.querySelectorAll('.toast-item').forEach(e => e.remove());
         setStatus(`提取失败: ${err.message}`, 'error');
     } finally {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         state.isGenerating = false;
         $('#btn-extract-setting').disabled = false;
         setExtractionLauncherBusy(launcherOverlay, false);
@@ -286,6 +353,7 @@ async function runProjectExtraction(launcherOverlay) {
     if (state.isGenerating) return;
     const startOrder = Number(launcherOverlay.querySelector('#extract-project-start')?.value || 1);
     const endOrder = Number(launcherOverlay.querySelector('#extract-project-end')?.value || startOrder);
+    const operation = captureAutomationOperation();
     state.isGenerating = true;
     $('#btn-extract-setting').disabled = true;
     setExtractionLauncherBusy(launcherOverlay, true, '正在连接逐章扫描...');
@@ -299,14 +367,17 @@ async function runProjectExtraction(launcherOverlay) {
                 endOrder,
         });
         const data = await readProjectExtractionStream(resp, launcherOverlay.querySelector('#extract-project-progress'));
+        if (!isCurrentAutomationOperation(operation)) return;
         launcherOverlay?.remove();
         showExtractionResults(data);
         setStatus('项目逐章扫描完成', 'success');
     } catch (err) {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`逐章扫描失败: ${err.message}`, 'error');
         const progress = launcherOverlay?.querySelector('#extract-project-progress');
         if (progress) progress.insertAdjacentHTML('beforeend', `<div class="error">失败：${escHtml(err.message)}</div>`);
     } finally {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         state.isGenerating = false;
         $('#btn-extract-setting').disabled = false;
         setExtractionLauncherBusy(launcherOverlay, false);
@@ -315,6 +386,9 @@ async function runProjectExtraction(launcherOverlay) {
 
 async function runCurrentExtractionBackground(launcherOverlay) {
     const text = $('#chapter-editor').value;
+    const operation = captureAutomationOperation({ chapterId: state.currentChapter?.id || '' });
+    const projectId = operation.context.projectId;
+    const chapterId = operation.context.chapterId;
     if (!text.trim()) { setStatus('请先编写正文再提取设定', 'warn'); return; }
     setExtractionLauncherBusy(launcherOverlay, true, '正在创建后台任务...');
     setStatus('正在创建设定提取任务...', 'loading');
@@ -322,25 +396,31 @@ async function runCurrentExtractionBackground(launcherOverlay) {
         const job = await createExtractionJob({
             type: 'current',
             text: text.slice(-12000),
-            novelId: state.currentNovel?.id || '',
-            chapterId: state.currentChapter?.id || '',
+            novelId: projectId,
+            chapterId,
             chapterTitle: state.currentChapter?.title || '',
             chapterOrder: state.currentChapter?.order ?? null,
         });
+        if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
         launcherOverlay?.remove();
-        trackExtractionJob(job);
+        trackExtractionJob({ ...job, _projectId: projectId });
         showToast('设定提取已挂到后台，可从左下角查看进度。', 'success');
         setStatus('设定提取已在后台执行', 'success');
     } catch (err) {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`提取任务创建失败: ${err.message}`, 'error');
         const progress = launcherOverlay?.querySelector('#extract-project-progress');
         if (progress) progress.insertAdjacentHTML('beforeend', `<div class="error">失败：${escHtml(err.message)}</div>`);
     } finally {
-        setExtractionLauncherBusy(launcherOverlay, false);
+        if (isCurrentAutomationOperation(operation, { requireLoaded: false })) {
+            setExtractionLauncherBusy(launcherOverlay, false);
+        }
     }
 }
 
 async function runProjectExtractionBackground(launcherOverlay) {
+    const operation = captureAutomationOperation();
+    const projectId = operation.context.projectId;
     if (!state.currentNovel?.id) { setStatus('请先打开项目', 'warn'); return; }
     const startOrder = Number(launcherOverlay.querySelector('#extract-project-start')?.value || 1);
     const endOrder = Number(launcherOverlay.querySelector('#extract-project-end')?.value || startOrder);
@@ -349,20 +429,24 @@ async function runProjectExtractionBackground(launcherOverlay) {
     try {
         const job = await createExtractionJob({
             type: 'project',
-            novelId: state.currentNovel.id,
+            novelId: projectId,
             startOrder,
             endOrder,
         });
+        if (!isCurrentAutomationOperation(operation)) return;
         launcherOverlay?.remove();
-        trackExtractionJob(job);
+        trackExtractionJob({ ...job, _projectId: projectId });
         showToast('逐章扫描已挂到后台，可从左下角查看进度。', 'success');
         setStatus('逐章扫描已在后台执行', 'success');
     } catch (err) {
+        if (!isCurrentAutomationOperation(operation, { requireLoaded: false })) return;
         setStatus(`逐章扫描任务创建失败: ${err.message}`, 'error');
         const progress = launcherOverlay?.querySelector('#extract-project-progress');
         if (progress) progress.insertAdjacentHTML('beforeend', `<div class="error">失败：${escHtml(err.message)}</div>`);
     } finally {
-        setExtractionLauncherBusy(launcherOverlay, false);
+        if (isCurrentAutomationOperation(operation, { requireLoaded: false })) {
+            setExtractionLauncherBusy(launcherOverlay, false);
+        }
     }
 }
 
@@ -415,8 +499,10 @@ function initExtractionJobDock() {
 }
 
 async function refreshExtractionJobs() {
+    const operation = captureAutomationOperation({ trackRequest: false });
     try {
         const data = await AutomationRuntime.execute('extraction.jobs.list');
+        if (!isCurrentAutomationOperation(operation)) return;
         (data.jobs || []).forEach(handleExtractionJobUpdate);
         renderExtractionJobDock();
         if ([...extractionJobs.values()].some(isExtractionJobActive)) startExtractionJobPolling();
@@ -429,17 +515,35 @@ function trackExtractionJob(job) {
     startExtractionJobPolling();
 }
 
+function extractionJobProjectId(job) {
+    return String(job?.novelId || job?.projectId || job?._projectId || '');
+}
+
+function isExtractionJobForCurrentProject(job) {
+    const projectId = extractionJobProjectId(job);
+    return !projectId || projectId === String(state.currentNovel?.id || '');
+}
+
 function handleExtractionJobUpdate(job) {
     if (!job?.id) return;
+    if (!isExtractionJobForCurrentProject(job)) return;
+    const normalizedJob = {
+        ...job,
+        _projectId: extractionJobProjectId(job) || String(state.currentNovel?.id || ''),
+    };
     const prev = extractionJobs.get(job.id);
-    extractionJobs.set(job.id, { ...(prev || {}), ...job });
+    extractionJobs.set(job.id, { ...(prev || {}), ...normalizedJob });
     const wasActive = prev && isExtractionJobActive(prev);
-    const isFinished = ['done', 'error'].includes(job.status);
+    const isFinished = ['done', 'error'].includes(normalizedJob.status);
     if (wasActive && isFinished && !extractionJobNotices.has(job.id)) {
         extractionJobNotices.add(job.id);
         if (job.status === 'done') {
-            applyExtractionChapterSummary(job.result);
-            void refreshChaptersAfterExtraction(job.result);
+            const result = {
+                ...(job.result || {}),
+                novelId: job.result?.novelId || extractionJobProjectId(job),
+            };
+            applyExtractionChapterSummary(result);
+            void refreshChaptersAfterExtraction(result);
         }
         showToast(job.status === 'done' ? '设定提取完成，点击左下角查看结果。' : `设定提取失败：${job.error || '未知错误'}`, job.status === 'done' ? 'success' : 'error');
     }
@@ -452,7 +556,9 @@ function startExtractionJobPolling() {
 }
 
 async function pollExtractionJobs() {
-    const activeJobs = [...extractionJobs.values()].filter(isExtractionJobActive);
+    const operation = captureAutomationOperation({ trackRequest: false });
+    const activeJobs = [...extractionJobs.values()]
+        .filter(job => isExtractionJobForCurrentProject(job) && isExtractionJobActive(job));
     if (!activeJobs.length) {
         clearInterval(extractionJobPollTimer);
         extractionJobPollTimer = null;
@@ -466,7 +572,7 @@ async function pollExtractionJobs() {
                 undefined,
                 { jobId: job.id },
             );
-            handleExtractionJobUpdate(data.job);
+            if (isCurrentAutomationOperation(operation)) handleExtractionJobUpdate(data.job);
         } catch {}
     }));
     renderExtractionJobDock();
@@ -479,7 +585,9 @@ function isExtractionJobActive(job) {
 function renderExtractionJobDock() {
     const dock = document.getElementById('extract-job-dock');
     if (!dock) return;
-    const jobs = [...extractionJobs.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const jobs = [...extractionJobs.values()]
+        .filter(isExtractionJobForCurrentProject)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     dock.hidden = !jobs.length;
     const activeJobs = jobs.filter(isExtractionJobActive);
     const erroredJobs = jobs.filter(job => job.status === 'error');
@@ -534,18 +642,25 @@ function getExtractionJobPercent(job) {
 }
 
 async function openExtractionJobResult(id) {
+    const operation = captureAutomationOperation({ trackRequest: false });
     try {
         const data = await AutomationRuntime.execute(
             'extraction.jobs.get',
             undefined,
             { jobId: id },
         );
+        if (!isCurrentAutomationOperation(operation)) return;
+        if (!isExtractionJobForCurrentProject(data.job)) return;
         handleExtractionJobUpdate(data.job);
         renderExtractionJobDock();
         if (!data.job?.result) throw new Error('任务还没有可查看的结果');
-        applyExtractionChapterSummary(data.job.result);
-        void refreshChaptersAfterExtraction(data.job.result);
-        showExtractionResults(data.job.result);
+        const result = {
+            ...data.job.result,
+            novelId: data.job.result?.novelId || extractionJobProjectId(data.job),
+        };
+        applyExtractionChapterSummary(result);
+        void refreshChaptersAfterExtraction(result);
+        showExtractionResults(result);
     } catch (err) {
         setStatus(`查看提取结果失败: ${err.message}`, 'error');
     }
@@ -554,6 +669,7 @@ async function openExtractionJobResult(id) {
 function applyExtractionChapterSummary(result = {}) {
     const brief = result.chapterSummary?.brief || result.chapterSummary || '';
     if (!brief || result.mode !== 'current') return;
+    if (result.novelId && String(result.novelId) !== String(state.currentNovel?.id || '')) return;
     if (!state.currentChapter?.id || String(result.chapterId || '') !== String(state.currentChapter.id)) return;
     state.currentChapter.summary = brief;
     state.currentChapter.summaryGenerator = 'ai-v1';
@@ -571,8 +687,11 @@ function applyExtractionChapterSummary(result = {}) {
 
 async function refreshChaptersAfterExtraction(result = {}) {
     if (!['current', 'project'].includes(result.mode) || !state.currentNovel?.id) return;
+    const operation = captureAutomationOperation({ trackRequest: false, chapterId: state.currentChapter?.id || '' });
+    const projectId = operation.context.projectId;
     try {
-        const data = await Repositories.chapters.list(state.currentNovel.id);
+        const data = await Repositories.chapters.list(projectId);
+        if (!isCurrentAutomationOperation(operation)) return;
         const nextChapters = Array.isArray(data) ? data : [];
         if (!nextChapters.length) return;
         state.chapters = nextChapters.map(chapter => {
@@ -582,9 +701,10 @@ async function refreshChaptersAfterExtraction(result = {}) {
         if (state.currentChapter?.id) {
             const latestMeta = nextChapters.find(chapter => chapter.id === state.currentChapter.id);
             const latest = await Repositories.chapters.get(
-                state.currentNovel.id,
+                projectId,
                 state.currentChapter.id,
             ).catch(() => latestMeta);
+            if (!isCurrentAutomationOperation(operation, { chapter: true })) return;
             if (latest) {
                 Object.assign(state.currentChapter, {
                     summary: latest.summary || state.currentChapter.summary || '',
@@ -668,6 +788,10 @@ async function readProjectExtractionStream(response, progressEl) {
 
 // eslint-disable-next-line no-unused-vars
 function showExtractionResultsLegacy(data) {
+    if (data?.novelId && String(data.novelId) !== String(state.currentNovel?.id || '')) return;
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
     const chars = data.characters || [];
     const entries = data.worldEntries || [];
     const overlay = document.createElement('div');
@@ -688,6 +812,12 @@ function showExtractionResultsLegacy(data) {
     overlay.querySelector('.extract-close-btn')?.addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     overlay.querySelector('.extract-import-btn')?.addEventListener('click', () => {
+        if (lifecycleContext
+            && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            close();
+            setStatus('项目已切换，已取消导入旧任务结果', 'warn');
+            return;
+        }
         const selChars = overlay.querySelectorAll('.extract-char-check:checked');
         const selEntries = overlay.querySelectorAll('.extract-entry-check:checked');
         if (!chars.length && !entries.length) { close(); return; }
@@ -715,6 +845,10 @@ function showExtractionResultsLegacy(data) {
 }
 
 function showExtractionResults(data) {
+    if (data?.novelId && String(data.novelId) !== String(state.currentNovel?.id || '')) return;
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
     const chars = data.characters || [];
     const entries = data.worldEntries || [];
     const overlay = document.createElement('div');
@@ -746,6 +880,12 @@ function showExtractionResults(data) {
     overlay.querySelector('.extract-close-btn')?.addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     overlay.querySelector('.extract-import-btn')?.addEventListener('click', () => {
+        if (lifecycleContext
+            && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            close();
+            setStatus('项目已切换，已取消导入旧任务结果', 'warn');
+            return;
+        }
         const selChars = overlay.querySelectorAll('.extract-char-check:checked');
         const selEntries = overlay.querySelectorAll('.extract-entry-check:checked');
         if (!chars.length && !entries.length) { close(); return; }

@@ -106,6 +106,16 @@ test('@interface app IPC only opens validated HTTPS URLs', async () => {
         },
     });
     expect(harness.openedUrls).toHaveLength(1);
+
+    const credentialUrl = await handler(event, { url: 'https://user:secret@example.com/' });
+    expect(credentialUrl).toMatchObject({
+        ok: false,
+        error: {
+            code: 'PERMISSION_DENIED',
+            retryable: false,
+        },
+    });
+    expect(harness.openedUrls).toHaveLength(1);
 });
 
 test('@interface sandboxed preload stays aligned with the public app contract', async () => {

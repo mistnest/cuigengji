@@ -5,12 +5,22 @@
 'use strict';
 /* eslint-disable no-undef, no-unused-vars */
 async function importDocumentFromDialog({ newProject = false } = {}) {
+    const lifecycleContext = newProject ? null
+        : (window.CuigengjiWorkspaceLifecycle?.capture
+            ? window.CuigengjiWorkspaceLifecycle.capture()
+            : null);
+    const projectId = lifecycleContext?.projectId || state.currentNovel?.id;
     try {
         const result = await Repositories.imports.selectDocument({
-            projectId: newProject ? undefined : state.currentNovel?.id,
+            projectId: newProject ? undefined : projectId,
             autoSplit: true,
         });
         if (!result) return;
+        if (lifecycleContext
+            && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            setStatus('项目已切换，已取消旧导入', 'warn');
+            return;
+        }
         const project = result.project || state.currentNovel;
         await enterWorkspace(project.id, project.title || state.currentNovel?.title || project.id);
     } catch (err) {
@@ -36,8 +46,14 @@ function downloadJson(data, filename) {
 
 function exportWorldBook() {
     const entries = Object.entries(state.worldBook?.entries || {});
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const sourceSnapshot = cloneForExport(state.worldBook);
+    const titleSnapshot = state.currentNovel?.title || 'worldbook';
     if (!entries.length) return setStatus('\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u4e16\u754c\u4e66', 'warn');
     showExportSelectionDialog({
+        lifecycleContext,
         title: '导出世界书',
         subtitle: '选择要导出的世界书条目。',
         items: entries.map(([uid, entry]) => ({
@@ -48,17 +64,23 @@ function exportWorldBook() {
         })),
         onConfirm: async selectedIds => {
             const selected = new Set(selectedIds);
-            const data = buildSelectedWorldBookExport(selected);
+            const data = buildSelectedWorldBookExport(selected, sourceSnapshot);
             if (!Object.keys(data.entries || {}).length) return setStatus('请选择至少一个世界书条目', 'warn');
-            const result = await downloadJson(data, `${state.currentNovel?.title || 'worldbook'}-worldbook.json`);
+            const result = await downloadJson(data, `${titleSnapshot}-worldbook.json`);
             if (result) setStatus(`已导出 ${Object.keys(data.entries).length} 条世界书`, 'success');
         },
     });
 }
 
 function exportCharacters() {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const charactersSnapshot = cloneForExport(state.characters);
+    const titleSnapshot = state.currentNovel?.title || 'characters';
     if (!state.characters.length) return setStatus('\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u89d2\u8272', 'warn');
     showExportSelectionDialog({
+        lifecycleContext,
         title: '导出角色卡',
         subtitle: '选择要导出的角色。单个角色会导出标准角色卡 JSON，多个角色会导出催更姬角色合集。',
         items: state.characters.map((character, index) => ({
@@ -70,9 +92,9 @@ function exportCharacters() {
         onConfirm: async selectedIds => {
             const selected = selectedIds
                 .map(id => Number(id))
-                .filter(index => Number.isInteger(index) && state.characters[index]);
+                .filter(index => Number.isInteger(index) && charactersSnapshot[index]);
             if (!selected.length) return setStatus('请选择至少一个角色', 'warn');
-            const characters = selected.map(index => state.characters[index]);
+            const characters = selected.map(index => charactersSnapshot[index]);
             if (characters.length === 1) {
                 const name = characters[0].data?.name || characters[0].name || 'character';
                 await downloadJson(characters[0], `${safeFilename(name)}.json`);
@@ -81,32 +103,36 @@ function exportCharacters() {
                     spec: 'cuigengji_character_bundle_v1',
                     exportedAt: Date.now(),
                     characters,
-                }, `${state.currentNovel?.title || 'characters'}-characters.json`);
+                }, `${titleSnapshot}-characters.json`);
             }
             setStatus(`已导出 ${characters.length} 个角色`, 'success');
         },
     });
 }
 
-function buildSelectedWorldBookExport(selectedIds) {
-    const source = state.worldBook || {};
+function buildSelectedWorldBookExport(selectedIds, source = state.worldBook) {
+    const sourceData = source || {};
     const entries = {};
     const folders = new Set();
-    for (const [uid, entry] of Object.entries(source.entries || {})) {
+    for (const [uid, entry] of Object.entries(sourceData.entries || {})) {
         if (!selectedIds.has(String(uid))) continue;
         entries[uid] = { ...entry };
         const folder = getWorldBookFolder(entry);
         if (folder) folders.add(folder);
     }
     return {
-        ...source,
+        ...sourceData,
         entries,
         folders: [...folders].sort((a, b) => a.localeCompare(b, 'zh-CN')),
-        sources: source.sources || {},
+        sources: sourceData.sources || {},
     };
 }
 
-function showExportSelectionDialog({ title, subtitle, items, onConfirm }) {
+function cloneForExport(value) {
+    try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value)); }
+}
+
+function showExportSelectionDialog({ title, subtitle, items, onConfirm, lifecycleContext = null }) {
     document.getElementById('export-selection-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.id = 'export-selection-overlay';
@@ -151,8 +177,16 @@ function showExportSelectionDialog({ title, subtitle, items, onConfirm }) {
         overlay.querySelectorAll('.export-selection-check').forEach(input => { input.checked = false; });
     });
     overlay.querySelector('.export-selection-confirm')?.addEventListener('click', () => {
+        if (lifecycleContext
+            && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            close();
+            setStatus('项目已切换，已取消旧导出', 'warn');
+            return;
+        }
         const selectedIds = [...overlay.querySelectorAll('.export-selection-check:checked')].map(input => input.value);
-        onConfirm?.(selectedIds);
+        void Promise.resolve(onConfirm?.(selectedIds)).catch(error => {
+            setStatus(`导出失败: ${error.message}`, 'error');
+        });
         close();
     });
     requestAnimationFrame(() => overlay.classList.add('active'));
@@ -172,20 +206,36 @@ async function exportPreset() {
 }
 
 async function importFolder() {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const projectId = lifecycleContext?.projectId || state.currentNovel?.id;
     try {
-        const result = await Repositories.imports.selectFolder(state.currentNovel?.id);
+        const result = await Repositories.imports.selectFolder(projectId);
         if (!result) return;
-        await enterWorkspace(state.currentNovel.id, state.currentNovel.title);
+        if (lifecycleContext && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            setStatus('项目已切换，已取消旧文件夹导入', 'warn');
+            return;
+        }
+        await enterWorkspace(projectId, state.currentNovel.title);
     } catch (err) {
         setStatus(`\u6587\u4ef6\u5939\u5bfc\u5165\u5931\u8d25: ${err.message}`, 'error');
     }
 }
 
 async function importWorldBook() {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const projectId = lifecycleContext?.projectId || state.currentNovel?.id;
     try {
-        await ensureNovelExists();
-        const result = await Repositories.imports.selectWorldBook(state.currentNovel.id);
+        await ensureNovelExists(projectId);
+        const result = await Repositories.imports.selectWorldBook(projectId);
         if (!result) return;
+        if (lifecycleContext && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            setStatus('项目已切换，已取消旧世界书导入', 'warn');
+            return;
+        }
         // Merge into existing entries instead of replacing
         const sourceName = result.name.replace(/\.json$/i, '');
         const incoming = result.entries || {};
@@ -214,10 +264,18 @@ async function importWorldBook() {
 }
 
 async function importCharacters() {
-    await ensureNovelExists();
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const projectId = lifecycleContext?.projectId || state.currentNovel?.id;
+    await ensureNovelExists(projectId);
     try {
-        const result = await Repositories.imports.selectCharacters(state.currentNovel.id);
+        const result = await Repositories.imports.selectCharacters(projectId);
         if (!result) return;
+        if (lifecycleContext && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            setStatus('项目已切换，已取消旧角色导入', 'warn');
+            return;
+        }
         const imported = result.characters
             .map(item => item.character || item.data)
             .filter(Boolean);
@@ -231,9 +289,17 @@ async function importCharacters() {
 }
 
 async function importPreset() {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
+    const projectId = lifecycleContext?.projectId || state.currentNovel?.id;
     try {
-        const result = await Repositories.imports.selectPreset(state.currentNovel.id);
+        const result = await Repositories.imports.selectPreset(projectId);
         if (!result) return;
+        if (lifecycleContext && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) {
+            setStatus('项目已切换，已取消旧预设导入', 'warn');
+            return;
+        }
         const data = result.data;
         const importedName = result.name.replace(/\.json$/i, '');
 

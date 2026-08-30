@@ -34,6 +34,7 @@ function ensureBuiltinPreset() {
                 isSystemPrompt: !!p.isSystemPrompt,
                 isMarker: !!p.isMarker,
                 markerId: p.markerId || '',
+                enabled: p.enabled !== false && p.disabled !== true,
             }));
     }
 
@@ -42,6 +43,11 @@ function ensureBuiltinPreset() {
             .filter(o => state.promptTemplates.some(t => t.identifier === o.identifier))
             .map(o => ({ identifier: o.identifier, enabled: o.enabled !== false }));
     }
+
+    // Preserve the preset's explicit enabled/disabled state.  The builtin
+    // file contains intentionally disabled experimental modes; dropping that
+    // bit here would make them enter every Agent prompt after the first save.
+    state.enabledTemplates = buildPresetEnabledTemplates(data, state.promptTemplates || []);
 
     state.presetName = data.name || '催更姬_v1.0';
     console.log('📦 已加载内置预设:', state.presetName);

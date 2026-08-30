@@ -58,6 +58,9 @@ function importEmbeddedWorldBookEntries(character, entries) {
 }
 
 function openCharacterEditor(existingChar, charIndex) {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
     const isEdit = existingChar !== null && existingChar !== undefined && charIndex >= 0;
     const data = isEdit ? (existingChar.data || existingChar) : {};
     const name = isEdit ? (data.name || existingChar.name || '') : '';
@@ -166,6 +169,9 @@ function openCharacterEditor(existingChar, charIndex) {
         btn.disabled = true; btn.textContent = '生成中...';
         try {
             const summary = await generateSummary(parts.join('\n'), 'character');
+            if (lifecycleContext
+                && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) return;
+            if (!overlay.isConnected) return;
             const summaryEl = overlay.querySelector('#character-edit-summary');
             if (summaryEl) summaryEl.value = summary;
         } catch (e) { alert('生成失败: ' + e.message); }

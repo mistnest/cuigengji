@@ -83,6 +83,8 @@
 .agent-message { min-width: 0; }
 .agent-message__label { margin-bottom: 5px; color: var(--agent-muted); font-size: 11px; font-weight: 700; }
 .agent-message__text { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 14px; line-height: 1.72; }
+.agent-source-link { color: var(--agent-accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.agent-source-link:hover { text-decoration-thickness: 2px; }
 .agent-message--user { justify-self: end; max-width: 88%; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--agent-accent) 24%, var(--agent-border)); border-radius: 13px 13px 4px 13px; background: color-mix(in srgb, var(--agent-accent) 8%, var(--agent-surface-raised)); }
 .agent-message--assistant { padding: 2px 1px; }
 .agent-message.is-error { border-color: var(--agent-danger); }
@@ -97,6 +99,22 @@
 .agent-tool-card__status { position: absolute; top: 9px; right: 9px; color: var(--agent-warning); font-size: 10px; }
 .agent-tool-card.is-success .agent-tool-card__status { color: var(--agent-success); }
 .agent-tool-card.is-error .agent-tool-card__status { color: var(--agent-danger); }
+.agent-proposal-card { display: grid; gap: 8px; padding: 11px; border: 1px solid color-mix(in srgb, var(--agent-accent) 48%, var(--agent-border)); border-radius: 12px; background: color-mix(in srgb, var(--agent-accent) 7%, var(--agent-surface-raised)); }
+.agent-proposal-card__eyebrow { color: var(--agent-accent); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.agent-proposal-card__title { font-size: 13px; line-height: 1.45; }
+.agent-proposal-card__reason { margin: 0; color: var(--agent-text); font-size: 12px; line-height: 1.6; }
+.agent-proposal-card__meta { color: var(--agent-muted); font-size: 10px; }
+.agent-proposal-card__operations,
+.agent-proposal-card__section ul { margin: 0; padding-left: 18px; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }
+.agent-proposal-card__section { display: grid; gap: 4px; }
+.agent-proposal-card__section strong { font-size: 11px; }
+.agent-proposal-card__warning { margin: 0; color: var(--agent-warning); font-size: 11px; }
+.agent-proposal-card__actions { display: flex; align-items: center; gap: 8px; }
+.agent-proposal-card__apply { padding: 6px 9px; border: 1px solid transparent; border-radius: 8px; background: var(--agent-accent); color: white; cursor: pointer; font-size: 11px; }
+.agent-proposal-card__apply:disabled { cursor: default; opacity: .5; }
+.agent-proposal-card__result { color: var(--agent-muted); font-size: 10px; }
+.agent-proposal-card__result.is-applied { color: var(--agent-success); }
+.agent-proposal-card__result.is-error { color: var(--agent-danger); }
 .agent-error-notice { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--agent-danger) 45%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--agent-danger) 8%, transparent); font-size: 12px; }
 .agent-error-notice span { color: var(--agent-muted); }
 .agent-jump-bottom { position: sticky; bottom: 8px; display: block; margin: 0 auto 8px; padding: 6px 10px; border-radius: 999px; font-size: 11px; box-shadow: 0 7px 20px rgba(0, 0, 0, .25); }

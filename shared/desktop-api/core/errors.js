@@ -12,6 +12,8 @@ export const DESKTOP_ERROR_CODES = Object.freeze({
     agentSessionProjectMismatch: 'AGENT_SESSION_PROJECT_MISMATCH',
     agentPromptRejected: 'AGENT_PROMPT_REJECTED',
     agentCancelRejected: 'AGENT_CANCEL_REJECTED',
+    agentContextStale: 'AGENT_CONTEXT_STALE',
+    agentProviderUnsupported: 'AGENT_PROVIDER_UNSUPPORTED',
     agentStreamDisconnected: 'AGENT_STREAM_DISCONNECTED',
     dataCorrupt: 'DATA_CORRUPT',
     permissionDenied: 'PERMISSION_DENIED',

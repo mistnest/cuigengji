@@ -339,7 +339,11 @@ async function appendReferenceToolResults({ messages, toolCalls = [], runtime, t
         const name = call.function?.name || '';
         const args = parseToolArguments(call.function?.arguments);
         const result = name === 'import_data'
-            ? await executeTool(name, args, runtime.context?.novelId || '')
+            ? await executeTool(name, args, runtime.context?.novelId || '', {
+                expectedRevision: runtime.context?.workspaceRevision,
+                expectedContentHash: runtime.context?.workspaceContentHash,
+                actor: { kind: 'agent', id: 'legacy-writing-tool' },
+            })
             : await executeReferenceTool(name, args, runtime);
         toolTrace.push({
             id: call.id,

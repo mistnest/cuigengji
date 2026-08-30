@@ -2,13 +2,19 @@
  * Chat Tool — Shared tool definitions for Plan & Assist modes
  */
 import sanitize from 'sanitize-filename';
+
 import {
-    AppError,
-    projectFile,
-    updateJson,
-    writeJson,
-} from '../../../backend/foundation/platform/index.js';
-import { ensureCharacterSummaries, ensureWorldBookSummaries } from '../../../backend/domains/knowledge/index.js';
+    listCharacters,
+    saveCharacter,
+    ensureCharacterSummaries,
+    ensureWorldBookSummaries,
+} from '../../../backend/domains/knowledge/index.js';
+import { loadWorkspace, saveWorkspace } from '../../../backend/domains/project/index.js';
+import {
+    getPreset,
+    savePreset,
+    sanitizePresetSecrets,
+} from '../../../backend/foundation/configuration/index.js';
 
 // ==================== Tool Definitions ====================
 
@@ -42,7 +48,8 @@ export const ASSIST_TOOLS = [
 
 // ==================== Tool Executor ====================
 
-export async function executeTool(name, args = {}, novelId = '') {
+export async function executeTool(name, args = {}, novelId = '', options = {}) {
+    const writeOptions = normalizeWriteOptions(options);
     switch (name) {
         case 'import_data': {
             const { target, data } = args;
@@ -50,15 +57,15 @@ export async function executeTool(name, args = {}, novelId = '') {
             if (!novelId) return { error: '缺少 novelId，无法写入项目' };
 
             if (target === 'character') {
-                return importCharacter(novelId, data);
+                return importCharacter(novelId, data, writeOptions);
             }
 
             if (target === 'worldbook') {
-                return importWorldBookEntries(novelId, data);
+                return importWorldBookEntries(novelId, data, writeOptions);
             }
 
             if (target === 'preset') {
-                return importPreset(novelId, data);
+                return importPreset(novelId, data, writeOptions);
             }
 
             return { error: `未知 target: ${target}` };
@@ -69,45 +76,50 @@ export async function executeTool(name, args = {}, novelId = '') {
     }
 }
 
-async function importCharacter(novelId, data = {}) {
+async function importCharacter(novelId, data = {}, options = {}) {
     const name = String(data.data?.name || data.name || '').trim();
     if (!name) return { error: '角色名缺失' };
 
     const card = normalizeCharacterCard(data, name);
     const character = ensureCharacterSummaries([card]).data[0];
-    const filePath = projectAssetFile(novelId, 'characters', name);
-    await writeJson(filePath, character);
+    // Resolve the current asset version before writing.  The old legacy tool
+    // used a raw write here, which could silently replace a human edit made
+    // while the model was thinking.  A missing asset is represented by
+    // revision 0 so a concurrent first create still loses with a CAS error.
+    const safeName = sanitize(String(name || '')).substring(0, 100);
+    const existing = (await listCharacters(novelId))
+        .find(item => item.name === safeName)?.data;
+    const savedCharacter = await saveCharacter(novelId, character, {
+        expectedRevision: data.expectedRevision ?? data.revision ?? existing?.revision ?? 0,
+        expectedContentHash: data.expectedContentHash ?? data.contentHash ?? existing?.contentHash,
+        actor: options.actor,
+    });
 
-    const workspaceFile = projectFile(novelId, 'workspace.json');
-    await updateJson(workspaceFile, workspace => {
-        workspace = workspace || {};
+    const workspaceResult = await updateWorkspace(novelId, options, workspace => {
         const characters = Array.isArray(workspace.characters) ? workspace.characters : [];
         const next = characters.filter(item => characterName(item) !== name);
-        next.push(character);
-        return {
-            ...workspace,
-            characters: next,
-            savedAt: Date.now(),
-        };
-    }, { defaultValue: {} });
+        next.push(savedCharacter.character || character);
+        return { ...workspace, characters: next };
+    });
 
     return {
         success: true,
         target: 'character',
         name,
-        character,
-        path: filePath,
+        character: savedCharacter.character || character,
+        path: savedCharacter.path,
+        revision: workspaceResult.saved.revision,
+        updatedAt: workspaceResult.saved.updatedAt,
+        contentHash: workspaceResult.saved.contentHash,
     };
 }
 
-async function importWorldBookEntries(novelId, data = {}) {
+async function importWorldBookEntries(novelId, data = {}, options = {}) {
     const entries = normalizeWorldBookInput(data);
     if (!entries.length) return { error: '没有提供世界书条目' };
 
-    const workspaceFile = projectFile(novelId, 'workspace.json');
     let addedEntries = {};
-    await updateJson(workspaceFile, workspace => {
-        workspace = workspace || {};
+    const workspaceResult = await updateWorkspace(novelId, options, workspace => {
         const currentBook = workspace.worldBook?.entries ? workspace.worldBook : { entries: {} };
         const bookEntries = { ...(currentBook.entries || {}) };
         let uid = Math.max(0, ...Object.keys(bookEntries).map(Number).filter(Number.isFinite)) + 1;
@@ -127,9 +139,8 @@ async function importWorldBookEntries(novelId, data = {}) {
                 ...currentBook,
                 entries: bookEntries,
             }).data,
-            savedAt: Date.now(),
         };
-    }, { defaultValue: { worldBook: { entries: {} } } });
+    });
 
     if (!Object.keys(addedEntries).length) return { error: '世界书条目缺少 content 或 key' };
 
@@ -138,28 +149,81 @@ async function importWorldBookEntries(novelId, data = {}) {
         target: 'worldbook',
         entries_added: Object.keys(addedEntries).length,
         entries: addedEntries,
+        revision: workspaceResult.saved.revision,
+        updatedAt: workspaceResult.saved.updatedAt,
+        contentHash: workspaceResult.saved.contentHash,
     };
 }
 
-async function importPreset(novelId, data = {}) {
+async function importPreset(novelId, data = {}, options = {}) {
     const name = String(data.name || '').trim();
     if (!name) return { error: '预设名称缺失' };
-    const preset = { ...data, name, savedAt: Date.now() };
-    const filePath = projectAssetFile(novelId, 'presets', name);
-    await writeJson(filePath, preset);
+    const preset = sanitizePresetSecrets({ ...data, name, savedAt: Date.now() });
+    const existingPreset = await getPreset(novelId, name);
+    const savedPreset = await savePreset(novelId, name, preset, {
+        expectedRevision: data.expectedPresetRevision ?? data.presetRevision
+            ?? existingPreset?.revision ?? 0,
+        expectedContentHash: data.expectedPresetContentHash ?? data.presetContentHash
+            ?? existingPreset?.contentHash,
+        actor: options.actor,
+    });
 
-    const workspaceFile = projectFile(novelId, 'workspace.json');
-    await updateJson(workspaceFile, workspace => ({
-        ...(workspace || {}),
+    const workspacePreset = {
+        ...preset,
+        revision: savedPreset.revision,
+        updatedAt: savedPreset.updatedAt,
+        contentHash: savedPreset.contentHash,
+    };
+    const workspaceResult = await updateWorkspace(novelId, options, workspace => ({
+        ...workspace,
         presets: {
-            ...((workspace || {}).presets || {}),
-            [name]: preset,
+            ...(workspace.presets || {}),
+            [name]: workspacePreset,
         },
-        presetName: (workspace || {}).presetName || name,
-        savedAt: Date.now(),
-    }), { defaultValue: {} });
+        presetName: workspace.presetName || name,
+    }));
 
-    return { success: true, target: 'preset', name, preset, path: filePath };
+    return {
+        success: true,
+        target: 'preset',
+        name,
+        preset: workspacePreset,
+        path: savedPreset.path,
+        revision: workspaceResult.saved.revision,
+        updatedAt: workspaceResult.saved.updatedAt,
+        contentHash: workspaceResult.saved.contentHash,
+    };
+}
+
+/**
+ * Update the authoritative workspace through a read/CAS/write cycle.  When
+ * the caller has no snapshot metadata we pin the CAS to the version read at
+ * the beginning of this operation; this is still safer than an unconditional
+ * update because another writer can commit between the read and the write.
+ */
+async function updateWorkspace(novelId, options = {}, mutate) {
+    const workspace = await loadWorkspace(novelId);
+    const expectedRevision = options.expectedRevision ?? workspace.revision ?? 0;
+    const expectedContentHash = options.expectedContentHash ?? workspace.contentHash;
+    const candidate = mutate(structuredClone(workspace));
+    const saved = await saveWorkspace(novelId, {
+        ...candidate,
+        expectedRevision,
+        expectedContentHash,
+        actor: options.actor,
+    });
+    return { workspace, candidate, saved };
+}
+
+function normalizeWriteOptions(options = {}) {
+    const actor = options?.actor && typeof options.actor === 'object'
+        ? options.actor
+        : { kind: 'agent', id: 'legacy-writing-tool' };
+    return {
+        expectedRevision: options?.expectedRevision,
+        expectedContentHash: options?.expectedContentHash,
+        actor,
+    };
 }
 
 function normalizeCharacterCard(data = {}, name) {
@@ -260,10 +324,4 @@ function normalizePosition(value) {
 
 function characterName(character = {}) {
     return character.data?.name || character.name || '';
-}
-
-function projectAssetFile(novelId, folder, name) {
-    const safe = sanitize(String(name || '')).substring(0, 100);
-    if (!safe) throw new AppError('INVALID_PATH', 'Invalid file name', { status: 400 });
-    return projectFile(novelId, 'assets', folder, `${safe}.json`);
 }

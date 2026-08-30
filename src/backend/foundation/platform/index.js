@@ -5,3 +5,5 @@ export * from './paths/project-paths.js';
 export * from './diagnostics/api-call-logger.js';
 export * from './identity/app-signature.js';
 export * from './runtime/runtime-config.js';
+export * from './versioning/versioning.js';
+export * from './events/domain-event-bus.js';

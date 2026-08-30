@@ -15,8 +15,22 @@ function withoutPath(value) {
 export function registerPresetIpcHandlers({ ipcMain, getMainWindow }) {
     const handlers = new Map([
         [PRESET_IPC_CHANNELS.save, createGuardedHandler(getMainWindow,
-            async input => withoutPath(await savePreset(input?.projectId, input?.name, input?.data)),
+            async input => withoutPath(await savePreset(
+                input?.projectId,
+                input?.name,
+                input?.data,
+                {
+                    expectedRevision: input?.expectedRevision,
+                    expectedContentHash: input?.expectedContentHash,
+                    actor: humanActor(input?.clientId),
+                },
+            )),
             'presets.save', CONFIGURATION_INPUT_SCHEMAS.savePreset)],
     ]);
     return registerHandlers(ipcMain, handlers);
+}
+
+function humanActor(clientId) {
+    const id = typeof clientId === 'string' ? clientId.replace(/[\0\r\n]/gu, '').slice(0, 160) : '';
+    return { kind: 'human', id: id || 'renderer' };
 }

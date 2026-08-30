@@ -24,7 +24,7 @@ function requireHttpsUrl(input) {
         error.publicMessage = '外部链接格式无效。';
         throw error;
     }
-    if (url.protocol !== 'https:') {
+    if (url.protocol !== 'https:' || url.username || url.password) {
         const error = new Error(`External protocol is not allowed: ${url.protocol}`);
         error.code = DESKTOP_ERROR_CODES.permissionDenied;
         error.publicMessage = '仅允许打开 HTTPS 外部链接。';

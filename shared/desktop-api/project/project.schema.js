@@ -2,6 +2,7 @@ import { defineObjectSchema } from '../core/schema.js';
 
 const projectId = { type: 'string', required: true, maxLength: 200 };
 const chapterId = { type: 'string', required: true, maxLength: 200 };
+const expectedContentHash = { type: 'string', maxLength: 128 };
 
 export const PROJECT_INPUT_SCHEMAS = Object.freeze({
     listProjects: defineObjectSchema('project.projects.list', {}, { allowUndefined: true }),
@@ -13,6 +14,11 @@ export const PROJECT_INPUT_SCHEMAS = Object.freeze({
         projectId,
         confirmationToken: { type: 'string', required: true, maxLength: 500 },
     }),
+    getChanges: defineObjectSchema('project.projects.changes', {
+        projectId,
+        sinceSeq: { type: 'number' },
+        sinceStreamId: { type: 'string', maxLength: 200 },
+    }),
     listChapters: defineObjectSchema('project.chapters.list', { projectId }),
     getChapter: defineObjectSchema('project.chapters.get', { projectId, chapterId }),
     createChapter: defineObjectSchema('project.chapters.create', {
@@ -23,6 +29,7 @@ export const PROJECT_INPUT_SCHEMAS = Object.freeze({
     }),
     deleteChapter: defineObjectSchema('project.chapters.delete', {
         projectId, chapterId, confirmed: { type: 'boolean' },
+        expectedRevision: { type: 'number' }, expectedContentHash,
     }),
     getOutline: defineObjectSchema('project.outlines.get', { projectId }),
     createOutlineNode: defineObjectSchema('project.outlines.createNode', {
@@ -40,10 +47,15 @@ export const PROJECT_INPUT_SCHEMAS = Object.freeze({
         projectId,
         nodeId: { type: 'string', required: true, maxLength: 200 },
         confirmed: { type: 'boolean' },
-        expectedRevision: { type: 'number' },
+        expectedRevision: { type: 'number' }, expectedContentHash,
+    }),
+    applyOutlinePatch: defineObjectSchema('project.outlines.applyPatch', {
+        projectId,
+        patch: { type: 'object', required: true },
     }),
     getWorkspace: defineObjectSchema('project.workspace.get', { projectId }),
     saveWorkspace: defineObjectSchema('project.workspace.save', {
         projectId, workspace: { type: 'object', required: true },
+        expectedRevision: { type: 'number' }, expectedContentHash,
     }),
 });

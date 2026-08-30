@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import writeFileAtomic from 'write-file-atomic';
 import { AppError } from '../errors/app-error.js';
+import {
+    assertExpectedRevision,
+    expectedContentHashFrom,
+    nextVersion,
+} from '../versioning/versioning.js';
 
 const writeQueues = new Map();
 const blockedRoots = new Set();
@@ -35,6 +40,32 @@ export async function updateJson(filePath, updater, options = {}) {
     return enqueueFileWrite(filePath, async () => {
         const current = await readJson(filePath, options);
         const next = await updater(current);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await writeFileAtomic(filePath, JSON.stringify(next, null, 2), { encoding: 'utf8' });
+        return next;
+    });
+}
+
+/**
+ * Compare-and-swap update for a versioned JSON aggregate.  The file queue
+ * provides serialization; the revision check provides correctness when a
+ * renderer and an Agent both hold an older snapshot.
+ */
+export async function updateVersionedJson(filePath, updater, options = {}) {
+    return enqueueFileWrite(filePath, async () => {
+        const current = await readJson(filePath, options);
+        assertExpectedRevision(
+            current,
+            options.expectedRevision,
+            options.resource || filePath,
+            {
+                includeCurrent: options.includeCurrent === true,
+                expectedContentHash: options.expectedContentHash
+                    ?? expectedContentHashFrom(options),
+            },
+        );
+        const candidate = await updater(current);
+        const next = nextVersion(current, candidate, options.updatedAt || Date.now());
         await fs.mkdir(path.dirname(filePath), { recursive: true });
         await writeFileAtomic(filePath, JSON.stringify(next, null, 2), { encoding: 'utf8' });
         return next;

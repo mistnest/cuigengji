@@ -87,6 +87,77 @@ test('@interface Agent store keeps injected runtime context out of the conversat
     expect(store.getState().items.map(item => item.text)).toEqual(['用户问题']);
 });
 
+test('@interface Agent store keeps the safe tool summary when completion has no replacement', () => {
+    const store = readyStore();
+    store.applyHistory('session-1', [
+        event(1, 'tool.started', {
+            turn: 1,
+            step: 1,
+            callId: 'web-1',
+            name: 'web_search',
+            label: '搜索网络资料',
+            summary: '搜索“明代县衙职位”',
+        }),
+        event(2, 'tool.completed', {
+            turn: 1,
+            step: 1,
+            callId: 'web-1',
+            status: 'success',
+            summary: '',
+        }),
+    ]);
+
+    expect(store.getState().items).toContainEqual(expect.objectContaining({
+        kind: 'tool',
+        name: 'web_search',
+        status: 'success',
+        summary: '搜索“明代县衙职位”',
+    }));
+});
+
+test('@interface Agent store projects outline proposals and keeps local apply state', () => {
+    const store = readyStore();
+    const proposal = {
+        proposalId: '12345678-1234-4234-8234-123456789abc',
+        baseRevision: 2,
+        summary: '补充阶段兑现',
+        reason: '当前大纲缺少回报节点。',
+        operations: [{ kind: 'create', ref: 'payoff', title: '第一次兑现' }],
+        impact: ['增强回报'],
+        assumptions: [],
+        hasDelete: false,
+    };
+    store.applyHistory('session-1', [
+        event(1, 'tool.started', {
+            turn: 1,
+            step: 1,
+            callId: 'proposal-call',
+            name: 'propose_outline_patch',
+            label: '整理大纲修改提案',
+            summary: '整理 1 项大纲修改',
+        }),
+        event(2, 'proposal.outline', {
+            turn: 1,
+            step: 1,
+            callId: 'proposal-call',
+            proposal,
+        }),
+    ]);
+    expect(store.getState().items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+            kind: 'tool', status: 'success', summary: '大纲修改提案已整理',
+        }),
+        expect.objectContaining({
+            kind: 'proposal', proposal, applyState: 'idle',
+        }),
+    ]));
+
+    store.setProposalApplyState(proposal.proposalId, 'applied', '已应用。');
+    expect(store.getState().items).toContainEqual(expect.objectContaining({
+        kind: 'proposal', applyState: 'applied', applyMessage: '已应用。',
+    }));
+});
+
 test('@interface Agent store restores rejected text without keeping duplicate pending items', () => {
     const store = readyStore();
     const pendingId = store.addOptimistic('恢复这段文字', 'queue');

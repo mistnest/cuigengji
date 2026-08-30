@@ -95,7 +95,11 @@ router.post('/', async (req, res) => {
                 const toolName = call.function?.name;
                 const args = parseToolArguments(call.function?.arguments);
                 sendSse(res, { type: 'tool_call', name: toolName, target: args.target, data: args.data });
-                const result = await executeTool(toolName, args, novelId);
+                const result = await executeTool(toolName, args, novelId, {
+                    expectedRevision: context?.workspaceRevision,
+                    expectedContentHash: context?.workspaceContentHash,
+                    actor: { kind: 'agent', id: 'legacy-assist-tool' },
+                });
                 sendSse(res, { type: 'tool_result', name: toolName, result });
                 messages.push({ role: 'tool', tool_call_id: call.id, name: toolName, content: JSON.stringify(result) });
             }
@@ -308,7 +312,11 @@ router.post('/import-data', async (req, res) => {
         const { name, args, novelId } = req.body;
         if (!name || !args) return res.status(400).json({ error: 'name and args required' });
         if (name !== 'import_data') return res.status(400).json({ error: 'unsupported tool' });
-        const result = await executeTool(name, args, novelId || '');
+        const result = await executeTool(name, args, novelId || '', {
+            expectedRevision: req.body?.expectedRevision ?? req.body?.workspaceRevision,
+            expectedContentHash: req.body?.expectedContentHash ?? req.body?.workspaceContentHash,
+            actor: { kind: 'agent', id: 'legacy-import-tool' },
+        });
         res.json(result);
     } catch (err) {
         console.error('[Chat ImportData]', err.message);

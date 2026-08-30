@@ -206,6 +206,11 @@ export async function startMockDeepSeekProvider(responder = defaultResponder) {
                 }));
                 return;
             }
+            if (body.stream !== true) {
+                response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+                response.end(JSON.stringify(result.json || completionFromFrames(result.frames)));
+                return;
+            }
             response.writeHead(200, {
                 'content-type': 'text/event-stream; charset=utf-8',
                 'cache-control': 'no-cache',
@@ -261,6 +266,38 @@ export async function startMockDeepSeekProvider(responder = defaultResponder) {
             for (const socket of sockets) socket.destroy();
             await new Promise(resolve => server.close(resolve));
         },
+    };
+}
+
+function completionFromFrames(frames = []) {
+    let content = '';
+    let reasoning = '';
+    let finishReason = 'stop';
+    const toolCalls = [];
+    for (const frame of frames) {
+        if (!frame || typeof frame !== 'object') continue;
+        const choice = frame.choices?.[0];
+        content += choice?.delta?.content || '';
+        reasoning += choice?.delta?.reasoning_content || '';
+        if (choice?.delta?.tool_calls) toolCalls.push(...choice.delta.tool_calls);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+    }
+    return {
+        id: 'mock-completion',
+        object: 'chat.completion',
+        created: 0,
+        model: 'mock-model',
+        choices: [{
+            index: 0,
+            message: {
+                role: 'assistant',
+                content,
+                ...(reasoning ? { reasoning_content: reasoning } : {}),
+                ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+            },
+            finish_reason: finishReason,
+        }],
+        usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
     };
 }
 

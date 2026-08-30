@@ -51,6 +51,8 @@ function createAppFacade({ invoke, ipcRenderer }) {
 const PROJECT_IPC_CHANNELS = Object.freeze({
     list: 'cgj:v1:projects:list', create: 'cgj:v1:projects:create',
     requestDelete: 'cgj:v1:projects:request-delete', delete: 'cgj:v1:projects:delete',
+    changed: 'cgj:v1:projects:changed',
+    changes: 'cgj:v1:projects:changes',
 });
 const CHAPTER_IPC_CHANNELS = Object.freeze({
     list: 'cgj:v1:chapters:list', get: 'cgj:v1:chapters:get',
@@ -60,59 +62,91 @@ const CHAPTER_IPC_CHANNELS = Object.freeze({
 const OUTLINE_IPC_CHANNELS = Object.freeze({
     get: 'cgj:v1:outlines:get', createNode: 'cgj:v1:outlines:create-node',
     updateNode: 'cgj:v1:outlines:update-node', reorder: 'cgj:v1:outlines:reorder',
-    deleteNode: 'cgj:v1:outlines:delete-node',
+    deleteNode: 'cgj:v1:outlines:delete-node', applyPatch: 'cgj:v1:outlines:apply-patch',
 });
 const WORKSPACE_IPC_CHANNELS = Object.freeze({
     get: 'cgj:v1:workspaces:get', save: 'cgj:v1:workspaces:save',
 });
 
-function createProjectFacade(invoke) {
+function createProjectFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const ipcRenderer = typeof input === 'object' ? input.ipcRenderer : null;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const projects = Object.freeze({
         list: () => invoke(PROJECT_IPC_CHANNELS.list),
-        create: input => invoke(PROJECT_IPC_CHANNELS.create, input),
-        requestDelete: projectId => invoke(PROJECT_IPC_CHANNELS.requestDelete, { projectId }),
-        delete: (projectId, confirmationToken) => invoke(PROJECT_IPC_CHANNELS.delete, {
-            projectId, confirmationToken,
+        changes: (projectId, options = {}) => invoke(PROJECT_IPC_CHANNELS.changes, {
+            projectId,
+            sinceSeq: options.sinceSeq,
+            sinceStreamId: options.sinceStreamId,
         }),
+        create: input => invoke(PROJECT_IPC_CHANNELS.create, writePayload(input || {})),
+        requestDelete: projectId => invoke(PROJECT_IPC_CHANNELS.requestDelete, { projectId }),
+        delete: (projectId, confirmationToken) => invoke(PROJECT_IPC_CHANNELS.delete, writePayload({
+            projectId, confirmationToken,
+        })),
+        onChanged(listener) {
+            if (typeof listener !== 'function') throw new TypeError('listener must be a function');
+            if (!ipcRenderer) return () => {};
+            const handler = (_event, value) => listener(value);
+            ipcRenderer.on(PROJECT_IPC_CHANNELS.changed, handler);
+            let active = true;
+            return () => {
+                if (!active) return;
+                active = false;
+                ipcRenderer.removeListener(PROJECT_IPC_CHANNELS.changed, handler);
+            };
+        },
     });
     const chapters = Object.freeze({
         list: projectId => invoke(CHAPTER_IPC_CHANNELS.list, { projectId }),
         get: (projectId, chapterId) => invoke(CHAPTER_IPC_CHANNELS.get, { projectId, chapterId }),
-        create: (projectId, chapter) => invoke(CHAPTER_IPC_CHANNELS.create, {
+        create: (projectId, chapter) => invoke(CHAPTER_IPC_CHANNELS.create, writePayload({
             projectId, chapter,
-        }),
-        update: (projectId, chapterId, patch) => invoke(CHAPTER_IPC_CHANNELS.update, {
+        })),
+        update: (projectId, chapterId, patch) => invoke(CHAPTER_IPC_CHANNELS.update, writePayload({
             projectId, chapterId, patch,
-        }),
-        delete: (projectId, chapterId, confirmed) => invoke(CHAPTER_IPC_CHANNELS.delete, {
-            projectId, chapterId, confirmed,
-        }),
+        })),
+        delete: (projectId, chapterId, options) => invoke(CHAPTER_IPC_CHANNELS.delete, writePayload({
+            projectId,
+            chapterId,
+            confirmed: typeof options === 'boolean' ? options : options?.confirmed,
+            expectedRevision: typeof options === 'object' ? options?.expectedRevision : undefined,
+            expectedContentHash: typeof options === 'object' ? options?.expectedContentHash : undefined,
+        })),
     });
     const outlines = Object.freeze({
         get: projectId => invoke(OUTLINE_IPC_CHANNELS.get, { projectId }),
-        createNode: (projectId, node) => invoke(OUTLINE_IPC_CHANNELS.createNode, {
+        createNode: (projectId, node) => invoke(OUTLINE_IPC_CHANNELS.createNode, writePayload({
             projectId, node,
-        }),
-        updateNode: (projectId, nodeId, patch) => invoke(OUTLINE_IPC_CHANNELS.updateNode, {
+        })),
+        updateNode: (projectId, nodeId, patch) => invoke(OUTLINE_IPC_CHANNELS.updateNode, writePayload({
             projectId, nodeId, patch,
-        }),
-        reorder: (projectId, command) => invoke(OUTLINE_IPC_CHANNELS.reorder, {
+        })),
+        reorder: (projectId, command) => invoke(OUTLINE_IPC_CHANNELS.reorder, writePayload({
             projectId, command,
-        }),
-        deleteNode: (projectId, nodeId, options) => invoke(OUTLINE_IPC_CHANNELS.deleteNode, {
+        })),
+        deleteNode: (projectId, nodeId, options) => invoke(OUTLINE_IPC_CHANNELS.deleteNode, writePayload({
             projectId,
             nodeId,
             confirmed: options?.confirmed,
             expectedRevision: options?.expectedRevision,
-        }),
+            expectedContentHash: options?.expectedContentHash,
+        })),
+        applyPatch: (projectId, patch) => invoke(OUTLINE_IPC_CHANNELS.applyPatch, writePayload({
+            projectId, patch,
+        })),
     });
     const workspace = Object.freeze({
         get: projectId => invoke(WORKSPACE_IPC_CHANNELS.get, { projectId }),
-        save: (projectId, value) => invoke(WORKSPACE_IPC_CHANNELS.save, {
-            projectId, workspace: value,
-        }),
+        save: (projectId, value) => invoke(WORKSPACE_IPC_CHANNELS.save, writePayload({
+            projectId,
+            workspace: value,
+            expectedRevision: value?.expectedRevision,
+            expectedContentHash: value?.expectedContentHash,
+        })),
     });
-    return Object.freeze({ projects, chapters, outlines, workspace });
+    return Object.freeze({ clientId: actorId, projects, chapters, outlines, workspace });
 }
 
 // ---- knowledge.cjs ----
@@ -125,25 +159,36 @@ const REFERENCE_IPC_CHANNELS = Object.freeze({
     saveCharacter: 'cgj:v1:references:save-character',
 });
 
-function createKnowledgeFacade(invoke) {
+function createKnowledgeFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const worldbooks = Object.freeze({
         list: projectId => invoke(REFERENCE_IPC_CHANNELS.listWorldBooks, { projectId }),
         get: (projectId, name) => invoke(REFERENCE_IPC_CHANNELS.getWorldBook, {
             projectId, name,
         }),
-        save: (projectId, name, data) => invoke(REFERENCE_IPC_CHANNELS.saveWorldBook, {
+        save: (projectId, name, data, options) => invoke(REFERENCE_IPC_CHANNELS.saveWorldBook, writePayload({
             projectId, name, data,
-        }),
-        updateEntry: (projectId, bookName, uid, entry) => invoke(
+            expectedRevision: options?.expectedRevision,
+            expectedContentHash: options?.expectedContentHash,
+        })),
+        updateEntry: (projectId, bookName, uid, entry, options) => invoke(
             REFERENCE_IPC_CHANNELS.updateWorldBookEntry,
-            { projectId, bookName, uid, entry },
+            writePayload({
+                projectId, bookName, uid, entry,
+                expectedRevision: options?.expectedRevision,
+                expectedContentHash: options?.expectedContentHash,
+            }),
         ),
     });
     const characters = Object.freeze({
         list: projectId => invoke(REFERENCE_IPC_CHANNELS.listCharacters, { projectId }),
-        save: (projectId, data) => invoke(REFERENCE_IPC_CHANNELS.saveCharacter, {
+        save: (projectId, data, options) => invoke(REFERENCE_IPC_CHANNELS.saveCharacter, writePayload({
             projectId, data,
-        }),
+            expectedRevision: options?.expectedRevision,
+            expectedContentHash: options?.expectedContentHash,
+        })),
     });
     const references = Object.freeze({
         listWorldBooks: worldbooks.list,
@@ -166,15 +211,22 @@ const SETTINGS_IPC_CHANNELS = Object.freeze({
 });
 const PRESET_IPC_CHANNELS = Object.freeze({ save: 'cgj:v1:presets:save' });
 
-function createConfigurationFacade(invoke) {
+function createConfigurationFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const preferences = Object.freeze({
         get: () => invoke(SETTINGS_IPC_CHANNELS.getPreferences),
         update: patch => invoke(SETTINGS_IPC_CHANNELS.updatePreferences, { patch }),
     });
     const presets = Object.freeze({
-        save: (projectId, name, data) => invoke(PRESET_IPC_CHANNELS.save, {
-            projectId, name, data,
-        }),
+        save: (projectId, name, data, options = {}) => invoke(PRESET_IPC_CHANNELS.save, writePayload({
+            projectId,
+            name,
+            data,
+            expectedRevision: options.expectedRevision,
+            expectedContentHash: options.expectedContentHash,
+        })),
     });
     const secrets = Object.freeze({
         status: (provider, profile) => invoke(SETTINGS_IPC_CHANNELS.secretStatus, {
@@ -384,13 +436,31 @@ const EXPORT_IPC_CHANNELS = Object.freeze({
     saveText: 'cgj:v1:exports:save-text', saveJson: 'cgj:v1:exports:save-json',
 });
 
-function createExchangeFacade(invoke) {
+function createExchangeFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const imports = Object.freeze({
-        selectDocument: options => invoke(IMPORT_IPC_CHANNELS.selectDocument, options),
-        selectFolder: projectId => invoke(IMPORT_IPC_CHANNELS.selectFolder, { projectId }),
-        selectWorldBook: projectId => invoke(IMPORT_IPC_CHANNELS.selectWorldBook, { projectId }),
-        selectCharacters: projectId => invoke(IMPORT_IPC_CHANNELS.selectCharacters, { projectId }),
-        selectPreset: projectId => invoke(IMPORT_IPC_CHANNELS.selectPreset, { projectId }),
+        selectDocument: options => invoke(
+            IMPORT_IPC_CHANNELS.selectDocument,
+            writePayload(options || {}),
+        ),
+        selectFolder: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectFolder,
+            writePayload({ projectId }),
+        ),
+        selectWorldBook: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectWorldBook,
+            writePayload({ projectId }),
+        ),
+        selectCharacters: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectCharacters,
+            writePayload({ projectId }),
+        ),
+        selectPreset: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectPreset,
+            writePayload({ projectId }),
+        ),
     });
     const exports = Object.freeze({
         saveText: (suggestedName, content) => invoke(EXPORT_IPC_CHANNELS.saveText, {
@@ -407,14 +477,16 @@ function createExchangeFacade(invoke) {
 const { contextBridge, ipcRenderer } = require('electron');
 
 const invoke = createInvoke(ipcRenderer);
+const rendererClientId = `renderer-${globalThis.crypto?.randomUUID?.()
+    || Math.random().toString(36).slice(2)}`;
 const appFacade = createAppFacade({ invoke, ipcRenderer });
-const projectFacade = createProjectFacade(invoke);
-const knowledgeFacade = createKnowledgeFacade(invoke);
-const configurationFacade = createConfigurationFacade(invoke);
+const projectFacade = createProjectFacade({ invoke, ipcRenderer, actorId: rendererClientId });
+const knowledgeFacade = createKnowledgeFacade({ invoke, actorId: rendererClientId });
+const configurationFacade = createConfigurationFacade({ invoke, actorId: rendererClientId });
 const modelsFacade = createModelsFacade(invoke);
 const agentFacade = createAgentFacade({ invoke, ipcRenderer });
 const automationFacade = createAutomationFacade(invoke);
-const exchangeFacade = createExchangeFacade(invoke);
+const exchangeFacade = createExchangeFacade({ invoke, actorId: rendererClientId });
 
 contextBridge.exposeInMainWorld('cuigengji', Object.freeze({
     version: DESKTOP_API_VERSION,

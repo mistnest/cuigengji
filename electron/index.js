@@ -13,6 +13,10 @@ import { fileURLToPath } from 'url';
 
 import { startServer } from '../src/server.js';
 import { configureAiSecretProtection } from '../src/backend/foundation/configuration/index.js';
+import {
+    createAgentCoordinator,
+} from '../src/backend/intelligence/agent/index.js';
+import { getDomainEventBus } from '../src/backend/foundation/platform/index.js';
 import { APP_IPC_CHANNELS, APP_MENU_COMMANDS } from '../shared/desktop-api/app/index.js';
 import { createDshSupervisor } from './intelligence/agent/dsh/dsh-supervisor.js';
 import { createDshGateway } from './intelligence/agent/dsh/dsh-gateway.js';
@@ -44,7 +48,15 @@ const dshSupervisor = createDshSupervisor({
     electronApp: app,
     spawnProcess: spawn,
 });
-const dshGateway = createDshGateway({ supervisor: dshSupervisor });
+let dshGateway;
+const agentCoordinator = createAgentCoordinator({
+    eventBus: getDomainEventBus(),
+    onProjectChange: event => dshGateway?.notifyProjectChange(event),
+});
+dshGateway = createDshGateway({
+    supervisor: dshSupervisor,
+    coordinator: agentCoordinator,
+});
 
 const unregisterAppIpcHandlers = registerAppIpcHandlers({
     ipcMain,
@@ -55,6 +67,7 @@ const unregisterAppIpcHandlers = registerAppIpcHandlers({
 const unregisterProjectIpcHandlers = registerProjectIpcHandlers({
     ipcMain,
     getMainWindow: () => mainWindow,
+    eventBus: getDomainEventBus(),
 });
 const unregisterChapterIpcHandlers = registerChapterIpcHandlers({
     ipcMain,
@@ -205,8 +218,22 @@ function closeEmbeddedServer() {
     embeddedServer = null;
     if (!server) return Promise.resolve();
     return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            if (error) reject(error);
+            else resolve();
+        };
+        const timeout = setTimeout(() => {
+            server.closeAllConnections?.();
+            finish(new Error('Embedded server shutdown timed out'));
+        }, 3_000);
+        timeout.unref?.();
         server.closeIdleConnections?.();
-        server.close(error => (error ? reject(error) : resolve()));
+        server.close(finish);
+        server.closeAllConnections?.();
     });
 }
 
@@ -334,6 +361,7 @@ app.on('before-quit', event => {
 });
 
 app.on('will-quit', unregisterAppIpcHandlers);
+app.on('will-quit', () => agentCoordinator.dispose());
 app.on('will-quit', unregisterProjectIpcHandlers);
 app.on('will-quit', unregisterChapterIpcHandlers);
 app.on('will-quit', unregisterOutlineIpcHandlers);

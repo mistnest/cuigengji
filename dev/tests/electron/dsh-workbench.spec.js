@@ -27,6 +27,9 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         const slowPromptIndex = messages.findLastIndex(message => (
             message.role === 'user' && messageText(message).includes('慢速取消')
         ));
+        const proposalPromptIndex = messages.findLastIndex(message => (
+            message.role === 'user' && messageText(message).includes('大纲提案验证')
+        ));
         const lastToolIndex = messages.findLastIndex(message => message.role === 'tool');
         if (slowPromptIndex >= 0) {
             return {
@@ -42,8 +45,26 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
                 }),
             };
         }
+        if (proposalPromptIndex >= 0 && lastToolIndex < proposalPromptIndex) {
+            return {
+                frames: toolResponseFrames('propose_outline_patch', {
+                    baseRevision: 0,
+                    summary: '补充第一次阶段兑现',
+                    reason: '当前大纲还没有阶段回报节点。',
+                    operations: [{
+                        kind: 'create',
+                        ref: 'first_payoff',
+                        title: '第一次阶段兑现',
+                        description: '主角获得第一项明确成果。',
+                        type: 'plot',
+                    }],
+                    impact: ['读者更早获得阶段回报'],
+                    assumptions: ['具体成果内容尚待后续讨论'],
+                }),
+            };
+        }
         return {
-            frames: textResponseFrames('原生侧栏回复完成。', {
+            frames: textResponseFrames('原生侧栏回复完成。\n来源：[DeepSeek 文档](https://api.deepseek.com/docs)', {
                 reasoning: '先核对当前章节和项目资料。',
             }),
         };
@@ -70,7 +91,16 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
                 cwd: path.dirname(packagedExecutable),
                 env,
             }
-                : { args: ['.'], cwd: PROJECT_ROOT, env });
+                : {
+                    args: [
+                        '.',
+                        '--no-sandbox',
+                        '--disable-gpu',
+                        `--user-data-dir=${path.join(testRoot, 'electron-user-data')}`,
+                    ],
+                    cwd: PROJECT_ROOT,
+                    env,
+                });
         const main = await electronApp.firstWindow();
         const pageErrors = [];
         main.on('pageerror', error => pageErrors.push(error.message));
@@ -83,11 +113,9 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         await expect(main.locator('#app-main')).toBeVisible();
         await expect(main.locator('#agent-sidebar-root')).toBeVisible();
 
-        const setup = await main.evaluate(async endpoint => {
-            let stage = 'initial agent open';
+        const setup = await main.evaluate(async () => {
+            let stage = 'project list';
             try {
-                await window.AgentWorkbenchFeature.open().catch(() => undefined);
-                stage = 'project list';
                 const [project] = await window.cuigengji.project.projects.list();
                 if (!project) throw new Error('project list was empty');
                 stage = 'chapter list';
@@ -108,16 +136,7 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
                 });
                 stage = 'workspace get';
                 const workspace = await window.cuigengji.project.workspace.get(project.id);
-                stage = 'workspace save';
-                await window.cuigengji.project.workspace.save(project.id, {
-                ...workspace,
-                aiConfig: {
-                    ...(workspace.aiConfig || {}),
-                    provider: 'deepseek',
-                    endpoint,
-                    model: 'deepseek-v4-flash',
-                },
-                worldBook: {
+                const worldBook = {
                     entries: {
                         1: {
                             key: ['星港'],
@@ -125,49 +144,53 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
                             content: '星港实行永久宵禁，钟声响起后不得离开室内。',
                         },
                     },
-                },
-                characters: [{
+                };
+                const characters = [{
                     data: {
                         name: '林冬',
                         description: '负责守卫星港北门。',
                         tags: ['守卫'],
                     },
-                }],
+                }];
+                stage = 'workspace save';
+                await window.cuigengji.project.workspace.save(project.id, {
+                ...workspace,
+                worldBook,
+                characters,
                 });
-                stage = 'secret save';
-                await window.cuigengji.configuration.secrets.save(
-                    'deepseek',
-                    undefined,
-                    'native-e2e-key',
-                );
-                stage = 'agent restart';
-                const opened = await window.cuigengji.agent.restart({
-                projectId: project.id,
-                chapterId: updated.id,
-                });
-                stage = 'agent history and sessions';
-                const [history, sessions] = await Promise.all([
-                window.cuigengji.agent.getHistory({
-                    projectId: project.id,
-                    sessionId: opened.sessionId,
-                    maxMessages: 30,
-                }),
-                window.cuigengji.agent.listSessions({ projectId: project.id }),
-                ]);
-                window.AgentWorkbenchFeature.store.setProject(opened);
-                window.AgentWorkbenchFeature.store.applyHistory(opened.sessionId, history.events);
-                window.AgentWorkbenchFeature.store.setSessions(sessions);
-                return { projectId: project.id, chapterId: updated.id, opened };
+                // Keep the live Renderer state aligned with the direct fixture write. Agent
+                // startup saves this state before opening and would otherwise overwrite it.
+                window.editorState.worldBook = worldBook;
+                window.editorState.characters = characters;
+                return { projectId: project.id, chapterId: updated.id };
             } catch (error) {
                 throw new Error(`${stage}: ${error?.code || ''} ${error?.message || error} ${error?.details ? JSON.stringify(error.details) : ''}`);
             }
-        }, provider.baseUrl);
+        });
+
+        await expect(main.locator('#ai-model')).toHaveAttribute('list', 'ai-model-options');
+        expect(await main.locator('#ai-model').evaluate(element => element.tagName)).toBe('INPUT');
+        await main.locator('#btn-settings').click();
+        await expect(main.locator('#settings-overlay')).toHaveClass(/active/u);
+        await main.locator('[data-settings-page="ai-service"]').click();
+        await main.locator('#ai-provider').selectOption('deepseek');
+        await main.locator('#ai-endpoint').fill(provider.baseUrl);
+        await main.locator('#ai-model').fill('deepseek-v4-flash');
+        await main.locator('#ai-api-key').fill('native-e2e-key');
+        await main.locator('#btn-connect-model').click();
+        await expect(main.locator('#ai-api-key')).toHaveValue('');
+        await expect(main.locator('#ai-api-key')).toHaveAttribute(
+            'placeholder',
+            'API Key 已安全保存到本机',
+        );
 
         await expect.poll(
             () => main.evaluate(() => window.AgentWorkbenchFeature.store.getState().runtime),
             { timeout: 45_000 },
         ).toMatchObject({ state: 'ready', ready: true, hasCredential: true });
         await expect(main.locator('.agent-composer__input')).toBeEnabled();
+        await main.locator('#btn-settings-done').click();
+        await expect(main.locator('#settings-overlay')).not.toHaveClass(/active/u);
         const status = await main.evaluate(() => window.cuigengji.agent.status());
         expect(status).toMatchObject({
             kind: 'deepseek-harness',
@@ -182,8 +205,12 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         await main.locator('.agent-composer__input').fill('工具验证：请查询星港资料。');
         await main.locator('.agent-composer__send').click();
         await expect(main.locator('.agent-message--user')).toContainText('工具验证');
-        await expect.poll(() => provider.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
-        const firstProviderRequest = provider.requests[0];
+        await expect.poll(() => provider.requests.some(record => (
+            record.body.messages.some(message => messageText(message).includes('工具验证'))
+        )), { timeout: 20_000 }).toBe(true);
+        const firstProviderRequest = provider.requests.find(record => (
+            record.body.messages.some(message => messageText(message).includes('工具验证'))
+        ));
         expect(firstProviderRequest.body.messages.some(message => (
             message.role === 'user' && messageText(message).includes('工具验证')
         )), JSON.stringify(firstProviderRequest.body.messages.map(message => ({
@@ -194,6 +221,8 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         await expect(main.locator('.agent-tool-card')).toHaveClass(/is-success/u);
         await expect(main.locator('.agent-message--assistant .agent-message__answer'))
             .toContainText('原生侧栏回复完成。', { timeout: 20_000 });
+        await expect(main.locator('.agent-message--assistant .agent-source-link'))
+            .toHaveAttribute('href', 'https://api.deepseek.com/docs');
         await expect(main.locator('.agent-reasoning')).toContainText('先核对当前章节和项目资料。');
         await expect.poll(
             () => main.evaluate(() => window.AgentWorkbenchFeature.store.getState().running),
@@ -203,8 +232,30 @@ test('@smoke Electron uses one Renderer for the native DSH Agent sidebar', async
         expect(toolRequest.authorization).toBe('Bearer native-e2e-key');
         expect(toolRequest.body.tools.map(tool => tool.function.name).sort()).toEqual([
             'get_project_knowledge',
+            'propose_outline_patch',
+            'safe_web_fetch',
             'search_project_knowledge',
+            'skill',
         ]);
+
+        await main.locator('.agent-composer__input').fill('大纲提案验证');
+        await main.locator('.agent-composer__send').click();
+        await expect(main.locator('.agent-proposal-card')).toContainText('补充第一次阶段兑现', {
+            timeout: 20_000,
+        });
+        await main.locator('.agent-proposal-card__apply').click();
+        await expect(main.locator('.agent-proposal-card__apply')).toHaveText('已应用', {
+            timeout: 20_000,
+        });
+        await expect(main.locator('#outline-tree')).toContainText('第一次阶段兑现');
+        await expect.poll(() => main.evaluate(async () => {
+            const [project] = await window.cuigengji.project.projects.list();
+            const outline = await window.cuigengji.project.outlines.get(project.id);
+            return {
+                revision: outline.revision,
+                titles: outline.nodes.map(node => node.title),
+            };
+        })).toEqual({ revision: 1, titles: ['第一次阶段兑现'] });
 
         await main.locator('.agent-composer__input').fill('慢速取消');
         await main.locator('.agent-composer__send').click();

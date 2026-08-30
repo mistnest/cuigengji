@@ -5,6 +5,11 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import CuigenjiNovelCompaction from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-novel-compaction.mjs';
+import {
+    apply as applyOutlineProposal,
+    normalizeOutlineProposal,
+    OUTLINE_PROPOSAL_MARKER,
+} from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-outline-proposal.mjs';
 import { apply as applyKnowledgeTools } from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-project-knowledge.mjs';
 import { applyToolPolicy } from '../../../electron/intelligence/agent/dsh/plugins/cuigenji-tool-policy.mjs';
 
@@ -103,6 +108,77 @@ test('@interface DSH tool policy fails closed when an unexpected tool is visible
     expect(() => applyToolPolicy(ctx, { kind: 'test-agent' })).toThrow(/pwsh/u);
 });
 
+test('@interface DSH tool policy accepts an exact configured skill surface', () => {
+    const definitions = new Map([
+        ['search_project_knowledge', { name: 'search_project_knowledge' }],
+        ['get_project_knowledge', { name: 'get_project_knowledge' }],
+        ['skill', { name: 'skill' }],
+    ]);
+    let guard;
+    const ctx = {
+        tools: {
+            schemas: () => [...definitions.values()],
+            guard: value => {
+                guard = value;
+                return () => {};
+            },
+        },
+    };
+
+    applyToolPolicy(ctx, { kind: 'test-agent' }, {
+        allowedToolNames: [
+            'search_project_knowledge',
+            'get_project_knowledge',
+            'skill',
+        ],
+    });
+
+    expect(guard({ name: 'skill' })).toBeUndefined();
+    expect(guard({ name: 'pwsh' })).toContain('不允许工具');
+});
+
+test('@interface outline proposal tool validates and renders a side-effect-free proposal', async () => {
+    const definitions = new Map();
+    applyOutlineProposal({
+        tools: {
+            register(definition) {
+                definitions.set(definition.name, definition);
+                return () => definitions.delete(definition.name);
+            },
+        },
+    });
+    const definition = definitions.get('propose_outline_patch');
+    const proposal = await definition.execute({
+        baseRevision: 7,
+        summary: '补上第一次阶段兑现',
+        reason: '当前压力连续累积，缺少阶段回报。',
+        operations: [
+            { kind: 'create', ref: 'first_payoff', title: '第一次阶段兑现', type: 'plot' },
+            { kind: 'delete', nodeId: 'obsolete-node' },
+        ],
+        impact: ['主角获得一次明确成果'],
+        assumptions: ['兑现方式仍需用户确认'],
+    });
+    expect(proposal).toMatchObject({
+        baseRevision: 7,
+        summary: '补上第一次阶段兑现',
+        hasDelete: true,
+    });
+    expect(proposal.proposalId).toMatch(/^[0-9a-f-]{36}$/u);
+    const rendered = definition.output.render({}, proposal);
+    expect(rendered[0].text).toContain(OUTLINE_PROPOSAL_MARKER);
+    expect(rendered[0].text).toContain(proposal.proposalId);
+
+    expect(() => normalizeOutlineProposal({
+        baseRevision: 7,
+        summary: '无效提案',
+        reason: '缺少必要字段。',
+        operations: [{ kind: 'create', ref: 'missing_title' }],
+        impact: [],
+        assumptions: [],
+    })).toThrow(/title/u);
+});
+
 test('@interface DSH compaction keeps the upstream mechanism and uses novel semantics', async () => {
     let request;
     const runtime = {
@@ -146,8 +222,13 @@ test('@interface DSH compaction keeps the upstream mechanism and uses novel sema
         maxTokens: 4_096,
     });
     const instruction = request.messages.at(-1).content[0].text;
-    expect(instruction).toContain('已确认的作品事实');
-    expect(instruction).toContain('已讨论但未确认');
+    expect(instruction).toContain('项目已存在事实');
+    expect(instruction).toContain('本会话用户确认');
+    expect(instruction).toContain('本会话偏好与否决');
+    expect(instruction).toContain('外部资料');
+    expect(instruction).toContain('大纲修改提案');
+    expect(instruction).toContain('只能延续当前 session');
+    expect(instruction).toContain('不等于已经修改项目');
     expect(instruction).not.toContain('AI coding assistant');
     expect(result.summary[0].text).toContain('续写第一章');
     expect(result).toMatchObject({ llmStreamCall: true, provider: 'deepseek-official' });

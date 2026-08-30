@@ -32,6 +32,7 @@
 
 ## 文档导航
 
+- [网文开发助手 v0.1 产品基线与实施计划](../web-fiction-development-assistant-v0.1.md)：已落地的 Agent 行为、Skills、Web Search、Safe Fetch 和大纲提案产品基线及验收记录。
 - [07-implementation-status.md](./07-implementation-status.md)：当前实施进度、验证命令与下一批工作。
 - [08-dsh-handoff.md](./08-dsh-handoff.md)：DSH 侧栏接管的实际结构、上下文链路和维护边界。
 - [frontend-interface-final-layout.md](./frontend-interface-final-layout.md)：P7 完成后的前端与接口权威模块地图。

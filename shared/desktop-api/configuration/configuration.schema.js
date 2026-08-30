@@ -24,5 +24,7 @@ export const CONFIGURATION_INPUT_SCHEMAS = Object.freeze({
         projectId: { type: 'string', required: true, maxLength: 200 },
         name: { type: 'string', required: true, maxLength: 500 },
         data: { type: 'object', required: true },
+        expectedRevision: { type: 'number' },
+        expectedContentHash: { type: 'string', maxLength: 128 },
     }),
 });

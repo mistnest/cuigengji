@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": [
+    "shared/contracts/**/*.ts",
+    "src/backend/foundation/platform/versioning/versioning.ts",
+    "src/backend/foundation/platform/events/domain-event-bus.ts",
+    "src/backend/intelligence/agent/coordination/agent-coordinator.ts"
+  ],
+  "exclude": ["node_modules"]
+}

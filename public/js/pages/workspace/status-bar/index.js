@@ -33,7 +33,7 @@ function updateStatusBar() {
     const credentialsConfigured = hasConfiguredAiCredentials();
     $('#status-connection').textContent = state.isConnected ? '🟢 已连接' : '🔌 未连接';
     $('#status-model').textContent = state.isConnected ? state.aiConfig.model : '—';
-    $('#status-save').textContent = state.isDirty ? '未保存' : '已保存';
+    $('#status-save').textContent = state.isDirty || state.workspaceDirty ? '未保存' : '已保存';
     // Connection badge color
     const badge = $('#ai-connection-badge');
     if (badge) {

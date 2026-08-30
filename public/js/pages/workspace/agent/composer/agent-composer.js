@@ -35,7 +35,11 @@
                 textarea.value = state.composer.text;
                 textarea.style.height = 'auto';
             }
-            const available = state.runtime.ready && state.runtime.hasCredential && state.activeSessionId;
+            const contextReady = state.project.contextState !== 'stale'
+                && state.project.contextState !== 'syncing'
+                && state.project.contextState !== 'error';
+            const available = state.runtime.ready && state.runtime.hasCredential
+                && state.activeSessionId && contextReady;
             sendButton.disabled = !available || !textarea.value.trim() || state.composer.submitting;
             cancelButton.hidden = !state.running;
             modeButton.hidden = !state.running;
@@ -44,6 +48,8 @@
             textarea.disabled = !available;
             textarea.placeholder = !state.runtime.hasCredential
                 ? '请先在 AI 设置中保存 DeepSeek API Key'
+                : !contextReady
+                    ? '项目正在同步，请等待同步完成'
                 : state.running
                     ? '可加入队列，或选择调整当前回复…'
                     : '和 Agent 讨论情节、人物或续写方向…';

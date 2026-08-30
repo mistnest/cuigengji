@@ -16,7 +16,12 @@ test('@smoke @regression Electron launches the current workspace home', async ()
     let electronApp;
     try {
         electronApp = await electron.launch({
-            args: ['.'],
+            args: [
+                '.',
+                '--no-sandbox',
+                '--disable-gpu',
+                `--user-data-dir=${path.join(dataRoot, 'electron-user-data')}`,
+            ],
             cwd: PROJECT_ROOT,
             env,
         });

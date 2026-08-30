@@ -104,7 +104,7 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
         await saveWorkspace(project.id, {
             aiConfig: {
                 provider: 'deepseek',
-                endpoint: provider.baseUrl,
+                endpoint: 'https://api.deepseek.com/v1',
                 model: 'deepseek-v4-flash',
             },
             worldBook: {
@@ -129,6 +129,7 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
             projectId: project.id,
             chapterId: chapter.id,
         });
+        launch.env.DEEPSEEK_BASE_URL = provider.baseUrl;
         runtime = await startDshContractRuntime(launch);
         const { sessionId } = await createDshSession(runtime.url, launch);
         mux = openDshMux(runtime.url);
@@ -156,17 +157,27 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
         ).toBeDefined();
         expect(firstRequest.body.tools.map(tool => tool.function.name).sort()).toEqual([
             'get_project_knowledge',
+            'propose_outline_patch',
+            'safe_web_fetch',
             'search_project_knowledge',
+            'skill',
+            'web_search',
         ]);
         expect(JSON.stringify(firstRequest.body.tools)).not.toMatch(
-            /bash|pwsh|shell|web_search|subagent|write_file/iu,
+            /bash|pwsh|shell|"web_fetch"|subagent|write_file/iu,
         );
+        expect(JSON.stringify(firstRequest.body.messages)).toContain('story-direction-probe');
         expect(JSON.stringify(firstRequest.body.messages)).toContain('版本A');
         const systemText = firstRequest.body.messages
             .filter(message => message.role === 'system')
             .map(message => messageText(message))
             .join('\n');
         expect(systemText).toContain('催更姬');
+        expect(systemText).toContain('每轮优先推进一个最关键的不确定性');
+        expect(systemText).toContain('默认给出两个真正有差异的方案');
+        expect(systemText).toContain('只服务于当前 DSH session');
+        expect(systemText).toContain('任何提案都不等于项目已经修改');
+        expect(systemText).toContain('当前会话可以使用 web_search');
         expect(systemText).not.toContain('coding agent');
         expect(systemText).not.toContain('DeepSeek Harness Web GUI');
         expect(systemText).not.toContain('implementation checkout');

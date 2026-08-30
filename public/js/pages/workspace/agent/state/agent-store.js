@@ -4,6 +4,7 @@
     function createAgentStore() {
         const listeners = new Set();
         const histories = new Map();
+        const proposalStates = new Map();
         let state = initialState();
 
         function initialState() {
@@ -11,6 +12,8 @@
                 runtime: { state: 'idle', ready: false, hasCredential: false, message: '', generation: 0 },
                 project: {
                     projectId: '', chapterId: '', contextState: 'idle', generatedAt: '', knowledgeEntries: 0,
+                    projectChangeSeq: 0, lastChangeSeq: 0, lastChangedEntity: null,
+                    streamId: '', snapshotId: '',
                 },
                 sessions: [],
                 activeSessionId: '',
@@ -31,18 +34,53 @@
         function notify() { for (const listener of listeners) listener(state); }
 
         function setProject(project) {
-            if (state.project.projectId && state.project.projectId !== project.projectId) histories.clear();
+            const projectChanged = Boolean(
+                state.project.projectId && state.project.projectId !== project.projectId,
+            );
+            const sessionChanged = state.activeSessionId
+                && state.activeSessionId !== project.sessionId;
+            const previousGeneration = Number(state.runtime.generation || 0);
+            const nextGeneration = Number(project.status?.generation ?? previousGeneration);
+            // A supervisor restart can keep the same project and DSH session
+            // while replacing the runtime process.  History events are keyed
+            // by generation, so retaining the old map would render every
+            // message twice after the restart.
+            const runtimeChanged = Boolean(
+                state.project.projectId
+                && Number.isFinite(nextGeneration)
+                && nextGeneration !== previousGeneration,
+            );
+            if (projectChanged || runtimeChanged) {
+                histories.clear();
+                proposalStates.clear();
+            }
             state = {
                 ...state,
                 runtime: { ...state.runtime, ...project.status },
                 project: {
                     projectId: project.projectId,
                     chapterId: project.context?.chapterId || '',
-                    contextState: 'synced',
+                    contextState: project.context?.contextState || 'synced',
                     generatedAt: project.context?.generatedAt || '',
                     knowledgeEntries: Number(project.context?.knowledgeEntries || 0),
+                    projectChangeSeq: Number(project.context?.projectChangeSeq || 0),
+                    lastChangeSeq: Number(project.context?.lastChangeSeq || 0),
+                    lastChangedEntity: project.context?.lastChangedEntity || null,
+                    streamId: project.context?.streamId || '',
+                    snapshotId: project.context?.snapshotId || '',
                 },
                 activeSessionId: project.sessionId,
+                // A runtime open/restart is a session boundary.  Never carry
+                // optimistic prompts or rendered items into another project
+                // (or attach them to a newly selected session): doing so can
+                // make a late prompt response look like a successful write in
+                // the wrong workspace.
+                ...(projectChanged || sessionChanged || runtimeChanged ? {
+                    items: [],
+                    running: false,
+                    pendingPrompts: [],
+                    composer: { ...state.composer, text: '', submitting: false, error: '' },
+                } : {}),
             };
             ensureHistory(project.sessionId);
             reproject();
@@ -71,6 +109,36 @@
                     runtime: { ...state.runtime, ...event.data, generation: event.generation },
                 };
                 notify();
+                return;
+            }
+            if (event.type === 'context.invalidated') {
+                setProjectChange({
+                    projectId: event.projectId,
+                    seq: event.data?.seq,
+                    entityType: event.data?.entityType,
+                    entityId: event.data?.entityId,
+                    revision: event.data?.revision,
+                    actor: event.data?.actor,
+                });
+                return;
+            }
+            if (event.type === 'context.synced') {
+                if (!state.project.projectId || event.projectId === state.project.projectId) {
+                    setContextState('synced', {
+                        generatedAt: event.data?.generatedAt || state.project.generatedAt,
+                        projectChangeSeq: Number(
+                            event.data?.projectChangeSeq ?? state.project.projectChangeSeq,
+                        ),
+                        lastChangeSeq: Number(
+                            event.data?.lastChangeSeq ?? state.project.lastChangeSeq,
+                        ),
+                        snapshotId: event.data?.snapshotId || state.project.snapshotId || '',
+                        streamId: event.data?.streamId || state.project.streamId || '',
+                        knowledgeEntries: Number(
+                            event.data?.knowledgeEntries ?? state.project.knowledgeEntries,
+                        ),
+                    });
+                }
                 return;
             }
             if (state.project.projectId && event.projectId !== state.project.projectId) return;
@@ -139,8 +207,43 @@
             state = { ...state, project: { ...state.project, contextState, ...patch } };
             notify();
         }
+        function setProjectChange(event) {
+            if (!event?.projectId || (state.project.projectId && event.projectId !== state.project.projectId)) return;
+            const seq = Number(event.seq || 0);
+            const sameStream = !event.streamId || !state.project.streamId
+                || event.streamId === state.project.streamId;
+            if (sameStream && Number.isFinite(seq) && seq > 0
+                && seq <= Math.max(
+                    Number(state.project.projectChangeSeq || 0),
+                    Number(state.project.lastChangeSeq || 0),
+                )) return;
+            state = {
+                ...state,
+                project: {
+                    ...state.project,
+                    contextState: 'stale',
+                    lastChangeSeq: Math.max(
+                        Number(state.project.lastChangeSeq || 0),
+                        seq,
+                    ),
+                    lastChangedEntity: {
+                        entityType: event.entityType || '',
+                        entityId: event.entityId || '',
+                        revision: Number(event.revision || 0),
+                        actor: event.actor || { kind: 'system' },
+                    },
+                },
+            };
+            notify();
+        }
+        function setProposalApplyState(proposalId, applyState, message = '') {
+            if (!proposalId) return;
+            proposalStates.set(proposalId, { applyState, message });
+            reproject();
+        }
         function clear() {
             histories.clear();
+            proposalStates.clear();
             state = initialState();
             notify();
         }
@@ -205,7 +308,8 @@
                 if (event.type === 'tool.started') {
                     const item = {
                         key: `tool-${event.data.callId || event.seq}`, kind: 'tool',
-                        callId: event.data.callId, label: event.data.label, summary: event.data.summary,
+                        callId: event.data.callId, name: event.data.name,
+                        label: event.data.label, summary: event.data.summary,
                         order: event.seq, status: 'running',
                     };
                     tools.set(event.data.callId, item);
@@ -216,13 +320,32 @@
                     if (!item) {
                         item = {
                             key: `tool-${event.data.callId || event.seq}`, kind: 'tool',
-                            callId: event.data.callId, label: '项目资料工具', order: event.seq,
+                            callId: event.data.callId, label: 'Agent 工具', order: event.seq,
                         };
                         tools.set(event.data.callId, item);
                         items.push(item);
                     }
                     item.status = event.data.status;
-                    item.summary = event.data.summary;
+                    if (event.data.summary) item.summary = event.data.summary;
+                }
+                if (event.type === 'proposal.outline') {
+                    const tool = tools.get(event.data.callId);
+                    if (tool) {
+                        tool.status = 'success';
+                        tool.summary = '大纲修改提案已整理';
+                    }
+                    const proposal = event.data.proposal;
+                    const local = proposalStates.get(proposal.proposalId) || {};
+                    items.push({
+                        key: `proposal-${proposal.proposalId}`,
+                        kind: 'proposal',
+                        callId: event.data.callId,
+                        proposal,
+                        order: event.seq,
+                        status: 'ready',
+                        applyState: local.applyState || 'idle',
+                        applyMessage: local.message || '',
+                    });
                 }
                 if (event.type === 'turn.completed' || event.type === 'turn.failed') running = false;
                 if (event.type === 'turn.failed') {
@@ -266,6 +389,8 @@
             getState, subscribe, setProject, setSessions, setActiveSession,
             applyHistory, applyEvent, addOptimistic, acceptOptimistic, rejectOptimistic,
             restorePending, setComposer, setContextState, clear, debugSnapshot,
+            setProposalApplyState,
+            setProjectChange,
         };
     }
 

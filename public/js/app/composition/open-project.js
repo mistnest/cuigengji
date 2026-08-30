@@ -7,7 +7,14 @@
 async function enterWorkspace(id, title) {
     if (state.workspaceLoaded && state.currentNovel?.id !== id) {
         if (state.isDirty && !await onSave({ silent: true })) return;
-        await saveWorkspaceState({ silent: true });
+        const saved = await saveWorkspaceState({ silent: true }).catch(err => {
+            // A concurrent Agent/renderer write must stop navigation.  The
+            // user can choose reload/resolve from the existing collaboration
+            // notice instead of silently losing the local workspace state.
+            setStatus(`工作区保存失败，已停止切换: ${err.message}`, 'error');
+            return false;
+        });
+        if (!saved) return;
     }
 
     workspaceLoadController?.abort();
@@ -20,6 +27,7 @@ async function enterWorkspace(id, title) {
         setPreference('recentProjectAccess', accessed);
     } catch {}
 
+    window.CuigengjiCollaboration?.setProject(id);
     resetWorkspaceState();
     state.currentNovel = { id, title };
     $('#current-novel-title').textContent = title;
@@ -40,6 +48,7 @@ async function enterWorkspace(id, title) {
         state.chapters = Array.isArray(chapterData) ? chapterData : [];
         state.outline = Array.isArray(outlineData.nodes) ? outlineData.nodes : [];
         state.outlineRevision = Number(outlineData.revision || 0);
+        state.outlineContentHash = String(outlineData.contentHash || '');
         applyWorkspaceState(workspaceData);
         state.workspaceLoaded = true;
         setPreference('lastWorkspace', id);
@@ -62,6 +71,10 @@ async function enterWorkspace(id, title) {
         renderCharacterList();
         renderPromptTemplates();
 
+        // Reconcile changes that may have arrived while the window was
+        // loading or temporarily disconnected from the live event channel.
+        void window.CuigengjiProjectEvents?.sync(id, { sinceSeq: 0 });
+
         void restoreAiConnection({ silent: true });
     } catch (err) {
         if (err.name === 'AbortError') return;
@@ -72,16 +85,22 @@ async function enterWorkspace(id, title) {
 async function showWelcomePage() {
     if (state.workspaceLoaded) {
         if (state.isDirty && !await onSave({ silent: true })) return;
-        await saveWorkspaceState({ silent: true });
+        const saved = await saveWorkspaceState({ silent: true }).catch(err => {
+            setStatus(`工作区保存失败，已停止离开: ${err.message}`, 'error');
+            return false;
+        });
+        if (!saved) return;
     }
+    window.invalidateWorkspaceActions?.();
+    window.CuigengjiCollaboration?.setProject('');
     window.AgentWorkbenchFeature?.setVisible(false);
     $('#welcome-page')?.classList.remove('hidden');
     if ($('#app-main')) $('#app-main').style.display = 'none';
     loadRecentWorkspaces();
 }
 
-async function ensureNovelExists() {
-    const novelId = state.currentNovel?.id || 'default';
+async function ensureNovelExists(requestedId = state.currentNovel?.id || 'default') {
+    const novelId = requestedId || 'default';
     try {
         // Check if project exists
         const projects = await Repositories.projects.list();
@@ -90,8 +109,9 @@ async function ensureNovelExists() {
             // Use novelId as title so the resulting directory matches
             const created = await Repositories.projects.create({ title: novelId });
             // Update state with the actual created id
-            if (created.id) state.currentNovel.id = created.id;
+            if (created.id && state.currentNovel?.id === novelId) state.currentNovel.id = created.id;
         }
+        return novelId;
     } catch { /* ignore — project might already exist */ }
 }
 

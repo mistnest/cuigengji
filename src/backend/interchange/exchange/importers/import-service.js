@@ -21,13 +21,13 @@ import {
     sanitizePresetSecrets,
 } from '../../../foundation/configuration/index.js';
 
-export async function importWorldBookData(projectId, name, data) {
+export async function importWorldBookData(projectId, name, data, options = {}) {
     requireProjectId(projectId);
     if (!data?.entries) throw validationError('Invalid world book format: missing entries');
     const sourceName = sanitize(name || 'imported_world') || 'imported_world';
     const worldBook = ensureWorldBookSummaries(normalizeWorldBookData(data)).data;
     applyWorldBookFolder(worldBook, sourceName);
-    await saveWorldBook(projectId, sourceName, worldBook);
+    await saveWorldBook(projectId, sourceName, worldBook, { actor: options.actor });
     return {
         success: true,
         name: `${sourceName}.json`,
@@ -36,16 +36,21 @@ export async function importWorldBookData(projectId, name, data) {
     };
 }
 
-export async function importWorldBookFile(projectId, filePath) {
+export async function importWorldBookFile(projectId, filePath, options = {}) {
     const data = JSON.parse(await readTextFile(filePath));
-    return importWorldBookData(projectId, path.basename(filePath, path.extname(filePath)), data);
+    return importWorldBookData(
+        projectId,
+        path.basename(filePath, path.extname(filePath)),
+        data,
+        options,
+    );
 }
 
-export async function importCharacterData(projectId, data) {
+export async function importCharacterData(projectId, data, options = {}) {
     requireProjectId(projectId);
     if (!data) throw validationError('No character data provided');
     const character = ensureCharacterSummaries([normalizeCharacterData(data)]).data[0];
-    const saved = await saveCharacter(projectId, character);
+    const saved = await saveCharacter(projectId, character, { actor: options.actor });
     return {
         success: true,
         name: saved.name,
@@ -57,7 +62,9 @@ export async function importCharacterData(projectId, data) {
 
 export async function importCharacterFile(projectId, filePath, options = {}) {
     const extension = path.extname(options.originalName || filePath).toLowerCase();
-    if (extension === '.json') return importCharacterData(projectId, JSON.parse(await readTextFile(filePath)));
+    if (extension === '.json') {
+        return importCharacterData(projectId, JSON.parse(await readTextFile(filePath)), options);
+    }
     if (extension !== '.png') throw validationError('Only PNG and JSON character cards are supported');
 
     const pngBuffer = await fs.readFile(filePath);
@@ -70,7 +77,7 @@ export async function importCharacterFile(projectId, filePath, options = {}) {
             publicMessage: '角色卡 PNG 无效或不包含可读取的数据。',
         });
     }
-    const result = await importCharacterData(projectId, data);
+    const result = await importCharacterData(projectId, data, options);
     const avatarPath = projectFile(
         projectId,
         'assets',
@@ -82,7 +89,7 @@ export async function importCharacterFile(projectId, filePath, options = {}) {
     return result;
 }
 
-export async function importPresetData(projectId, name, data) {
+export async function importPresetData(projectId, name, data, options = {}) {
     requireProjectId(projectId);
     if (!data || typeof data !== 'object') throw validationError('No preset data provided');
     const safeName = sanitize(name || data.name || 'imported_preset') || 'imported_preset';
@@ -92,7 +99,11 @@ export async function importPresetData(projectId, name, data) {
         provider,
     }, safeName);
     const sanitized = sanitizePresetSecrets(data);
-    await savePreset(projectId, safeName, sanitized);
+    await savePreset(projectId, safeName, sanitized, {
+        expectedRevision: options.expectedRevision,
+        expectedContentHash: options.expectedContentHash,
+        actor: options.actor,
+    });
     return { success: true, name: `${safeName}.json`, data: sanitized };
 }
 
@@ -104,11 +115,12 @@ function providerFromImportedPreset(source) {
     }[source] || source || '';
 }
 
-export async function importPresetFile(projectId, filePath) {
+export async function importPresetFile(projectId, filePath, options = {}) {
     return importPresetData(
         projectId,
         path.basename(filePath, path.extname(filePath)),
         JSON.parse(await readTextFile(filePath)),
+        options,
     );
 }
 
@@ -132,12 +144,13 @@ export async function importDocumentFile(projectId, filePath, options = {}) {
             content: part.content.trim(),
             volumeId: options.volumeId || '',
             order: chapters.length,
+            actor: options.actor,
         }));
     }
     return { success: true, chapters, count: chapters.length };
 }
 
-export async function importFolder(projectId, folderPath) {
+export async function importFolder(projectId, folderPath, options = {}) {
     requireProjectId(projectId);
     const files = await listSupportedDocuments(folderPath);
     const results = { volumes: 0, chapters: 0, errors: [] };
@@ -150,7 +163,9 @@ export async function importFolder(projectId, folderPath) {
             if (segments.length > 1) {
                 const volumeName = segments[0];
                 if (!volumeIds.has(volumeName)) {
-                    const volume = await createChapter(projectId, { type: 'volume', title: volumeName });
+                    const volume = await createChapter(projectId, {
+                        type: 'volume', title: volumeName, actor: options.actor,
+                    });
                     volumeIds.set(volumeName, volume.id);
                     results.volumes += 1;
                 }
@@ -159,6 +174,7 @@ export async function importFolder(projectId, folderPath) {
             const imported = await importDocumentFile(projectId, filePath, {
                 autoSplit: false,
                 volumeId,
+                actor: options.actor,
             });
             results.chapters += imported.count;
         } catch (error) {

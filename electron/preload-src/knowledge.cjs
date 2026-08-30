@@ -9,25 +9,36 @@ const REFERENCE_IPC_CHANNELS = Object.freeze({
     saveCharacter: 'cgj:v1:references:save-character',
 });
 
-function createKnowledgeFacade(invoke) {
+function createKnowledgeFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const worldbooks = Object.freeze({
         list: projectId => invoke(REFERENCE_IPC_CHANNELS.listWorldBooks, { projectId }),
         get: (projectId, name) => invoke(REFERENCE_IPC_CHANNELS.getWorldBook, {
             projectId, name,
         }),
-        save: (projectId, name, data) => invoke(REFERENCE_IPC_CHANNELS.saveWorldBook, {
+        save: (projectId, name, data, options) => invoke(REFERENCE_IPC_CHANNELS.saveWorldBook, writePayload({
             projectId, name, data,
-        }),
-        updateEntry: (projectId, bookName, uid, entry) => invoke(
+            expectedRevision: options?.expectedRevision,
+            expectedContentHash: options?.expectedContentHash,
+        })),
+        updateEntry: (projectId, bookName, uid, entry, options) => invoke(
             REFERENCE_IPC_CHANNELS.updateWorldBookEntry,
-            { projectId, bookName, uid, entry },
+            writePayload({
+                projectId, bookName, uid, entry,
+                expectedRevision: options?.expectedRevision,
+                expectedContentHash: options?.expectedContentHash,
+            }),
         ),
     });
     const characters = Object.freeze({
         list: projectId => invoke(REFERENCE_IPC_CHANNELS.listCharacters, { projectId }),
-        save: (projectId, data) => invoke(REFERENCE_IPC_CHANNELS.saveCharacter, {
+        save: (projectId, data, options) => invoke(REFERENCE_IPC_CHANNELS.saveCharacter, writePayload({
             projectId, data,
-        }),
+            expectedRevision: options?.expectedRevision,
+            expectedContentHash: options?.expectedContentHash,
+        })),
     });
     const references = Object.freeze({
         listWorldBooks: worldbooks.list,

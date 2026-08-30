@@ -330,7 +330,7 @@
                         </select>
 
                         <div id="ai-api-key-field">
-                            <label class="ai-field-label" for="ai-api-key">API Key <span class="info-tooltip" data-tooltip="连接 AI 服务的密钥，只保存在本机。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">不同服务商有不同的 API Key。粘贴后会保存在本机，不会上传到第三方。</span></span></label>
+                            <label class="ai-field-label" for="ai-api-key">API Key <span class="info-tooltip" data-tooltip="连接 AI 服务的密钥，仅加密保存在本机，并只发送给所选模型服务。"><span class="info-tooltip-icon">?</span><span class="info-tooltip-text">不同服务商使用不同的 API Key。应用只会把它发送给当前选择的模型服务。</span></span></label>
                             <div class="ai-key-row">
                                 <input type="password" id="ai-api-key" placeholder="粘贴后自动保存到本机" class="ai-input" autocomplete="off" spellcheck="false">
                                 <button type="button" id="btn-toggle-api-key" class="ai-key-toggle" aria-label="显示 API Key" aria-pressed="false" title="显示 API Key">
@@ -345,6 +345,7 @@
                         <input type="text" id="ai-endpoint" placeholder="通常不用修改" class="ai-input">
 
                         <div id="ai-vertex-fields" class="ai-provider-extra" style="display:none;">
+                            <div class="ai-key-status">当前写作与 Agent 侧栏均支持 Vertex Express API Key；Agent 暂不支持 Service Account JSON。</div>
                             <label class="ai-field-label" for="ai-vertex-auth-mode">Vertex AI 认证方式</label>
                             <select id="ai-vertex-auth-mode" class="ai-select">
                                 <option value="express">Express API Key</option>
@@ -352,7 +353,7 @@
                             </select>
 
                             <label class="ai-field-label" for="ai-vertex-region">Vertex AI Region</label>
-                            <input type="text" id="ai-vertex-region" class="ai-input" value="us-central1" placeholder="global, us-central1, europe-west1, asia-northeast1" list="ai-vertex-region-options">
+                            <input type="text" id="ai-vertex-region" class="ai-input" value="global" placeholder="global, us-central1, europe-west1, asia-northeast1" list="ai-vertex-region-options">
                             <datalist id="ai-vertex-region-options">
                                 <option value="global"></option>
                                 <option value="us-central1"></option>
@@ -402,9 +403,8 @@
 
                         <label class="ai-field-label" for="ai-model">模型</label>
                         <div class="ai-model-row">
-                            <select id="ai-model" class="ai-select" style="flex:1;min-width:0;">
-                                <option value="">— 先选服务商再刷新模型列表 —</option>
-                            </select>
+                            <input type="text" id="ai-model" class="ai-input" list="ai-model-options" placeholder="选择或输入模型 ID" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;">
+                            <datalist id="ai-model-options"></datalist>
                             <button id="btn-fetch-models" class="ai-btn-inline">刷新模型列表</button>
                         </div>
                         <div id="model-context-info" class="model-context-info" style="display:none;"></div>
@@ -737,6 +737,7 @@
     <script src="js/shared/desktop/app-signature.js"></script>
     <script src="js/shared/desktop/desktop-bridge.js"></script>
     <script src="js/shared/desktop/desktop-repositories.js"></script>
+    <script src="js/shared/desktop/project-events.js"></script>
     <script src="js/shared/state/preferences-store.js"></script>
     <script src="js/pages/workspace/automation/automation-runtime.js"></script>
     <script src="js/pages/workspace/chapters/chapter-tree.js"></script>
@@ -783,6 +784,7 @@
     <script src="js/shared/security/dom-text.js"></script>
     <script src="js/pages/settings/prompt-settings.js"></script>
     <script src="js/app/composition/save-workspace.js"></script>
+    <script src="js/app/composition/collaboration-coordinator.js"></script>
     <script src="js/app/bootstrap.js"></script>
 </body>
 </html>

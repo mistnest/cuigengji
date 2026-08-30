@@ -2315,6 +2315,27 @@ button:focus-visible {
 #status-message.status-info { color: var(--info); }
 #status-message.status-loading { color: var(--accent-primary); animation: pulse 1s infinite; }
 
+/* Compact collaboration notice reuses the existing status bar; it never
+   creates another navigation surface or competes with the Agent sidebar. */
+#collaboration-notice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+    color: var(--warning);
+    font-size: 11px;
+}
+#collaboration-notice button {
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 1px 5px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+#collaboration-notice button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }

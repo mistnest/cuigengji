@@ -7,18 +7,22 @@ import sanitize from 'sanitize-filename';
 import {
     allowWritesInside,
     AppError,
+    getVersionStamp,
     novelDir,
     novelsRoot,
+    publishDomainChange,
     readJson,
     requireString,
     resolveInside,
     safeSegment,
+    withVersion,
     withWriteBarrier,
     writeJson,
 } from '../../../foundation/platform/index.js';
 
 const DELETE_TOKEN_TTL_MS = 60_000;
 const deleteTokens = new Map();
+const projectLifecycleLocks = new Map();
 
 export async function listProjects() {
     const root = novelsRoot();
@@ -46,11 +50,15 @@ export async function listProjects() {
                 if (!['ENOENT', 'CORRUPT_JSON'].includes(error.code)) throw error;
             }
             const created = config.created || stat.birthtimeMs || 0;
+            const version = getVersionStamp(config);
             return {
                 id: entry.name,
                 title: config.title || entry.name,
                 created,
                 updated: config.updated || stat.mtimeMs || created,
+                revision: version.revision,
+                updatedAt: version.updatedAt || config.updated || stat.mtimeMs || created,
+                contentHash: version.contentHash,
             };
         }));
 
@@ -62,33 +70,71 @@ export async function createProject(input) {
     const title = requireString(input?.title, 'title', { maxLength: 200 }).trim();
     const id = sanitize(title).substring(0, 50) || Date.now().toString(36);
     const dir = novelDir(id);
-    try {
-        await fs.access(dir);
-        throw new AppError('PROJECT_EXISTS', 'Project already exists', { status: 409 });
-    } catch (error) {
-        if (error instanceof AppError) throw error;
-        if (error.code !== 'ENOENT') throw error;
-    }
+    return withProjectLifecycleLock(id, async () => {
+        try {
+            await fs.access(dir);
+            throw new AppError('PROJECT_EXISTS', 'Project already exists', { status: 409 });
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            if (error.code !== 'ENOENT') throw error;
+        }
 
-    allowWritesInside(dir);
-    await Promise.all([
-        fs.mkdir(path.join(dir, 'chapters'), { recursive: true }),
-        fs.mkdir(path.join(dir, 'memory'), { recursive: true }),
-        fs.mkdir(path.join(dir, 'sessions'), { recursive: true }),
-    ]);
-    const now = Date.now();
-    const config = {
-        schemaVersion: 1,
-        novelId: id,
-        title,
-        author: '',
-        genre: '',
-        styleGuide: '',
-        created: now,
-        updated: now,
-    };
-    await writeJson(path.join(dir, 'novel.json'), config);
-    return { id, config };
+        // `access` above is only a friendly error check.  The exclusive mkdir
+        // is the actual collision guard, so two renderer/Agent requests for
+        // the same title cannot both create a project directory and then
+        // overwrite its metadata.  The lifecycle lock also prevents a
+        // same-process delete from removing a directory after this check.
+        allowWritesInside(dir);
+        let createdDirectory = false;
+        try {
+            await fs.mkdir(novelsRoot(), { recursive: true });
+            await fs.mkdir(dir, { recursive: false });
+            createdDirectory = true;
+            await Promise.all([
+                fs.mkdir(path.join(dir, 'chapters'), { recursive: true }),
+                fs.mkdir(path.join(dir, 'memory'), { recursive: true }),
+                fs.mkdir(path.join(dir, 'sessions'), { recursive: true }),
+            ]);
+            const now = Date.now();
+            const config = withVersion({
+                schemaVersion: 1,
+                novelId: id,
+                title,
+                author: '',
+                genre: '',
+                styleGuide: '',
+                created: now,
+                updated: now,
+            }, 1, now);
+            await writeJson(path.join(dir, 'novel.json'), config);
+            const version = getVersionStamp(config);
+            publishDomainChange({
+                projectId: id,
+                entityType: 'project',
+                entityId: id,
+                operation: 'created',
+                beforeRevision: 0,
+                revision: version.revision,
+                updatedAt: version.updatedAt,
+                contentHash: version.contentHash,
+                changedFields: ['title'],
+                actor: input?.actor || { kind: 'human', id: 'renderer' },
+            });
+            return { id, config };
+        } catch (error) {
+            if (error?.code === 'EEXIST') {
+                throw new AppError('PROJECT_EXISTS', 'Project already exists', { status: 409 });
+            }
+            // Do not leave a half-created project that would later look valid
+            // to the project picker.  Only remove a directory created by this
+            // invocation; a failed collision check must never delete another
+            // request's project.
+            if (createdDirectory) {
+                try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+            }
+            throw error;
+        }
+    });
 }
 
 export async function requestProjectDeletion(projectId) {
@@ -105,15 +151,52 @@ export async function requestProjectDeletion(projectId) {
 
 export async function deleteProject(projectId, options = {}) {
     const id = safeSegment(projectId, 'project id');
-    const dir = await requireProjectDirectory(id);
-    if (!options.bypassConfirmation) consumeDeleteToken(id, options.confirmationToken);
+    return withProjectLifecycleLock(id, async () => {
+        const dir = await requireProjectDirectory(id);
+        if (!options.bypassConfirmation) consumeDeleteToken(id, options.confirmationToken);
 
-    await withWriteBarrier(
-        dir,
-        () => fs.rm(dir, { recursive: true, force: true }),
-        { keepBlocked: true },
-    );
-    return { success: true };
+        let previousVersion = getVersionStamp({});
+        try {
+            previousVersion = getVersionStamp(await readJson(path.join(dir, 'novel.json'), {
+                defaultValue: {},
+            }));
+        } catch (error) {
+            // A corrupt metadata file must not make a confirmed destructive
+            // operation impossible; retain the deletion event's safe fallback
+            // version instead of exposing the parse error to the user.
+            if (error?.code !== 'CORRUPT_JSON') throw error;
+        }
+
+        await withWriteBarrier(
+            dir,
+            () => fs.rm(dir, { recursive: true, force: true }),
+            { keepBlocked: true },
+        );
+        publishDomainChange({
+            projectId: id,
+            entityType: 'project',
+            entityId: id,
+            operation: 'deleted',
+            beforeRevision: previousVersion.revision,
+            revision: previousVersion.revision + 1,
+            updatedAt: Date.now(),
+            contentHash: '',
+            changedFields: [],
+            actor: options.actor || { kind: 'human', id: 'renderer' },
+        });
+        return { success: true };
+    });
+}
+
+function withProjectLifecycleLock(projectId, operation) {
+    const id = String(projectId || '');
+    const previous = projectLifecycleLocks.get(id) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    projectLifecycleLocks.set(id, current);
+    current.finally(() => {
+        if (projectLifecycleLocks.get(id) === current) projectLifecycleLocks.delete(id);
+    }).catch(() => {});
+    return current;
 }
 
 async function requireProjectDirectory(id) {

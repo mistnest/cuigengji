@@ -9,15 +9,22 @@ const SETTINGS_IPC_CHANNELS = Object.freeze({
 });
 const PRESET_IPC_CHANNELS = Object.freeze({ save: 'cgj:v1:presets:save' });
 
-function createConfigurationFacade(invoke) {
+function createConfigurationFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const preferences = Object.freeze({
         get: () => invoke(SETTINGS_IPC_CHANNELS.getPreferences),
         update: patch => invoke(SETTINGS_IPC_CHANNELS.updatePreferences, { patch }),
     });
     const presets = Object.freeze({
-        save: (projectId, name, data) => invoke(PRESET_IPC_CHANNELS.save, {
-            projectId, name, data,
-        }),
+        save: (projectId, name, data, options = {}) => invoke(PRESET_IPC_CHANNELS.save, writePayload({
+            projectId,
+            name,
+            data,
+            expectedRevision: options.expectedRevision,
+            expectedContentHash: options.expectedContentHash,
+        })),
     });
     const secrets = Object.freeze({
         status: (provider, profile) => invoke(SETTINGS_IPC_CHANNELS.secretStatus, {

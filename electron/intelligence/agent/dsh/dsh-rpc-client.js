@@ -24,8 +24,21 @@ export class DshRpcError extends Error {
 }
 
 export function createDshRpcClient({ baseUrl, fetchImpl = fetch, defaultTimeoutMs = 10_000 }) {
-    const endpoint = new URL(baseUrl);
-    if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') {
+    let endpoint;
+    try {
+        endpoint = new URL(baseUrl);
+    } catch {
+        throw new DshRpcError('DSH_ENDPOINT_INVALID', 'DSH endpoint must be loopback HTTP');
+    }
+    // The child runtime is intentionally local-only.  Reject URL components
+    // that could smuggle credentials or alter the request namespace; the
+    // client always constructs the exact `/api/<method>` path below.
+    if (endpoint.protocol !== 'http:'
+        || endpoint.hostname !== '127.0.0.1'
+        || endpoint.username
+        || endpoint.password
+        || endpoint.search
+        || endpoint.hash) {
         throw new DshRpcError('DSH_ENDPOINT_INVALID', 'DSH endpoint must be loopback HTTP');
     }
 
@@ -55,7 +68,9 @@ export function createDshRpcClient({ baseUrl, fetchImpl = fetch, defaultTimeoutM
             });
         }
         if (!response.ok) {
-            await response.body?.cancel().catch(() => {});
+            if (typeof response.body?.cancel === 'function') {
+                await Promise.resolve(response.body.cancel()).catch(() => {});
+            }
             throw new DshRpcError('DSH_RPC_HTTP_ERROR', 'DSH RPC returned an HTTP error', {
                 method,
                 retryable: response.status >= 500,

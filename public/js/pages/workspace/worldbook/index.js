@@ -286,6 +286,9 @@ function renderWorldBookList() {
 }
 
 function showWorldBookDetail(uid, entry) {
+    const lifecycleContext = window.CuigengjiWorkspaceLifecycle?.capture
+        ? window.CuigengjiWorkspaceLifecycle.capture()
+        : null;
     const overlay = document.createElement('div');
     overlay.className = 'plot-modal-overlay';
 
@@ -434,6 +437,9 @@ function showWorldBookDetail(uid, entry) {
         btn.disabled = true; btn.textContent = '生成中...';
         try {
             const summary = await generateSummary(content, 'worldbook');
+            if (lifecycleContext
+                && !window.CuigengjiWorkspaceLifecycle?.isCurrent(lifecycleContext)) return;
+            if (!overlay.isConnected) return;
             const summaryEl = overlay.querySelector('#wb-edit-summary');
             if (summaryEl) summaryEl.value = summary;
         } catch (e) { alert('生成失败: ' + e.message); }

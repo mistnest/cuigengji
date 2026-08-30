@@ -13,5 +13,5 @@ export const AGENT_PROMPT_MAX_CODE_POINTS = 50_000;
 export const AGENT_UI_EVENT_TYPES = Object.freeze([
     'runtime.state', 'session.ready', 'turn.started', 'message.user',
     'assistant.delta', 'assistant.completed', 'tool.started', 'tool.completed',
-    'turn.completed', 'turn.failed',
+    'proposal.outline', 'turn.completed', 'turn.failed',
 ]);

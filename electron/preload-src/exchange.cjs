@@ -11,13 +11,31 @@ const EXPORT_IPC_CHANNELS = Object.freeze({
     saveText: 'cgj:v1:exports:save-text', saveJson: 'cgj:v1:exports:save-json',
 });
 
-function createExchangeFacade(invoke) {
+function createExchangeFacade(input) {
+    const invoke = typeof input === 'function' ? input : input.invoke;
+    const actorId = typeof input === 'object' ? input.actorId : '';
+    const writePayload = value => ({ ...value, ...(actorId ? { clientId: actorId } : {}) });
     const imports = Object.freeze({
-        selectDocument: options => invoke(IMPORT_IPC_CHANNELS.selectDocument, options),
-        selectFolder: projectId => invoke(IMPORT_IPC_CHANNELS.selectFolder, { projectId }),
-        selectWorldBook: projectId => invoke(IMPORT_IPC_CHANNELS.selectWorldBook, { projectId }),
-        selectCharacters: projectId => invoke(IMPORT_IPC_CHANNELS.selectCharacters, { projectId }),
-        selectPreset: projectId => invoke(IMPORT_IPC_CHANNELS.selectPreset, { projectId }),
+        selectDocument: options => invoke(
+            IMPORT_IPC_CHANNELS.selectDocument,
+            writePayload(options || {}),
+        ),
+        selectFolder: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectFolder,
+            writePayload({ projectId }),
+        ),
+        selectWorldBook: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectWorldBook,
+            writePayload({ projectId }),
+        ),
+        selectCharacters: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectCharacters,
+            writePayload({ projectId }),
+        ),
+        selectPreset: projectId => invoke(
+            IMPORT_IPC_CHANNELS.selectPreset,
+            writePayload({ projectId }),
+        ),
     });
     const exports = Object.freeze({
         saveText: (suggestedName, content) => invoke(EXPORT_IPC_CHANNELS.saveText, {
