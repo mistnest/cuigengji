@@ -10,6 +10,7 @@
     <title>催更姬 — AI 写作助手</title>
     <link rel="stylesheet" href="css/editor.css">
     <link rel="stylesheet" href="js/pages/workspace/agent/agent-sidebar.css">
+    <link rel="stylesheet" href="css/graph.css">
 </head>
 <body data-cuigengji-app="mistnest-cuigengji">
     <div id="toast-container"></div>
@@ -168,6 +169,7 @@
                     <button class="sidebar-tab active" data-panel="chat">Agent</button>
                     <button class="sidebar-tab" data-panel="worldbook">世界书</button>
                     <button class="sidebar-tab" data-panel="characters">角色</button>
+                    <button class="sidebar-tab" data-panel="graph">图谱</button>
                     <button class="sidebar-tab" data-panel="ai-tools">AI</button>
                 </div>
 
@@ -266,6 +268,27 @@
                     </div>
                     <div id="character-list" class="item-list">
                         <div class="list-placeholder">尚未导入角色<br>点击 "导入" 导入角色卡</div>
+                    </div>
+                </div>
+
+                <div id="panel-graph" class="sidebar-panel graph-panel">
+                    <div class="panel-toolbar">
+                        <button id="btn-graph-refresh" title="刷新图谱">刷新</button>
+                        <button id="btn-graph-new-node" title="新建图谱节点">新节点</button>
+                        <button id="btn-graph-new-edge" title="新建关系">新关系</button>
+                    </div>
+                    <div class="graph-toolbar">
+                        <input id="graph-search" class="ai-input" placeholder="搜索节点名称或摘要…">
+                        <select id="graph-kind-filter" class="ai-select">
+                            <option value="">全部类型</option>
+                            <option value="world_book">世界书</option>
+                            <option value="world_entry">世界书条目</option>
+                            <option value="character_card">角色卡</option>
+                        </select>
+                    </div>
+                    <div class="graph-layout">
+                        <div id="graph-node-list" class="graph-node-list"><div class="list-placeholder">尚未加载图谱</div></div>
+                        <div id="graph-detail" class="graph-detail"><div class="list-placeholder">选择一个节点查看详情</div></div>
                     </div>
                 </div>
 
@@ -759,6 +782,7 @@
     <script src="js/pages/workspace/editor/index.js"></script>
     <script src="js/pages/workspace/worldbook/index.js"></script>
     <script src="js/pages/workspace/characters/index.js"></script>
+    <script src="js/pages/workspace/graph/index.js"></script>
     <script src="js/pages/workspace/outline/index.js"></script>
     <script src="js/pages/workspace/worldbook/reference-selection.js"></script>
     <script src="js/pages/workspace/automation/extraction.js"></script>

@@ -362,6 +362,7 @@ app.on('before-quit', event => {
 
 app.on('will-quit', unregisterAppIpcHandlers);
 app.on('will-quit', () => agentCoordinator.dispose());
+app.on('will-quit', () => dshSupervisor.projectBridge?.stop?.());
 app.on('will-quit', unregisterProjectIpcHandlers);
 app.on('will-quit', unregisterChapterIpcHandlers);
 app.on('will-quit', unregisterOutlineIpcHandlers);

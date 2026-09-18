@@ -1,0 +1,7 @@
+{
+  "name": "@local/writing-project-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "writing-project-mcp": "src/bin.js" }
+}

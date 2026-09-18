@@ -1,3 +1,3 @@
 # knowledge
 
-世界书、角色卡、引用选择与知识快照的唯一所有者。当前数据源是 JSON；未来 Obsidian 只能作为 `sources/obsidian` 适配器接入，禁止依赖 Agent 或 DSH。
+世界书、角色卡、引用选择、知识快照与小说图谱的唯一所有者。JSON 仍是兼容导入/导出格式；图谱节点是 Agent 与前端按需读取的权威记忆层，禁止依赖 Agent 或 DSH 直接写文件。

@@ -14,6 +14,7 @@ function switchTab(tab) {
     if (panel) panel.classList.add('active');
     if (sidebar.id === 'right-sidebar') {
         window.AgentWorkbenchFeature?.setVisible(panelName === 'chat');
+        if (panelName === 'graph') window.CuigengjiGraphWorkspace?.refresh?.();
     }
     setPreference('rightSidebarTab', panelName);
 }

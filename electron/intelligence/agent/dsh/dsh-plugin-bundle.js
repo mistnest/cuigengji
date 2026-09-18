@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const BUNDLED_SKILL_NAMES = Object.freeze([
+    'writing-single-agent',
     'story-direction-probe',
     'character-motivation-review',
     'conflict-suspense-review',
@@ -27,8 +28,10 @@ export function buildDshAgentPluginEntries({
     skillRoot,
     webSearchEnabled = false,
     allowedToolNames = [],
+    novelGraph,
+    writingProject,
 } = {}) {
-    return [
+    const entries = [
         {
             id: 'cuigenji-writing-context',
             name: './cuigenji-writing-context.mjs',
@@ -40,6 +43,32 @@ export function buildDshAgentPluginEntries({
             id: 'cuigenji-project-knowledge',
             name: './cuigenji-project-knowledge.mjs',
         },
+        ...(novelGraph?.enabled ? [{
+            id: 'mcp-novel-graph',
+            name: '@deepseek-ai/dsh-mcp-client',
+            config: {
+                serverName: 'novel_graph',
+                transport: 'stdio',
+                command: novelGraph.command,
+                args: novelGraph.args,
+                cwd: novelGraph.cwd,
+                env: novelGraph.env,
+                failOnStartupError: true,
+            },
+        }] : []),
+        ...(writingProject?.enabled ? [{
+            id: 'mcp-writing-project',
+            name: '@deepseek-ai/dsh-mcp-client',
+            config: {
+                serverName: 'writing_project',
+                transport: 'stdio',
+                command: writingProject.command,
+                args: writingProject.args,
+                cwd: writingProject.cwd,
+                env: writingProject.env,
+                failOnStartupError: true,
+            },
+        }] : []),
         {
             id: 'skill-filesystem',
             name: '@deepseek-ai/dsh-skill-filesystem',
@@ -78,7 +107,13 @@ export function buildDshAgentPluginEntries({
         {
             id: 'cuigenji-tool-policy',
             name: './cuigenji-tool-policy.mjs',
-            config: { allowedToolNames },
+            config: {
+                allowedToolNames,
+                allowedToolPrefixes: [
+                    ...(novelGraph?.enabled ? ['mcp__novel_graph__'] : []),
+                    ...(writingProject?.enabled ? ['mcp__writing_project__'] : []),
+                ],
+            },
         },
         {
             id: 'compaction',
@@ -109,6 +144,7 @@ export function buildDshAgentPluginEntries({
             ],
         },
     ];
+    return entries;
 }
 
 export async function readBundledDshPluginSources({ pluginRoot, moduleUrl }) {

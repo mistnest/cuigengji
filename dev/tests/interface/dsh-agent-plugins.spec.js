@@ -5,6 +5,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import {
+    BUNDLED_SKILL_NAMES,
     buildDshAgentPluginEntries,
     LOCAL_DSH_PLUGIN_FILES,
 } from '../../../electron/intelligence/agent/dsh/dsh-plugin-bundle.js';
@@ -55,11 +56,62 @@ test('@interface DSH Agent has one canonical writing-context plugin boundary', a
         expect(entries.some(entry => entry.id === 'tool-web')).toBe(true);
         expect(LOCAL_DSH_PLUGIN_FILES).toContain('cuigenji-writing-context.mjs');
         expect(LOCAL_DSH_PLUGIN_FILES).not.toContain('cuigenji-project-context.mjs');
+        expect(BUNDLED_SKILL_NAMES).toContain('writing-single-agent');
     } finally {
         if (previous === undefined) delete process.env.CUIGENGJI_DSH_CONTEXT_FILE;
         else process.env.CUIGENGJI_DSH_CONTEXT_FILE = previous;
         await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
+});
+
+test('@interface DSH can mount the local Novel Graph MCP over stdio', () => {
+    const entries = buildDshAgentPluginEntries({
+        skillRoot: '/tmp/cuigenji-skills',
+        novelGraph: {
+            enabled: true,
+            command: process.execPath,
+            args: ['/tmp/novel-graph/lib/bin.js'],
+            cwd: '/tmp/novel-graph',
+            env: { WRITING_NOVEL_GRAPH_DB: '/tmp/novel-graphs' },
+        },
+        allowedToolNames: [
+            'mcp__novel_graph__search_nodes',
+            'mcp__novel_graph__get_node',
+            'mcp__novel_graph__list_edges',
+            'mcp__novel_graph__get_edge',
+            'mcp__novel_graph__commit_changes',
+        ],
+    });
+    expect(entries).toContainEqual(expect.objectContaining({
+        id: 'mcp-novel-graph',
+        name: '@deepseek-ai/dsh-mcp-client',
+        config: expect.objectContaining({
+            serverName: 'novel_graph',
+            transport: 'stdio',
+            failOnStartupError: true,
+        }),
+    }));
+});
+
+test('@interface DSH can mount the authenticated writing project MCP namespace', () => {
+    const entries = buildDshAgentPluginEntries({
+        skillRoot: '/tmp/cuigenji-skills',
+        writingProject: {
+            enabled: true,
+            command: process.execPath,
+            args: ['/tmp/writing-project-mcp/src/bin.js'],
+            cwd: '/tmp/writing-project-mcp',
+            env: { WRITING_PROJECT_BRIDGE_URL: 'http://127.0.0.1:1234', WRITING_PROJECT_BRIDGE_TOKEN: 'test' },
+        },
+        allowedToolNames: ['search_project_knowledge', 'get_project_knowledge'],
+    });
+    expect(entries).toContainEqual(expect.objectContaining({
+        id: 'mcp-writing-project',
+        name: '@deepseek-ai/dsh-mcp-client',
+        config: expect.objectContaining({ serverName: 'writing_project', transport: 'stdio' }),
+    }));
+    expect(entries.find(entry => entry.id === 'cuigenji-tool-policy').config.allowedToolPrefixes)
+        .toContain('mcp__writing_project__');
 });
 
 test('@interface DSH writing preset exposes only guarded read-only knowledge tools', async () => {
@@ -184,6 +236,29 @@ test('@interface DSH tool policy accepts an exact configured skill surface', () 
 
     expect(guard({ name: 'skill' })).toBeUndefined();
     expect(guard({ name: 'pwsh' })).toContain('不允许工具');
+});
+
+test('@interface DSH tool policy allows the guarded Novel Graph namespace to arrive asynchronously', () => {
+    const definitions = new Map([
+        ['search_project_knowledge', { name: 'search_project_knowledge' }],
+        ['get_project_knowledge', { name: 'get_project_knowledge' }],
+    ]);
+    let guard;
+    const ctx = {
+        tools: {
+            schemas: () => [...definitions.values()],
+            guard: value => {
+                guard = value;
+                return () => {};
+            },
+        },
+    };
+    applyToolPolicy(ctx, { kind: 'test-agent' }, {
+        allowedToolNames: ['search_project_knowledge', 'get_project_knowledge'],
+        allowedToolPrefixes: ['mcp__novel_graph__'],
+    });
+    expect(guard({ name: 'mcp__novel_graph__commit_changes' })).toBeUndefined();
+    expect(guard({ name: 'mcp__other__search' })).toContain('不允许工具');
 });
 
 test('@interface outline proposal tool validates and renders a side-effect-free proposal', async () => {

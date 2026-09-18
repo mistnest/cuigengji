@@ -25,4 +25,22 @@ export const KNOWLEDGE_INPUT_SCHEMAS = Object.freeze({
         projectId, data: { type: 'object', required: true },
         expectedRevision: { type: 'number' }, expectedContentHash,
     }),
+    searchGraphNodes: defineObjectSchema('knowledge.graph.searchNodes', {
+        projectId, query: { type: 'string', maxLength: 500 },
+        kinds: { type: 'array' }, limit: { type: 'number' },
+    }),
+    getGraphNode: defineObjectSchema('knowledge.graph.getNode', {
+        projectId, nodeId: { type: 'string', required: true, maxLength: 200 },
+        includeBody: { type: 'boolean' },
+    }),
+    getGraphEdge: defineObjectSchema('knowledge.graph.getEdge', {
+        projectId, edgeId: { type: 'string', required: true, maxLength: 200 },
+    }),
+    listGraphEdges: defineObjectSchema('knowledge.graph.listEdges', {
+        projectId, nodeId: { type: 'string', required: true, maxLength: 200 },
+        direction: { type: 'string', maxLength: 10 }, types: { type: 'array' }, limit: { type: 'number' },
+    }),
+    commitGraph: defineObjectSchema('knowledge.graph.commit', {
+        projectId, request: { type: 'object', required: true },
+    }),
 });

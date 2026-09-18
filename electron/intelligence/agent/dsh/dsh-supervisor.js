@@ -11,7 +11,7 @@ import { stringify as stringifyYaml } from 'yaml';
 import { buildAgentProjectContextArtifacts } from '../../../../src/backend/intelligence/agent/index.js';
 import { readAiSecret } from '../../../../src/backend/foundation/configuration/index.js';
 import { loadWorkspace } from '../../../../src/backend/domains/project/index.js';
-import { AppError } from '../../../../src/backend/foundation/platform/index.js';
+import { AppError, getDataRoot } from '../../../../src/backend/foundation/platform/index.js';
 import { AGENT_RUNTIME_KIND } from '../../../../shared/desktop-api/agent/index.js';
 import {
     buildDshAgentPluginEntries,
@@ -24,6 +24,7 @@ import {
     normalizeDshReadyUrl,
     readInstalledDshVersion,
 } from './dsh-runtime-contract.js';
+import { createWritingProjectBridge } from './writing-project-bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -37,6 +38,7 @@ export function createDshSupervisor({
     prepareLaunch = prepareDshLaunch,
     refreshContextSnapshot = refreshDshProjectContext,
     waitForReady = waitForRuntime,
+    projectBridge = createWritingProjectBridge(),
 }) {
     let child = null;
     let state = 'idle';
@@ -46,6 +48,7 @@ export function createDshSupervisor({
     let activeProjectId = '';
     let lastError = '';
     let hasCredential = false;
+    let activeProjectCapability;
     let generation = 0;
     let lifecycleTail = Promise.resolve();
     const pendingRuntimeOpens = new Map();
@@ -68,13 +71,22 @@ export function createDshSupervisor({
 
     async function openRuntimeUnlocked(input = {}) {
         let launch;
+        let capability;
         try {
+            capability = child && state === 'ready' && input?.projectId === activeProjectId
+                ? activeProjectCapability
+                : await projectBridge.issueCapability({
+                    projectId: input?.projectId,
+                    sessionId: input?.sessionId,
+                });
             launch = await prepareLaunch({
                 userDataRoot: process.env.CUIGENGJI_DSH_ROOT || electronApp.getPath('userData'),
                 projectId: input?.projectId,
                 chapterId: input?.chapterId,
+                writingProjectBridge: capability,
             });
         } catch (error) {
+            if (capability?.token) projectBridge.revokeCapability(capability.token);
             const cause = error instanceof Error ? error.message : String(error);
             console.error('[DSH] launch preparation failed', cause);
             throw new AppError('AGENT_RUNTIME_START_FAILED', cause, {
@@ -93,6 +105,16 @@ export function createDshSupervisor({
             && (launch.configSignature !== activeConfigSignature
                 || input.projectId !== activeProjectId)) {
             await stopUnlocked();
+            capability = await projectBridge.issueCapability({
+                projectId: input?.projectId,
+                sessionId: input?.sessionId,
+            });
+            launch = await prepareLaunch({
+                userDataRoot: process.env.CUIGENGJI_DSH_ROOT || electronApp.getPath('userData'),
+                projectId: input?.projectId,
+                chapterId: input?.chapterId,
+                writingProjectBridge: capability,
+            });
         }
         // `stopUnlocked` intentionally clears the public credential flag. Set
         // it after any replacement stop so the status describes the runtime
@@ -101,6 +123,7 @@ export function createDshSupervisor({
         if (!child || state !== 'ready') await start(launch);
         await waitForReady(runtimeUrl);
         activeProjectId = input.projectId;
+        activeProjectCapability = capability;
         return {
             url: runtimeUrl,
             generation,
@@ -200,7 +223,7 @@ export function createDshSupervisor({
             };
 
             try {
-                child = spawnProcess(process.execPath, [
+                child = spawnProcess(resolveDshExecutable(), [
                     '--expose-internals',
                     resolveDshBin(),
                     'web',
@@ -265,6 +288,8 @@ export function createDshSupervisor({
         runtimeUrl = '';
         activeConfigSignature = '';
         activeProjectId = '';
+        if (activeProjectCapability?.token) projectBridge.revokeCapability(activeProjectCapability.token);
+        activeProjectCapability = undefined;
         hasCredential = false;
         state = 'stopped';
         lastError = '';
@@ -308,10 +333,11 @@ export function createDshSupervisor({
         restartRuntime,
         stop,
         invalidateCredentials,
+        projectBridge,
     };
 }
 
-export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
+export async function prepareDshLaunch({ userDataRoot, projectId, chapterId, writingProjectBridge }) {
     if (!projectId || typeof projectId !== 'string') {
         throw new AppError('VALIDATION_ERROR', 'projectId is required', {
             status: 400,
@@ -355,6 +381,11 @@ export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
         provider: providerConfig.sourceProvider,
         endpoint,
     }));
+    const novelGraph = resolveNovelGraphConfig({ runtimeRoot });
+    const writingProject = resolveWritingProjectConfig({ projectId, capability: writingProjectBridge, runtimeRoot });
+    if (novelGraph.enabled && writingProject.enabled) {
+        novelGraph.env = { ...novelGraph.env, ...writingProject.env };
+    }
     const allowedToolNames = [
         'search_project_knowledge',
         'get_project_knowledge',
@@ -377,7 +408,7 @@ export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
         )),
         writePrivateText(path.join(presetRoot, 'preset.yml'), stringifyYaml({
             name: '催更姬写作模式',
-            description: '只读取当前小说上下文、不授予文件或命令执行工具的写作 Agent。',
+            description: '通过受控 MCP 读取和修改当前小说正文与图谱，不授予文件或命令执行工具的写作 Agent。',
             order: -100,
         })),
         writePrivateText(path.join(presetRoot, 'agent.cordis.yml'), stringifyYaml(
@@ -385,6 +416,8 @@ export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
                 skillRoot,
                 webSearchEnabled,
                 allowedToolNames,
+                novelGraph,
+                writingProject,
             }),
         )),
         writePrivateText(patchFile, stringifyYaml([
@@ -434,6 +467,7 @@ export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
         contextFile,
         knowledgeFile,
         providerEnvironment: providerConfig.environment,
+        writingProject,
     });
     const configSignature = createHash('sha256')
         .update(JSON.stringify({
@@ -459,6 +493,8 @@ export async function prepareDshLaunch({ userDataRoot, projectId, chapterId }) {
             chapterId: chapterId || '',
             generatedAt: snapshot.generatedAt,
             knowledgeEntries: knowledge.entries.length,
+            novelGraphEnabled: novelGraph.enabled,
+            writingProjectEnabled: writingProject.enabled,
             webSearchEnabled,
             snapshotId: snapshot.snapshotId || '',
             projectChangeSeq: Number(snapshot.collaboration?.projectChangeSeq || 0),
@@ -507,12 +543,14 @@ function resolveDshBin() {
     return path.join(path.dirname(resolveModuleFile('@deepseek-ai/dsh/package.json')), 'lib', 'bin.js');
 }
 
-function runtimeEnvironment({ dshHome, contextFile, knowledgeFile, providerEnvironment = {} }) {
+function runtimeEnvironment({ dshHome, contextFile, knowledgeFile, providerEnvironment = {}, writingProject }) {
     const allowed = [
         'SystemRoot', 'WINDIR', 'PATH', 'PATHEXT', 'COMSPEC',
         'TEMP', 'TMP', 'LOCALAPPDATA', 'APPDATA', 'USERPROFILE',
         'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
         'http_proxy', 'https_proxy', 'no_proxy',
+        'LD_LIBRARY_PATH',
+        'CUIGENGJI_DSH_NODE',
     ];
     const env = Object.fromEntries(allowed
         .filter(key => typeof process.env[key] === 'string')
@@ -526,7 +564,96 @@ function runtimeEnvironment({ dshHome, contextFile, knowledgeFile, providerEnvir
         NODE_ENV: 'production',
         FORCE_COLOR: '0',
         ...providerEnvironment,
+        ...(writingProject?.env || {}),
     };
+}
+
+function resolveWritingProjectConfig({ projectId, capability, runtimeRoot = process.cwd() } = {}) {
+    if (process.env.CUIGENGJI_WRITING_PROJECT_ENABLED === '0'
+        || !capability?.url || !capability?.token || !projectId) return { enabled: false, env: {} };
+    return {
+        enabled: true,
+        env: {
+            WRITING_PROJECT_BRIDGE_URL: capability.url,
+            WRITING_PROJECT_BRIDGE_TOKEN: capability.token,
+            WRITING_PROJECT_ID: projectId,
+            ELECTRON_RUN_AS_NODE: '1',
+        },
+        command: resolveDshExecutable(),
+        args: [path.join(__dirname, '../../../../plugins/writing-project-mcp/src/bin.js')],
+        cwd: runtimeRoot,
+    };
+}
+
+function resolveNovelGraphConfig({ runtimeRoot }) {
+    const serverFile = cleanSingleLine(
+        process.env.CUIGENGJI_NOVEL_GRAPH_SERVER,
+        2_000,
+    ) || path.join(__dirname, '../../../../plugins/novel-graph-mcp/lib/bin.js');
+    const requested = process.env.CUIGENGJI_NOVEL_GRAPH_ENABLED === '1';
+    const disabled = process.env.CUIGENGJI_NOVEL_GRAPH_ENABLED === '0';
+    const available = existsSync(serverFile);
+    if (requested && !available) {
+        throw new AppError(
+            'AGENT_RUNTIME_START_FAILED',
+            `Novel Graph MCP server is missing: ${serverFile}`,
+            { status: 503, retryable: false, publicMessage: 'Novel Graph MCP 未安装，请检查项目插件目录。' },
+        );
+    }
+    if (disabled || !available) return { enabled: false };
+
+    const command = cleanSingleLine(process.env.CUIGENGJI_NOVEL_GRAPH_COMMAND, 2_000)
+        || cleanSingleLine(process.env.CUIGENGJI_DSH_NODE, 2_000)
+        || process.execPath;
+    const args = parseJsonStringArray(process.env.CUIGENGJI_NOVEL_GRAPH_ARGS)
+        || [serverFile];
+    const cwd = cleanSingleLine(process.env.CUIGENGJI_NOVEL_GRAPH_CWD, 2_000)
+        || path.dirname(serverFile);
+    const graphRoot = cleanSingleLine(process.env.CUIGENGJI_NOVEL_GRAPH_DB, 2_000)
+        || path.join(getDataRoot(), 'novel-graphs');
+    const resultsRoot = cleanSingleLine(process.env.CUIGENGJI_NOVEL_GRAPH_RESULTS_ROOT, 2_000)
+        || path.join(runtimeRoot, 'pipeline-results');
+    return {
+        enabled: true,
+        command,
+        args,
+        cwd,
+        env: {
+            WRITING_NOVEL_GRAPH_DB: graphRoot,
+            WRITING_PIPELINE_RESULTS_ROOT: resultsRoot,
+            // In a packaged Electron build the fallback command is the
+            // Electron executable itself; this makes it run the stdio Node
+            // entrypoint instead of trying to open it as an app.
+            ELECTRON_RUN_AS_NODE: '1',
+        },
+    };
+}
+
+function resolveDshExecutable() {
+    // Electron uses its own executable in production.  Local Linux setups
+    // may expose a musl-compatible Node wrapper whose process.execPath is not
+    // suitable for a child spawned by Playwright; the explicit override keeps
+    // the development/runtime path deterministic without affecting packaged
+    // launches.
+    return cleanSingleLine(process.env.CUIGENGJI_DSH_NODE, 2_000) || process.execPath;
+}
+
+function parseJsonStringArray(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed) || parsed.some(item => typeof item !== 'string')) {
+            throw new Error('must be a JSON string array');
+        }
+        return parsed;
+    } catch (error) {
+        throw new AppError(
+            'VALIDATION_ERROR',
+            `CUIGENGJI_NOVEL_GRAPH_ARGS ${error instanceof Error ? error.message : String(error)}`,
+            { status: 400, publicMessage: 'Novel Graph MCP 参数格式无效。' },
+        );
+    }
 }
 
 function resolveProjectRuntimePaths(userDataRoot, projectId) {

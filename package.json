@@ -131,6 +131,8 @@
             "src/**/*",
             "public/**/*",
             "electron/**/*",
+            "plugins/novel-graph-mcp/**/*",
+            "plugins/writing-project-mcp/**/*",
             "shared/**/*",
             "package.json",
             "!node_modules/**/*.map",

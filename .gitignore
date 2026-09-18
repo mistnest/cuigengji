@@ -31,6 +31,7 @@ CLAUDE.md
 
 # One-off local debugging/experiment scripts.
 dev/scripts/*.mjs
+!dev/scripts/build-typescript.mjs
 !dev/scripts/check-real-dsh-flow.mjs
 dev/scripts/*.local.*
 dev/scripts/cache-hit-*.mjs

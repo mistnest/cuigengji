@@ -7,6 +7,11 @@ const REFERENCE_IPC_CHANNELS = Object.freeze({
     updateWorldBookEntry: 'cgj:v1:references:update-worldbook-entry',
     listCharacters: 'cgj:v1:references:list-characters',
     saveCharacter: 'cgj:v1:references:save-character',
+    searchGraphNodes: 'cgj:v1:graph:search-nodes',
+    getGraphNode: 'cgj:v1:graph:get-node',
+    getGraphEdge: 'cgj:v1:graph:get-edge',
+    listGraphEdges: 'cgj:v1:graph:list-edges',
+    commitGraph: 'cgj:v1:graph:commit',
 });
 
 function createKnowledgeFacade(input) {
@@ -40,6 +45,19 @@ function createKnowledgeFacade(input) {
             expectedContentHash: options?.expectedContentHash,
         })),
     });
+    const graph = Object.freeze({
+        searchNodes: (projectId, query = '', options = {}) => invoke(REFERENCE_IPC_CHANNELS.searchGraphNodes, {
+            projectId, query, kinds: options.kinds, limit: options.limit,
+        }),
+        getNode: (projectId, nodeId, includeBody = true) => invoke(REFERENCE_IPC_CHANNELS.getGraphNode, {
+            projectId, nodeId, includeBody,
+        }),
+        getEdge: (projectId, edgeId) => invoke(REFERENCE_IPC_CHANNELS.getGraphEdge, { projectId, edgeId }),
+        listEdges: (projectId, nodeId, options = {}) => invoke(REFERENCE_IPC_CHANNELS.listGraphEdges, {
+            projectId, nodeId, direction: options.direction, types: options.types, limit: options.limit,
+        }),
+        commit: (projectId, request) => invoke(REFERENCE_IPC_CHANNELS.commitGraph, writePayload({ projectId, request })),
+    });
     const references = Object.freeze({
         listWorldBooks: worldbooks.list,
         getWorldBook: worldbooks.get,
@@ -48,5 +66,5 @@ function createKnowledgeFacade(input) {
         listCharacters: characters.list,
         saveCharacter: characters.save,
     });
-    return Object.freeze({ worldbooks, characters, references });
+    return Object.freeze({ worldbooks, characters, graph, references });
 }

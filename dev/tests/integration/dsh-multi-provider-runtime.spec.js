@@ -84,6 +84,11 @@ test('@integration DSH Agent uses the selected OpenAI-compatible provider', asyn
         expect(request.body.model).toBe('gpt-4o');
         expect(request.body.tools.map(tool => tool.function.name).sort()).toEqual([
             'get_project_knowledge',
+            'mcp__novel_graph__commit_changes',
+            'mcp__novel_graph__get_edge',
+            'mcp__novel_graph__get_node',
+            'mcp__novel_graph__list_edges',
+            'mcp__novel_graph__search_nodes',
             'propose_outline_patch',
             'safe_web_fetch',
             'search_project_knowledge',

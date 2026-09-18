@@ -9,7 +9,11 @@ const READY_PATTERN = /dsh web: (http:\/\/127\.0\.0\.1:\d+)/u;
 
 export async function startDshContractRuntime(launch) {
     const dshPackage = require.resolve('@deepseek-ai/dsh/package.json');
-    const child = spawn(process.execPath, [
+    // The workspace's musl Node wrapper cannot be inferred from a Playwright
+    // worker's process.execPath.  Allow the local test launcher to provide the
+    // same wrapper explicitly; packaged Electron still uses its own runtime.
+    const nodeExecutable = process.env.CUIGENGJI_DSH_NODE || process.execPath;
+    const child = spawn(nodeExecutable, [
         '--expose-internals',
         path.join(path.dirname(dshPackage), 'lib', 'bin.js'),
         'web',

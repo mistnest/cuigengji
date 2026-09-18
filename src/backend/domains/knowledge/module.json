@@ -3,5 +3,5 @@
   "group": "domains",
   "entry": "./index.js",
   "dependsOn": ["platform"],
-  "dataOwnership": ["assets/worldbooks/**", "assets/characters/**", "references/selection.json"]
+  "dataOwnership": ["assets/worldbooks/**", "assets/characters/**", "references/selection.json", "novel-graphs/**"]
 }

@@ -33,14 +33,17 @@ import {
 
 test.setTimeout(120_000);
 
-test('@integration real DSH request keeps exact read-only tools and hot context', async () => {
+test('@integration real DSH request keeps the guarded knowledge tool surface and hot context', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cuigenji-dsh-contract-'));
     const previousDataRoot = globalThis.DATA_ROOT;
+    const previousGraphDb = process.env.CUIGENGJI_NOVEL_GRAPH_DB;
+    const graphDb = path.join(root, 'novel-graphs');
     let provider;
     let runtime;
     let mux;
     try {
         globalThis.DATA_ROOT = path.join(root, 'data');
+        process.env.CUIGENGJI_NOVEL_GRAPH_DB = graphDb;
         configureAiSecretProtection({
             encrypt: value => Buffer.from(value, 'utf8').toString('base64'),
             decrypt: value => Buffer.from(value, 'base64').toString('utf8'),
@@ -79,7 +82,31 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
             const toolPromptIndex = messages.findLastIndex(message => (
                 message.role === 'user' && messageText(message).includes('工具验证')
             ));
+            const graphPromptIndex = messages.findLastIndex(message => (
+                message.role === 'user' && messageText(message).includes('图谱工具验证')
+            ));
             const lastToolIndex = messages.findLastIndex(message => message.role === 'tool');
+            if (graphPromptIndex >= 0 && lastToolIndex < graphPromptIndex) {
+                return {
+                    frames: toolResponseFrames('mcp__novel_graph__commit_changes', {
+                        requestId: 'dsh-graph-contract-commit',
+                        novelId: 'dsh-contract-project',
+                        expectedGraphVersion: 0,
+                        operations: [{
+                            op: 'upsert_node',
+                            expectedVersion: 0,
+                            node: {
+                                id: 'character-lin-dong',
+                                kind: 'character_card',
+                                name: '林冬',
+                                summary: '星港北门守卫。',
+                                body: '林冬负责守卫星港北门。',
+                                sourceRevisionId: 'dsh-graph-contract-revision',
+                            },
+                        }],
+                    }, 'dsh-graph-contract-call'),
+                };
+            }
             if (toolPromptIndex >= 0 && lastToolIndex < toolPromptIndex) {
                 return {
                     frames: toolResponseFrames('search_project_knowledge', {
@@ -157,6 +184,11 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
         ).toBeDefined();
         expect(firstRequest.body.tools.map(tool => tool.function.name).sort()).toEqual([
             'get_project_knowledge',
+            'mcp__novel_graph__commit_changes',
+            'mcp__novel_graph__get_edge',
+            'mcp__novel_graph__get_node',
+            'mcp__novel_graph__list_edges',
+            'mcp__novel_graph__search_nodes',
             'propose_outline_patch',
             'safe_web_fetch',
             'search_project_knowledge',
@@ -211,6 +243,34 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
             .map(frame => frame.event.seq);
         expect(muxSeqs).toEqual([...muxSeqs].sort((left, right) => left - right));
         expect(new Set(muxSeqs).size).toBe(muxSeqs.length);
+
+        await dshRpc(runtime.url, 'session.prompt', {
+            sessionId,
+            mode: 'queue',
+            content: [{ type: 'text', text: '图谱工具验证：提交林冬的角色记忆。' }],
+            clientTimeZone: 'Asia/Shanghai',
+        });
+        await mux.waitFor(frame => (
+            frame.type === 'session/event'
+            && frame.sessionId === sessionId
+            && frame.event?.type === 'turn/end'
+            && frame.event?.data?.reason
+        ));
+        const graphToolFollowup = await provider.waitForRequest(record => (
+            record.body.messages.some(message => (
+                message.role === 'tool'
+                && messageText(message).includes('character-lin-dong')
+            ))
+        ));
+        expect(JSON.stringify(graphToolFollowup.body.messages)).toContain('dsh-graph-contract-commit');
+        const graphJournalPath = path.join(
+            graphDb,
+            'dsh-contract-project',
+            'journal.jsonl',
+        );
+        const graphJournal = await fs.readFile(graphJournalPath, 'utf8');
+        expect(graphJournal).toContain('character-lin-dong');
+        expect(graphJournal).toContain('dsh-graph-contract-revision');
 
         const updated = await updateChapter(project.id, chapter.id, {
             content: '版本B：林冬已经离开星港北门。',
@@ -362,6 +422,8 @@ test('@integration real DSH request keeps exact read-only tools and hot context'
         clearAiSecretProtection();
         if (previousDataRoot === undefined) delete globalThis.DATA_ROOT;
         else globalThis.DATA_ROOT = previousDataRoot;
+        if (previousGraphDb === undefined) delete process.env.CUIGENGJI_NOVEL_GRAPH_DB;
+        else process.env.CUIGENGJI_NOVEL_GRAPH_DB = previousGraphDb;
         await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
 });

@@ -12,7 +12,7 @@ const DETAIL_CHARS = 32_000;
 export function apply(ctx) {
     ctx.tools.register(defineTool({
         name: 'search_project_knowledge',
-        description: '在当前小说的只读冷资料中搜索世界书和角色卡。先搜索，再用返回的 id 获取详情。不得把未命中的内容当作项目事实。',
+        description: '在当前小说的热资料索引中搜索世界书和角色卡。Novel Graph 是完整资料的权威源；先搜索，再按需使用图谱工具读取详情。不得把未命中的内容当作项目事实。',
         parameters: {
             query: {
                 type: 'string',
@@ -84,7 +84,7 @@ export function apply(ctx) {
 
     ctx.tools.register(defineTool({
         name: 'get_project_knowledge',
-        description: '按 search_project_knowledge 返回的 id 读取一条当前小说世界书或角色卡详情。此工具只读。',
+        description: '按 search_project_knowledge 返回的 id 读取热资料快照中的一条世界书或角色卡详情。需要完整正文或关系时使用 Novel Graph MCP；此工具只读。',
         parameters: {
             id: {
                 type: 'string',
